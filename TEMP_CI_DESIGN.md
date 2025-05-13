@@ -1,0 +1,355 @@
+# Bun.sh On-Prem CI: Hardware and Infrastructure Design
+
+## Overview
+This is a design document for an on-prem CI rack to handle Bun.sh builds across all target platforms. The immediate goal is to reduce MacStadium and EC2 costs by bringing macOS builds in-house, with a path to expand to other platforms later.
+
+### Technical Stack & Project Importance
+
+#### Tart
+Tart is a macOS virtualization tool that runs on Apple Silicon. It's crucial for our project because:
+- It's the only virtualization solution that works natively on Apple Silicon
+- Provides clean, reproducible build environments
+- Allows us to run multiple isolated builds simultaneously
+- Enables us to maintain a library of pre-configured build environments
+
+#### Buildkite
+Buildkite is a CI/CD platform that uses self-hosted agents. It's essential because:
+- Gives us full control over the build environment
+- Allows us to run builds on our own hardware
+- Provides flexible job routing based on hardware capabilities
+- Enables us to scale horizontally as we add more build hosts
+
+#### Terraform
+Terraform is an infrastructure as code tool. It's important because:
+- Ensures our build environment is consistent across all hosts
+- Makes it easy to rebuild the entire infrastructure if needed
+- Provides version control for our infrastructure
+- Automates the setup of new build hosts
+
+#### UniFi Network Stack
+The UniFi network stack provides our physical infrastructure. It's critical because:
+- Enables remote management of all build hosts
+- Provides power cycling capabilities through PoE
+- Allows network isolation between build environments
+- Gives us visibility into network performance
+
+#### Prometheus & Grafana
+These tools provide monitoring and visualization. They're vital because:
+- Help us track build performance and resource usage
+- Enable us to identify bottlenecks and issues
+- Provide historical data for capacity planning
+- Allow us to monitor the health of our build infrastructure
+
+### Design Tradeoffs & Decisions
+
+#### Infrastructure as Code vs Scripts
+**Decision**: Use Terraform for core infrastructure
+- **Pros**:
+  - Reproducible environment setup
+  - Version controlled infrastructure
+  - Easy to rebuild if hardware fails
+- **Cons**:
+  - Additional complexity
+  - Learning curve for team
+  - Overkill for simple setups
+- **Alternative**: Bash scripts with Ansible
+  - Simpler to maintain
+  - Faster to implement
+  - Less overhead
+- **Why Terraform**: Long-term maintainability and consistency across hosts
+
+#### Caching Strategy
+**Decision**: Hybrid approach with NFS + S3
+- **Build Cache**:
+  - NFS for local, fast access
+  - S3 for long-term storage
+  - Daily cache rotation
+- **VM Snapshots**:
+  - Weekly base image updates
+  - Keep last 4 weeks of images
+- **Tradeoffs**:
+  - NFS adds network complexity
+  - S3 adds cost
+  - Clean state vs build speed
+
+#### Networking Stack
+**Decision**: UniFi with VLAN isolation
+- **Pros**:
+  - PoE for remote power management
+  - VLAN support for isolation
+  - Good monitoring
+- **Cons**:
+  - More expensive than basic switches
+  - Requires more setup
+- **Alternative**: Basic managed switches
+  - Cheaper
+  - Simpler setup
+  - Less features
+- **Why UniFi**: Remote management and power cycling capabilities
+
+#### Total Cost of Ownership
+**Hardware Costs**:
+- Mac Mini M4: ~$1,200
+- Mac Mini Intel: ~$800
+- Network Stack: ~$1,500
+- UPS: ~$500
+- Total: ~$4,000
+
+**Monthly Costs**:
+- Power: ~$50
+- Internet: ~$100
+- S3 Storage: ~$20
+- Maintenance: ~$100
+- Total: ~$270
+
+**Savings vs Cloud**:
+- MacStadium: ~$1,000/month
+- EC2: ~$500/month
+- Net Savings: ~$1,230/month
+- ROI: ~3.5 months
+
+#### VM Management
+**Decision**: Tart with 2 VMs per host
+- **Pros**:
+  - Clean state per build
+  - Apple Silicon support
+  - Snapshot management
+- **Cons**:
+  - Resource overhead
+  - More complex than bare metal
+- **Alternative**: Bare metal builds
+  - Faster builds
+  - Simpler setup
+  - No VM overhead
+- **Why Tart**: Clean state and isolation
+
+#### Monitoring & Observability
+**Decision**: Prometheus + Grafana
+- **Pros**:
+  - Industry standard
+  - Rich metrics
+  - Good visualization
+- **Cons**:
+  - More complex than basic monitoring
+  - Resource overhead
+- **Alternative**: Basic logging + alerts
+  - Simpler setup
+  - Less overhead
+- **Why Prometheus**: Better debugging and trend analysis
+
+#### Storage & Caching Architecture
+**Decision**: Hybrid NFS + S3 approach
+- **NFS Server**:
+  - Dedicated host for build cache
+  - RAID 10 for performance + redundancy
+  - 2TB usable space
+  - Daily cache rotation
+- **S3 Storage**:
+  - Long-term artifact storage
+  - Versioned buckets
+  - Lifecycle policies for cost control
+- **Open Questions**:
+  - NFS performance impact on build times
+  - Cache invalidation strategy
+  - Cost vs performance tradeoff for S3 storage class
+  - Whether to use EBS or local storage for NFS
+
+#### Backup & Disaster Recovery
+**Decision**: Multi-layer backup strategy
+- **Local Backups**:
+  - Daily VM snapshots
+  - Weekly full system backups
+  - Monthly archive backups
+- **Cloud Backups**:
+  - Critical configs to S3
+  - Build artifacts to S3
+  - Cross-region replication
+- **Open Questions**:
+  - RTO/RPO requirements
+  - Backup retention policy
+  - Whether to use cloud backup service
+  - How to handle hardware failures
+
+#### High Availability
+**Decision**: Active-passive with manual failover
+- **Primary Setup**:
+  - One host per architecture
+  - Manual failover process
+  - 4-hour recovery time
+- **Future Considerations**:
+  - Active-active for critical paths
+  - Automated failover
+  - Load balancing
+- **Open Questions**:
+  - Whether to implement automated failover
+  - How to handle network redundancy
+  - Whether to use load balancing
+  - How to handle power redundancy
+
+#### Security & Threat Model
+**Decision**: Defense in depth approach
+- **Network Security**:
+  - VLAN isolation
+  - No public internet access
+  - VPN for remote access
+  - Firewall rules per service
+- **Host Security**:
+  - Regular security updates
+  - Host-based firewalls
+  - File integrity monitoring
+  - Access control lists
+- **Build Security**:
+  - Clean VM per build
+  - No persistent credentials
+  - Artifact signing
+  - Build log sanitization
+- **Open Questions**:
+  - Whether to implement HSM for signing
+  - How to handle supply chain attacks
+  - Whether to use container isolation
+  - How to handle zero-day vulnerabilities
+
+#### Next Steps
+1. **Security Review**:
+   - External security audit
+   - Penetration testing
+   - Code review of automation scripts
+   - Access control review
+2. **Infrastructure Testing**:
+   - Load testing
+   - Failover testing
+   - Backup restoration testing
+   - Network resilience testing
+3. **Documentation**:
+   - Runbooks for common scenarios
+   - Incident response procedures
+   - Recovery procedures
+   - Security incident handling
+4. **Monitoring Setup**:
+   - Alert thresholds
+   - On-call rotation
+   - Escalation procedures
+   - Performance baselines
+
+### Build Flow
+```mermaid
+graph LR
+    A[Developer] -->|Push| B[GitHub]
+    B -->|Webhook| C[GitHub Actions]
+    C -->|Trigger| D[Buildkite Pipeline]
+    D -->|Route| E[On-Prem Buildkite Agent]
+    E -->|Launch| F[Tart VM]
+    F -->|Build| G[Bun.sh]
+    G -->|Upload| H[S3 Artifacts]
+    H -->|Report| I[GitHub Status]
+    I -->|Notify| A
+
+    subgraph "On-Prem Infrastructure"
+        E
+        F
+        G
+    end
+```
+
+Key points:
+- Initial focus on macOS (both Intel and ARM)
+- Using Tart for VM management
+- Buildkite for job orchestration
+- Terraform for infrastructure as code
+
+## Current Pain Points
+- MacStadium costs are high for our build volume
+- EC2 macOS instances are slow and expensive
+- No control over hardware specs or network topology
+- Build times are inconsistent due to shared resources
+- No way to test builds in a clean environment
+- No way to test builds in a controlled environment
+
+## Hardware Requirements
+
+### Phase 1 (macOS Focus)
+| Host | Specs | Purpose |
+|------|-------|---------|
+| Mac Mini M4 | 32GB RAM, 1TB SSD | Primary build host for ARM64 |
+| Mac Mini Intel | 32GB RAM, 1TB SSD | Intel builds and testing |
+| Mac Mini M1 | 16GB RAM, 512GB SSD | Legacy ARM testing |
+
+### Network Stack
+- UniFi Switch 24 PoE (for power cycling and VLAN isolation)
+- UDM Pro for routing and VPN
+- APC Smart PDU for remote power management
+- UPS for clean shutdowns
+
+## Build Architecture
+
+### Buildkite Setup
+We'll run Buildkite agents on each host, tagged by:
+- `os: macos`
+- `arch: arm64|x64`
+- `chip: m4|intel|m1`
+
+Example pipeline:
+```yaml
+steps:
+  - label: "Build ARM64 Release"
+    command: "bun run build:release"
+    agents:
+      os: "macos"
+      arch: "arm64"
+      chip: "m4"
+```
+
+### VM Management
+Using Tart for macOS virtualization:
+- Base image includes all build dependencies
+- 2 VMs per host max to prevent resource contention
+- Snapshot-based for quick spin-up
+- Clean state per build
+
+### Build Process
+1. PR triggers Buildkite pipeline
+2. Agent picks up job based on tags
+3. Tart VM spins up from snapshot
+4. Build runs in isolated environment
+5. Artifacts uploaded to S3
+6. Status reported back to GitHub
+
+## Implementation Plan
+
+### Phase 1 (Current)
+1. Set up M4 host with Tart
+2. Create base build image
+3. Configure Buildkite agent
+4. Run test builds
+5. Compare performance vs MacStadium
+
+### Phase 2
+1. Add Intel host
+2. Set up shared build cache
+3. Implement artifact storage
+4. Add monitoring
+
+### Phase 3
+1. Windows host setup
+2. Linux build host
+3. Cross-platform testing
+
+## Monitoring & Maintenance
+- Prometheus for metrics
+- Grafana dashboards for:
+  - Build times
+  - Resource usage
+  - Queue depth
+  - Test flakiness
+- Daily snapshot rotation
+- Weekly image updates
+
+## Notes
+- Keep an eye on Tart's stability with M4
+- Consider NFS for shared cache
+- Document all host configurations
+- Track test flakiness per platform
+
+## Contact
+Sam Biddle (sam@buildarchetype.dev)
+
