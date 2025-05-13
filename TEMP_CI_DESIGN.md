@@ -41,6 +41,37 @@ These tools provide monitoring and visualization. They're vital because:
 - Provide historical data for capacity planning
 - Allow us to monitor the health of our build infrastructure
 
+#### Alerting
+This project will require an alerting system to notify us of issues. Suggest using [Prometheus AlertManager](https://prometheus.io/docs/alerting/alertmanager/) or existing systems like [Sentry](https://sentry.io/for/ci/) or [Opsgenie](https://www.opsgenie.com/).
+
+
+#### Monitoring Stack in Detail
+A draft plan for the monitoring stack (Prometheus, Grafana, AlertManager) is detailed below:
+
+1. **Metrics Collection**
+   - Build metrics (duration, queue time, cache hits)
+   - Host metrics (CPU, memory, disk, network)
+   - Network metrics (bandwidth, latency, connections)
+   - Security metrics (access attempts, policy violations)
+
+2. **Alerting**
+   - P0: System down, security breach (15min response)
+   - P1: High resource usage, queue buildup (1hr response)
+   - P2: Performance degradation, warnings (4hr response)
+   - P3: Non-critical issues (24hr response)
+
+3. **Dashboards**
+   - Operational: Current status, queue, resources
+   - Security: Access, violations, incidents
+   - Performance: Build times, resource usage
+   - Capacity: Usage trends, growth projections
+
+4. **Log Management**
+   - 30 days hot storage
+   - 1 year warm storage
+   - 7 years cold storage
+   - Encrypted at rest
+
 ### Build Flow
 ```mermaid
 graph LR
@@ -488,28 +519,6 @@ graph LR
      - Access revocation
      - Log preservation
      - Incident response
-
-#### Next Steps
-1. **Security Review**:
-   - External security audit
-   - Penetration testing
-   - Code review of automation scripts
-   - Access control review
-2. **Infrastructure Testing**:
-   - Load testing
-   - Failover testing
-   - Backup restoration testing
-   - Network resilience testing
-3. **Documentation**:
-   - Runbooks for common scenarios
-   - Incident response procedures
-   - Recovery procedures
-   - Security incident handling
-4. **Monitoring Setup**:
-   - Alert thresholds
-   - On-call rotation
-   - Escalation procedures
-   - Performance baselines
 
 ## Build Architecture
 
