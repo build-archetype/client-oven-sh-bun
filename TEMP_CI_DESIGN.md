@@ -7,35 +7,45 @@ This is a design document for an on-prem CI rack to handle Bun.sh builds across 
 ### Technical Stack
 
 #### Tart
-Tart is a macOS virtualization tool that runs on Apple Silicon. It's crucial for our project because:
+Use Tart for macOS virtualization.
+
+Rationale:
 - It's the only virtualization solution that works natively on Apple Silicon
 - Provides clean, reproducible build environments
 - Allows us to run multiple isolated builds simultaneously
 - Enables us to maintain a library of pre-configured build environments
 
 #### Buildkite
-Buildkite is a CI/CD platform that uses self-hosted agents. It's essential because:
+Use Buildkite for self hosted CI agents and artifact storage.
+
+Rationale:
 - Gives us full control over the build environment
 - Allows us to run builds on our own hardware
 - Provides flexible job routing based on hardware capabilities
 - Enables us to scale horizontally as we add more build hosts
 
 #### Terraform
-Terraform is an infrastructure as code tool. It's important because:
+Use Terraform for Infrastructure as Code using the Terraform Provider for Buildkite and the Terraform Provider for Tart.
+
+Rationale:
 - Ensures our build environment is consistent across all hosts
 - Makes it easy to rebuild the entire infrastructure if needed
 - Provides version control for our infrastructure
 - Automates the setup of new build hosts
 
 #### UniFi Network Stack
-The UniFi network stack provides our physical infrastructure. It's critical because:
+Use the UniFi network stack to manage our our physical infrastructure and provide remote management of all build hosts.
+
+Rationale:
 - Enables remote management of all build hosts
 - Provides power cycling capabilities through PoE
 - Allows network isolation between build environments
 - Gives us visibility into network performance
 
 #### Prometheus & Grafana
-These tools provide monitoring and visualization. They're vital because:
+Use Prometheus for metrics and Grafana for visualization.
+
+Rationale:
 - Help us track build performance and resource usage
 - Enable us to identify bottlenecks and issues
 - Provide historical data for capacity planning
