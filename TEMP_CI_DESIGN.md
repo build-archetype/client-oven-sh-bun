@@ -3,7 +3,8 @@
 ## Overview
 This is a design document for an on-prem CI rack to handle Bun.sh builds across all target platforms. The immediate goal is to reduce MacStadium and EC2 costs by bringing macOS builds in-house, with a path to expand to other platforms later.
 
-### Technical Stack & Project Importance
+
+### Technical Stack
 
 #### Tart
 Tart is a macOS virtualization tool that runs on Apple Silicon. It's crucial for our project because:
@@ -40,7 +41,145 @@ These tools provide monitoring and visualization. They're vital because:
 - Provide historical data for capacity planning
 - Allow us to monitor the health of our build infrastructure
 
-### Design Tradeoffs & Decisions
+### Build Flow
+```mermaid
+graph LR
+    A[Developer] -->|Push| B[GitHub]
+    B -->|Webhook| C[GitHub Actions]
+    C -->|Trigger| D[Buildkite Pipeline]
+    D -->|Route| E[On-Prem Buildkite Agent]
+    E -->|Launch| F[Tart VM]
+    F -->|Build| G[Bun.sh]
+    G -->|Upload| H[S3 Artifacts]
+    H -->|Report| I[GitHub Status]
+    I -->|Notify| A
+
+    subgraph "On-Prem Infrastructure"
+        E
+        F
+        G
+    end
+```
+
+#### Build Flow Annotations
+
+1. **Developer Push**
+   - Developer pushes code to GitHub
+   - Triggers webhook to GitHub Actions
+   - Includes branch and commit information
+   - Requires signed commits
+
+2. **GitHub Actions**
+   - Validates PR status
+   - Checks required status checks
+   - Triggers Buildkite pipeline
+   - Passes build parameters
+   - Verifies commit signatures
+
+3. **Buildkite Pipeline**
+   - Routes job to appropriate agent
+   - Applies build configuration
+   - Sets up environment variables
+   - Manages build lifecycle
+   - Enforces resource limits
+
+4. **On-Prem Agent**
+   - Receives build job
+   - Prepares build environment
+   - Manages VM lifecycle
+   - Handles artifact upload
+   - Enforces security policies
+
+5. **Tart VM**
+   - Spins up from snapshot
+   - Mounts build cache
+   - Provides clean environment
+   - Manages build resources
+   - Enforces isolation
+
+6. **Bun.sh Build**
+   - Compiles source code
+   - Runs tests
+   - Generates artifacts
+   - Creates build logs
+   - Signs artifacts
+
+7. **Artifact Storage**
+   - Uploads to S3
+   - Manages versioning
+   - Handles retention
+   - Provides access control
+   - Generates SLSA provenance
+
+8. **Status Reporting**
+   - Updates GitHub status
+   - Notifies developers
+   - Records build metrics
+   - Triggers notifications
+   - Logs security events
+
+### Operational Considerations
+
+#### Scaling
+- Each host can run 2 VMs concurrently
+- Build queue managed by Buildkite
+- Resource limits per VM:
+  - CPU: 4 cores
+  - RAM: 8GB
+  - Disk: 50GB
+- Cache hit ratio target: 80%
+
+#### Monitoring
+- Build duration
+- Resource utilization
+- Cache hit rates
+- Security events
+- Network performance
+- Storage usage
+
+#### Maintenance
+- Weekly base image updates
+- Daily cache rotation
+- Monthly security patches
+- Quarterly capacity planning
+- Annual hardware refresh
+
+#### Incident Response
+1. **Build Failures**
+   - Automatic retry with backoff
+   - Alert on 3+ failures
+   - Log collection
+   - Root cause analysis
+
+2. **Security Incidents**
+   - Immediate VM termination
+   - Log preservation
+   - Access revocation
+   - Incident investigation
+   - Post-mortem
+
+3. **Hardware Failures**
+   - Automatic failover
+   - Spare hardware rotation
+   - Build queue management
+   - Developer communication
+
+## Hardware Requirements
+
+### Phase 1 (macOS Focus)
+| Host | Specs | Purpose |
+|------|-------|---------|
+| Mac Mini M4 | 32GB RAM, 1TB SSD | Primary build host for ARM64 |
+| Mac Mini Intel | 32GB RAM, 1TB SSD | Intel builds and testing |
+| Mac Mini M1 | 16GB RAM, 512GB SSD | Legacy ARM testing |
+
+### Network Stack
+- UniFi Switch 24 PoE (for power cycling and VLAN isolation)
+- UDM Pro for routing and VPN
+- APC Smart PDU for remote power management
+- UPS for clean shutdowns
+
+## Design Tradeoffs & Decisions
 
 #### Infrastructure as Code vs Scripts
 **Decision**: Use Terraform for core infrastructure
@@ -209,6 +348,147 @@ These tools provide monitoring and visualization. They're vital because:
   - Whether to use container isolation
   - How to handle zero-day vulnerabilities
 
+### Threat Model & Security Boundaries
+
+#### Attack Vectors
+1. **Supply Chain**
+   - Malicious code in PRs
+   - Compromised dependencies
+   - Build cache poisoning
+   - VM image tampering
+
+2. **Network**
+   - MITM attacks on build artifacts
+   - DNS spoofing
+   - VLAN hopping
+   - VPN compromise
+
+3. **Host**
+   - VM escape attempts
+   - Resource exhaustion
+   - Credential theft
+   - Log tampering
+
+#### Security Controls
+
+1. **Build Isolation**
+   - Each build runs in fresh Tart VM
+     - Base image: macOS 14.0 minimal
+     - No persistent storage between builds
+     - Ephemeral credentials per build
+     - Network namespace isolation
+   - Resource limits per VM
+     - CPU: 4 cores max
+     - RAM: 8GB max
+     - Disk: 50GB max
+     - Network: 100Mbps max
+   - Read-only base images
+     - Signed and verified on boot
+     - Weekly updates with security patches
+     - Version controlled in private registry
+     - Hash verification on pull
+
+2. **Artifact Security**
+   - Code signing for all builds
+     - Apple Developer ID for macOS binaries
+     - GPG for Linux/Windows binaries
+     - Signing keys in HSM
+     - Key rotation every 90 days
+   - SLSA provenance
+     - Build source verification
+     - Dependency verification
+     - Build environment attestation
+     - Artifact chain of custody
+   - Checksum verification
+     - SHA-256 for all artifacts
+     - Checksums signed with build key
+     - Verification on download
+     - Checksum database in S3
+   - Immutable artifact storage
+     - S3 versioning enabled
+     - 90-day retention policy
+     - Access logging enabled
+     - WORM compliance
+
+3. **Access Control**
+   - Zero-trust network model
+     - No implicit trust between services
+     - Mutual TLS for all internal traffic
+     - Service mesh for east-west traffic
+     - Network policies per service
+   - JIT access for maintenance
+     - 4-hour access windows
+     - Approval required for extension
+     - Session recording enabled
+     - Access logs to SIEM
+   - MFA for all admin access
+     - Yubikey required for SSH
+     - TOTP for web interfaces
+     - Biometric for local access
+     - Emergency break-glass procedure
+   - Audit logging
+     - All access attempts logged
+     - Logs shipped to SIEM
+     - 1-year retention
+     - Alert on suspicious patterns
+   - Role-based access
+     - Build engineers: VM management
+     - Security team: Audit access
+     - Developers: Build trigger
+     - Admins: Full access
+     - Read-only: Monitoring only
+
+4. **Network Security**
+   - VLAN isolation
+     - Build network: 10.0.1.0/24
+     - Management network: 10.0.2.0/24
+     - Storage network: 10.0.3.0/24
+     - No direct internet access
+   - Firewall rules
+     - Allow: GitHub webhooks
+     - Allow: Buildkite API
+     - Allow: S3 uploads
+     - Deny: All other traffic
+   - VPN access
+     - WireGuard for remote access
+     - Split tunneling enabled
+     - Client certificates required
+     - IP allowlisting
+
+5. **Supply Chain Security**
+   - Dependency verification
+     - Lockfile verification
+     - SBOM generation
+     - Vulnerability scanning
+     - License compliance
+   - Build environment
+     - Reproducible builds
+     - Deterministic outputs
+     - Build cache verification
+     - Environment attestation
+   - Release process
+     - Multi-party approval
+     - Release signing
+     - Release notes
+     - Rollback procedure
+
+6. **Monitoring & Detection**
+   - Security monitoring
+     - Failed access attempts
+     - Resource exhaustion
+     - Network anomalies
+     - Build anomalies
+   - Alert thresholds
+     - 3 failed logins
+     - 80% resource usage
+     - Unusual build patterns
+     - Network policy violations
+   - Response procedures
+     - Immediate VM termination
+     - Access revocation
+     - Log preservation
+     - Incident response
+
 #### Next Steps
 1. **Security Review**:
    - External security audit
@@ -230,55 +510,6 @@ These tools provide monitoring and visualization. They're vital because:
    - On-call rotation
    - Escalation procedures
    - Performance baselines
-
-### Build Flow
-```mermaid
-graph LR
-    A[Developer] -->|Push| B[GitHub]
-    B -->|Webhook| C[GitHub Actions]
-    C -->|Trigger| D[Buildkite Pipeline]
-    D -->|Route| E[On-Prem Buildkite Agent]
-    E -->|Launch| F[Tart VM]
-    F -->|Build| G[Bun.sh]
-    G -->|Upload| H[S3 Artifacts]
-    H -->|Report| I[GitHub Status]
-    I -->|Notify| A
-
-    subgraph "On-Prem Infrastructure"
-        E
-        F
-        G
-    end
-```
-
-Key points:
-- Initial focus on macOS (both Intel and ARM)
-- Using Tart for VM management
-- Buildkite for job orchestration
-- Terraform for infrastructure as code
-
-## Current Pain Points
-- MacStadium costs are high for our build volume
-- EC2 macOS instances are slow and expensive
-- No control over hardware specs or network topology
-- Build times are inconsistent due to shared resources
-- No way to test builds in a clean environment
-- No way to test builds in a controlled environment
-
-## Hardware Requirements
-
-### Phase 1 (macOS Focus)
-| Host | Specs | Purpose |
-|------|-------|---------|
-| Mac Mini M4 | 32GB RAM, 1TB SSD | Primary build host for ARM64 |
-| Mac Mini Intel | 32GB RAM, 1TB SSD | Intel builds and testing |
-| Mac Mini M1 | 16GB RAM, 512GB SSD | Legacy ARM testing |
-
-### Network Stack
-- UniFi Switch 24 PoE (for power cycling and VLAN isolation)
-- UDM Pro for routing and VPN
-- APC Smart PDU for remote power management
-- UPS for clean shutdowns
 
 ## Build Architecture
 
