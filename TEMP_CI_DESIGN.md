@@ -51,6 +51,17 @@ Rationale:
 - Provide historical data for capacity planning
 - Allow us to monitor the health of our build infrastructure
 
+#### Remote Access Stack
+Use WireGuard and Tailscale for secure remote access. See [Remote Access Stack in Detail](#remote-access-stack-in-detail) for more information.
+
+Rationale:
+- WireGuard for traditional VPN access
+- Tailscale for zero-trust mesh networking
+- UniFi Controller for network management
+- IPMI for power management
+- SSH/VNC for host access
+- MFA and audit logging
+
 #### Alerting
 This project will require an alerting system to notify us of issues. Suggest using [Prometheus AlertManager](https://prometheus.io/docs/alerting/alertmanager/) or existing systems like [Sentry](https://sentry.io/for/ci/) or [Opsgenie](https://www.opsgenie.com/).
 
@@ -594,6 +605,152 @@ Using Tart for macOS virtualization:
 - Daily snapshot rotation
 - Weekly image updates
 
+
+
+### Remote Access Stack in Detail
+
+#### Primary Access Methods
+
+1. **WireGuard VPN**
+   - Dedicated VPN server in DMZ
+   - Client certificates required
+   - Split tunneling enabled
+   - IP allowlisting
+   - MFA for admin access
+   - Audit logging enabled
+
+2. **Tailscale**
+   - Zero-trust mesh VPN
+   - ACLs for service access
+   - MagicDNS for hostnames
+   - SSH key management
+   - Device enrollment required
+   - Audit logging enabled
+
+3. **Remote Management**
+   - UniFi Controller for network
+   - IPMI for power management
+   - SSH for host access
+   - VNC for macOS GUI
+   - Web-based monitoring
+   - Remote console access
+
+#### Access Control
+
+1. **Authentication**
+   - SSH keys for all access
+   - Yubikey for admin access
+   - TOTP for web interfaces
+   - Client certificates for VPN
+   - Device enrollment for Tailscale
+   - MFA for all admin access
+
+2. **Authorization**
+   - Role-based access control
+   - JIT access for maintenance
+   - Time-limited access tokens
+   - IP-based restrictions
+   - Service-specific access
+   - Audit logging
+
+3. **Monitoring**
+   - Access attempt logging
+   - Session recording
+   - Resource usage tracking
+   - Connection monitoring
+   - Alert on suspicious activity
+   - Regular access reviews
+
+#### Emergency Access
+
+1. **Break-glass Procedure**
+   - Physical access required
+   - Multi-party approval
+   - Time-limited access
+   - Full audit logging
+   - Post-incident review
+   - Access revocation
+
+2. **Recovery Access**
+   - Console access
+   - Recovery mode
+   - Backup credentials
+   - Secure storage
+   - Regular testing
+   - Documentation
+
+### Remote Access Details
+
+#### Primary Access Methods
+
+1. **WireGuard VPN**
+   - Dedicated VPN server in DMZ
+   - Client certificates required
+   - Split tunneling enabled
+   - IP allowlisting
+   - MFA for admin access
+   - Audit logging enabled
+
+2. **Tailscale**
+   - Zero-trust mesh VPN
+   - ACLs for service access
+   - MagicDNS for hostnames
+   - SSH key management
+   - Device enrollment required
+   - Audit logging enabled
+
+3. **Remote Management**
+   - UniFi Controller for network
+   - IPMI for power management
+   - SSH for host access
+   - VNC for macOS GUI
+   - Web-based monitoring
+   - Remote console access
+
+#### Access Control
+
+1. **Authentication**
+   - SSH keys for all access
+   - Yubikey for admin access
+   - TOTP for web interfaces
+   - Client certificates for VPN
+   - Device enrollment for Tailscale
+   - MFA for all admin access
+
+2. **Authorization**
+   - Role-based access control
+   - JIT access for maintenance
+   - Time-limited access tokens
+   - IP-based restrictions
+   - Service-specific access
+   - Audit logging
+
+3. **Monitoring**
+   - Access attempt logging
+   - Session recording
+   - Resource usage tracking
+   - Connection monitoring
+   - Alert on suspicious activity
+   - Regular access reviews
+
+#### Emergency Access
+
+1. **Break-glass Procedure**
+   - Physical access required
+   - Multi-party approval
+   - Time-limited access
+   - Full audit logging
+   - Post-incident review
+   - Access revocation
+
+2. **Recovery Access**
+   - Console access
+   - Recovery mode
+   - Backup credentials
+   - Secure storage
+   - Regular testing
+   - Documentation
+
 ## Notes
 - Keep an eye on Tart's stability with M4
 - Consider NFS for shared cache
@@ -602,4 +759,3 @@ Using Tart for macOS virtualization:
 
 ## Contact
 Sam Biddle (sam@buildarchetype.dev)
-
