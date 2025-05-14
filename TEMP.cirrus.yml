@@ -1,0 +1,18 @@
+task:
+  name: sr_bun
+  macos_instance:
+    image: ghcr.io/cirruslabs/macos-sequoia-base:latest
+  sr_bun_script:
+    - brew --version
+    - brew install automake ccache cmake coreutils gnu-sed go icu4c libiconv libtool ninja pkg-config rust ruby
+    - curl -fsSL https://bun.sh/install | bash
+    - which $SHELL
+    - echo 'export BUN_INSTALL="$HOME/.bun"' >> ~/.zshrc
+    - echo 'export PATH="$BUN_INSTALL/bin:$PATH"' >> ~/.zshrc
+    - source ~/.zshrc
+    - bun --help
+    - bun --version
+    - brew install llvm@19
+    - export PATH="$(brew --prefix llvm@19)/bin:$PATH"
+    - which clang-19
+
