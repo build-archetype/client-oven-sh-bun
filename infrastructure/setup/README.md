@@ -2,6 +2,126 @@
 
 Self-hosted CI for Bun.sh builds, focused on macOS with plans for Windows/Linux. Replaces MacStadium/EC2 with local hardware.
 
+## Infrastructure Overview
+
+```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': { 'fontSize': '16px'}}}%%
+graph TB
+    classDef external fill:#2d3436,stroke:#e17055,stroke-width:2px,color:#fff
+    classDef network fill:#2d3436,stroke:#0984e3,stroke-width:2px,color:#fff
+    classDef compute fill:#2d3436,stroke:#00b894,stroke-width:2px,color:#fff
+    classDef storage fill:#2d3436,stroke:#6c5ce7,stroke-width:2px,color:#fff
+    classDef monitoring fill:#2d3436,stroke:#00cec9,stroke-width:2px,color:#fff
+
+    %% External Services
+    GH[GitHub] --> |Webhooks| BK[Buildkite]
+    S3[S3 Storage] --> |Artifacts| BK
+    class GH,S3,BK external
+
+    %% Network Layer
+    subgraph Network ["Network Layer (10.0.0.0/16)"]
+        direction TB
+        VPN{VPN Gateway} --> |10.0.1.0/24| Build[Build VLAN]
+        VPN --> |10.0.2.0/24| Mgmt[Management VLAN]
+        VPN --> |10.0.3.0/24| Storage[Storage VLAN]
+    end
+    class Network,VPN,Build,Mgmt,Storage network
+
+    %% Compute Layer
+    subgraph Compute ["Compute Layer"]
+        direction TB
+        Tart[Tart VM Manager] --> |Manages| VM1[VM 1]
+        Tart --> |Manages| VM2[VM 2]
+        VM1 & VM2 --> |Runs| Agent[Buildkite Agent]
+    end
+    class Compute,Tart,VM1,VM2,Agent compute
+
+    %% Storage Layer
+    subgraph Storage ["Storage Layer"]
+        direction TB
+        Cache[Build Cache] --> |NFS| VM1 & VM2
+        Images[VM Images] --> |Snapshots| Tart
+    end
+    class Storage,Cache,Images storage
+
+    %% Monitoring Layer
+    subgraph Monitoring ["Monitoring Stack"]
+        direction TB
+        Prom[Prometheus] --> |Scrapes| Node[Node Exporter]
+        Prom --> |Metrics| Graf[Grafana]
+        Alert[AlertManager] --> |Alerts| Graf
+    end
+    class Monitoring,Prom,Node,Graf,Alert monitoring
+
+    %% Connections
+    BK --> VPN
+    Network --> Compute
+    Compute --> Storage
+    Compute --> Monitoring
+```
+
+## Installation Flow
+
+```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': { 'fontSize': '16px'}}}%%
+graph TD
+    classDef phase fill:#2d3436,stroke:#00b894,stroke-width:2px,color:#fff
+    classDef component fill:#2d3436,stroke:#0984e3,stroke-width:2px,color:#fff
+    classDef data fill:#2d3436,stroke:#6c5ce7,stroke-width:2px,color:#fff
+    classDef service fill:#2d3436,stroke:#00cec9,stroke-width:2px,color:#fff
+
+    %% Installation Phase
+    Start[Start Installation] --> Curl[curl downloads setup script]
+    Curl --> Sudo[sudo -E runs script]
+    Sudo --> CheckRoot{Check root access}
+    CheckRoot -->|No| Error[Exit with error]
+    CheckRoot -->|Yes| Prompt[Interactive prompts]
+    class Start,Curl,Sudo,CheckRoot,Error,Prompt phase
+
+    %% Configuration Phase
+    Prompt --> |Required| BuildkiteToken[Buildkite Token]
+    Prompt --> |Required| GrafanaPass[Grafana Password]
+    Prompt --> |Choose| VPNType{VPN Type}
+    class BuildkiteToken,GrafanaPass data
+
+    VPNType -->|WireGuard| WG[WireGuard Setup]
+    VPNType -->|Tailscale| TS[Tailscale Setup]
+    VPNType -->|UniFi| UV[UniFi VPN Setup]
+    class VPNType phase
+    class WG,TS,UV component
+
+    %% Installation Phase
+    WG & TS & UV --> InstallCore[Install Core Components]
+    InstallCore --> |Homebrew| CoreDeps[Core Dependencies]
+    CoreDeps --> Components[Components Setup]
+    class InstallCore,CoreDeps phase
+
+    %% Component Setup
+    Components --> Tart[Tart VM Manager]
+    Components --> BA[Buildkite Agent]
+    Components --> Prom[Prometheus]
+    Components --> Graf[Grafana]
+    class Components phase
+    class Tart,BA,Prom,Graf service
+
+    %% Service Configuration
+    Tart --> |VM Images| VMDir[/opt/tart/images]
+    BA --> |Config| BAConfig[/opt/buildkite-agent]
+    Prom --> |Metrics| PromConfig[/opt/prometheus]
+    Graf --> |Dashboard| GrafConfig[/opt/grafana]
+    class VMDir,BAConfig,PromConfig,GrafConfig data
+
+    %% Service Start
+    VMDir & BAConfig & PromConfig & GrafConfig --> StartServices[Start Services]
+    StartServices --> |LaunchD| Running[Services Running]
+    class StartServices,Running phase
+
+    %% Final Steps
+    Running --> Complete[Setup Complete]
+    Complete --> NextSteps[Display Next Steps]
+    class Complete,NextSteps phase
+```
+
 ## Quick Install
 
 One command to set up everything:
