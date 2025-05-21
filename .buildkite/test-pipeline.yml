@@ -1,4 +1,7 @@
 steps:
+  - label: "Generate Mac CI Pipeline"
+    command: "ONLY_MAC=1 node .buildkite/ci.mjs"
+
   - label: "🔄 Prepare Build VMs"
     key: "prepare-vms"
     command: |

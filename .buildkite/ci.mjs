@@ -449,8 +449,10 @@ function getBuildEnv(target, options) {
  * @returns {string}
  */
 function getBuildCommand(target, options) {
+  if (target.os === "darwin") {
+    return "./.buildkite/scripts/build.sh";
+  }
   const { profile } = target;
-
   const label = profile || "release";
   return `bun run build:${label}`;
 }
@@ -622,10 +624,7 @@ function getTestBunStep(platform, options, testOptions = {}) {
     cancel_on_build_failing: isMergeQueue(),
     parallelism: unifiedTests ? undefined : os === "darwin" ? 2 : 10,
     timeout_in_minutes: profile === "asan" ? 90 : 30,
-    command:
-      os === "windows"
-        ? `node .\\scripts\\runner.node.mjs ${args.join(" ")}`
-        : `./scripts/runner.node.mjs ${args.join(" ")}`,
+    command: getTestCommand(platform, options),
   };
 }
 
