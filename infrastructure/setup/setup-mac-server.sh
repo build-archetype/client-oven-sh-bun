@@ -2,6 +2,34 @@
 
 set -euo pipefail
 
+# Only show welcome/confirmation if not already in privileged (sudo/root) mode
+if [ "$EUID" -ne 0 ]; then
+  # --- Welcome message ---
+  echo -e "\033[1;36m" # Cyan bold
+  cat <<WELCOME
+Bun.sh On-Prem Mac CI Server Setup
+==================================
+This script will:
+  - Install and configure Homebrew and dependencies
+  - Set up Buildkite agent, Prometheus, Grafana, and Tart
+  - Configure VPN (WireGuard, Tailscale, or UniFi)
+  - Set up SSH and system security
+  - Configure your Mac to never sleep (server mode)
+  - Create base Tart VMs (optional)
+  - Start all required services
+
+You will be prompted for secrets and configuration details.
+WELCOME
+  echo -e "\033[1;33mWARNING: This script will make system-level changes and should be run on a dedicated CI/server Mac.\033[0m"
+
+  read -rp $'\033[1;32mContinue with setup? (y/n): \033[0m' confirm_start
+  if [[ "$confirm_start" != "y" ]]; then
+    echo -e "\033[0;31mAborted by user.\033[0m"
+    exit 1
+  fi
+  echo -e "\033[0m" # Reset color
+fi
+
 # --- Color codes ---
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -110,7 +138,7 @@ if [ "$goto_privileged_setup" = false ]; then
         prompt_text WIREGUARD_ENDPOINT "Enter WireGuard endpoint" "vpn.example.com"
         ;;
       tailscale)
-        prompt_text TAILSCALE_AUTH_KEY "Enter Tailscale auth key (optional)" ""
+        prompt_secret TAILSCALE_AUTH_KEY "Enter Tailscale auth key (optional)"
         ;;
       unifi)
         prompt_text UNIFI_VPN_USER "Enter UniFi VPN username" ""
@@ -136,7 +164,7 @@ if [ "$goto_privileged_setup" = false ]; then
       wireguard)
         echo "  WireGuard Endpoint:       $WIREGUARD_ENDPOINT" ;;
       tailscale)
-        echo "  Tailscale Auth Key:       ${TAILSCALE_AUTH_KEY:-[none]}" ;;
+        echo "  Tailscale Auth Key:       [hidden]" ;;
       unifi)
         echo "  UniFi VPN User:           $UNIFI_VPN_USER"
         echo "  UniFi VPN Server:         $UNIFI_VPN_SERVER" ;;
@@ -214,7 +242,30 @@ fi
 # --- Privileged setup (root) ---
 echo_color "$BLUE" "\n[2/3] Running privileged setup..."
 
+# Ensure buildkite-agent user exists before any chown or file operations
+if ! id -u buildkite-agent >/dev/null 2>&1; then
+  echo_color "$YELLOW" "Creating buildkite-agent user..."
+  sudo dscl . -create /Users/buildkite-agent
+  sudo dscl . -create /Users/buildkite-agent UserShell /bin/bash
+  sudo dscl . -create /Users/buildkite-agent RealName "Buildkite Agent"
+  sudo dscl . -create /Users/buildkite-agent UniqueID "$(dscl . -list /Users UniqueID | awk '{print $2}' | sort -n | tail -1 | awk '{print $1+1}')"
+  sudo dscl . -create /Users/buildkite-agent PrimaryGroupID 20
+  sudo dscl . -create /Users/buildkite-agent NFSHomeDirectory /Users/buildkite-agent
+  sudo mkdir -p /Users/buildkite-agent
+  sudo chown buildkite-agent:staff /Users/buildkite-agent
+  sudo dscl . -append /Groups/wheel GroupMembership buildkite-agent
+  echo_color "$GREEN" "User 'buildkite-agent' created."
+fi
+
 mkdir -p /opt/buildkite-agent /opt/tart/images /opt/prometheus /opt/grafana /var/log/buildkite-agent
+
+# --- Prevent system sleep (server mode) ---
+echo_color "$BLUE" "Configuring system to never sleep (server mode)..."
+sudo systemsetup -setcomputersleep Never
+sudo systemsetup -setdisplaysleep Never
+sudo systemsetup -setharddisksleep Never
+sudo pmset -a sleep 0
+sudo pmset -a disablesleep 1
 
 # VPN setup (if enabled)
 if [ "$VPN_ENABLED" = true ]; then
@@ -235,6 +286,8 @@ PersistentKeepalive = 25
 EOF
       ;;
     tailscale)
+      # Ensure tailscaled is running
+      sudo brew services start tailscale
       if [ -n "${TAILSCALE_AUTH_KEY-}" ]; then
         # Start Tailscale with auth key
         echo_color "$BLUE" "Starting Tailscale with auth key..."
@@ -270,8 +323,35 @@ Match Address ${TAILSCALE_IP}
     AllowGroups buildkite-agent wheel
 EOF
 
-        # Restart SSH to apply changes
-        launchctl kickstart -k system/com.openssh.sshd
+        # Enable and restart SSH server to apply changes (macOS)
+        echo_color "$BLUE" "Ensuring SSH server is enabled..."
+        # Check for Full Disk Access by attempting a harmless systemsetup command
+        FDA_CHECK_OUTPUT=$(sudo systemsetup -getremotelogin 2>&1)
+        if echo "$FDA_CHECK_OUTPUT" | grep -q "Full Disk Access"; then
+          echo_color "$YELLOW" "\nIMPORTANT: macOS requires your Terminal app to have Full Disk Access to enable Remote Login (SSH) from the command line."
+          echo_color "$YELLOW" "If you see a permissions error, follow these steps:"
+          echo_color "$YELLOW" "1. Open System Settings → Privacy & Security → Full Disk Access."
+          echo_color "$YELLOW" "2. Click the + button and add your Terminal app (e.g., Terminal, iTerm)."
+          echo_color "$YELLOW" "3. Quit and reopen your Terminal app, then re-run this script."
+          echo_color "$YELLOW" "\nAfter granting access and restarting, re-run this script."
+          echo_color "$YELLOW" "Press SPACEBAR to exit."
+          # Wait for spacebar
+          while true; do
+            read -rsn1 key
+            if [[ $key == " " ]]; then
+              break
+            fi
+          done
+          exit 1
+        fi
+        sudo systemsetup -setremotelogin on
+        # Try to restart SSH daemon if the service exists
+        if sudo launchctl list | grep -q com.openssh.sshd; then
+          echo_color "$BLUE" "Restarting SSH daemon..."
+          sudo launchctl kickstart -k system/com.openssh.sshd
+        else
+          echo_color "$YELLOW" "SSH daemon service not found; enabled SSH but did not restart (may not be needed on this macOS version)."
+        fi
       else
         echo_color "$YELLOW" "No Tailscale auth key provided. Starting Tailscale in interactive mode..."
         tailscale up --hostname="bun-ci-$(hostname)"
@@ -392,21 +472,6 @@ hooks-path="/opt/buildkite-agent/hooks"
 plugins-path="/opt/buildkite-agent/plugins"
 EOF
 sudo chown buildkite-agent:staff "$BK_CFG"
-
-# --- Ensure buildkite-agent user exists before starting agent ---
-if ! id -u buildkite-agent >/dev/null 2>&1; then
-  echo_color "$YELLOW" "Creating buildkite-agent user..."
-  sudo dscl . -create /Users/buildkite-agent
-  sudo dscl . -create /Users/buildkite-agent UserShell /bin/bash
-  sudo dscl . -create /Users/buildkite-agent RealName "Buildkite Agent"
-  sudo dscl . -create /Users/buildkite-agent UniqueID "$(dscl . -list /Users UniqueID | awk '{print $2}' | sort -n | tail -1 | awk '{print $1+1}')"
-  sudo dscl . -create /Users/buildkite-agent PrimaryGroupID 20
-  sudo dscl . -create /Users/buildkite-agent NFSHomeDirectory /Users/buildkite-agent
-  sudo mkdir -p /Users/buildkite-agent
-  sudo chown buildkite-agent:staff /Users/buildkite-agent
-  sudo dscl . -append /Groups/wheel GroupMembership buildkite-agent
-  echo_color "$GREEN" "User 'buildkite-agent' created."
-fi
 
 # --- Start Buildkite agent as buildkite-agent user using Homebrew path and correct HOME ---
 AGENT_BIN="$(brew --prefix buildkite-agent)/bin/buildkite-agent"
