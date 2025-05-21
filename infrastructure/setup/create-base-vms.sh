@@ -14,6 +14,28 @@ VM_USERNAME="admin"
 VM_PASSWORD="admin"  # You should change this
 TART_PATH="/opt/tart/images"
 
+# --- USER SECTION ---
+if [ "$EUID" -ne 0 ]; then
+    echo "[User] Installing Homebrew dependencies for VM creation..."
+
+    # Install Homebrew if not present
+    if ! command -v brew &> /dev/null; then
+        echo "Installing Homebrew..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        eval "$('/opt/homebrew/bin/brew' shellenv)"
+    fi
+
+    # Install all required packages as user
+    brew install tart git node cmake ninja python3 wget curl zig pkg-config openssl@3
+
+    echo "[User] Homebrew dependencies installed."
+    echo "[User] Switching to root for VM provisioning..."
+    exec sudo "$0" "$@"
+fi
+
+# --- ROOT SECTION ---
+echo "[Root] Running privileged VM provisioning..."
+
 # Function to print status messages
 log() {
     echo -e "${GREEN}[create-base-vms]${NC} $1"

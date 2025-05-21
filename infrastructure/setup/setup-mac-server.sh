@@ -2,13 +2,27 @@
 
 set -euo pipefail
 
-echo "🍎 Setting up Mac build server..."
-
-# Check if running as root
+# --- USER SECTION ---
 if [ "$EUID" -ne 0 ]; then
-    echo "Please run as root (sudo -E)"
-    exit 1
+    echo "🍎 [User] Installing Homebrew dependencies..."
+
+    # Install Homebrew if not present
+    if ! command -v brew &> /dev/null; then
+        echo "Installing Homebrew..."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        eval "$('/opt/homebrew/bin/brew' shellenv)"
+    fi
+
+    # Install all required packages as user
+    brew install tart buildkite/buildkite/buildkite-agent prometheus grafana terraform jq yq wget git wireguard-tools tailscale openvpn node_exporter prometheus-node-exporter alertmanager
+
+    echo "🍎 [User] Homebrew dependencies installed."
+    echo "🍎 [User] Switching to root for system configuration..."
+    exec sudo "$0" "$@"
 fi
+
+# --- ROOT SECTION ---
+echo "🍎 [Root] Running privileged setup..."
 
 # Function to prompt for input if env var not set
 prompt_if_not_set() {
@@ -35,7 +49,6 @@ prompt_vpn_choice() {
         echo "2) Tailscale"
         echo "3) UniFi VPN"
         read -rp "Choice [1]: " vpn_choice
-        
         case "${vpn_choice:-1}" in
             1) export VPN_TYPE="wireguard" ;;
             2) export VPN_TYPE="tailscale" ;;
@@ -45,7 +58,6 @@ prompt_vpn_choice() {
     fi
 }
 
-# Interactive prompts for required information
 echo "Welcome to Bun.sh CI Setup"
 echo "-------------------------"
 echo "Press enter to use defaults or provide custom values."
@@ -54,7 +66,6 @@ echo
 prompt_if_not_set BUILDKITE_AGENT_TOKEN "Enter your Buildkite Agent Token" true
 prompt_if_not_set GRAFANA_ADMIN_PASSWORD "Enter Grafana admin password" true
 
-# VPN Configuration
 echo
 echo "VPN Configuration"
 echo "----------------"
@@ -76,7 +87,6 @@ case "${VPN_TYPE}" in
         ;;
 esac
 
-# Optional network configuration
 echo
 echo "Optional Network Configuration"
 echo "----------------------------"
@@ -84,50 +94,7 @@ prompt_if_not_set BUILD_VLAN "Build VLAN [default: 10.0.1.0/24]" false
 prompt_if_not_set MGMT_VLAN "Management VLAN [default: 10.0.2.0/24]" false
 prompt_if_not_set STORAGE_VLAN "Storage VLAN [default: 10.0.3.0/24]" false
 
-# Install Homebrew if not present
-if ! command -v brew &> /dev/null; then
-    echo "Installing Homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-fi
-
-# Install core dependencies
-echo "Installing core dependencies..."
-brew install \
-    tart \
-    buildkite/buildkite/buildkite-agent \
-    prometheus \
-    grafana \
-    terraform \
-    jq \
-    yq \
-    wget \
-    git
-
-# Install VPN dependencies based on type
-case "$VPN_TYPE" in
-    wireguard)
-        echo "Installing WireGuard..."
-        brew install wireguard-tools
-        ;;
-    tailscale)
-        echo "Installing Tailscale..."
-        brew install tailscale
-        ;;
-    unifi)
-        echo "Installing OpenVPN client..."
-        brew install openvpn
-        ;;
-esac
-
-# Install monitoring tools
-echo "Installing monitoring tools..."
-brew install \
-    node_exporter \
-    prometheus-node-exporter \
-    alertmanager
-
 # Create necessary directories
-echo "Creating directories..."
 mkdir -p /opt/buildkite-agent
 mkdir -p /opt/tart/images
 mkdir -p /opt/prometheus
