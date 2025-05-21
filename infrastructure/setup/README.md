@@ -4,7 +4,7 @@ Self-hosted CI for Bun.sh builds, focused on macOS with plans for Windows/Linux.
 
 ## Build Pipeline Overview
 
-The CI pipeline is configured to handle multi-architecture builds across Apple Silicon and Intel:
+The CI pipeline handles multi-architecture builds across Apple Silicon and Intel:
 
 ```mermaid
 %%{init: {'theme': 'dark', 'themeVariables': { 'fontSize': '16px'}}}%%
@@ -36,11 +36,10 @@ graph TD
 
 1. **VM Preparation**
    - Cleanup running VMs
-   - Restore/create base images
+   - Restore/create base images (handled by `setup-mac-server.sh`)
    - Check cache status
    ```bash
    tart list --running | xargs -I{} tart stop {}
-   ./infrastructure/setup/create-base-vms.sh
    ```
 
 2. **Build Dependencies**
@@ -57,13 +56,14 @@ graph TD
    - M2 builds (arm64)
    - M3 builds (arm64)
    - Intel builds (x64)
-   Each build runs in a clean VM environment.
+   Each build runs in a clean Tart VM environment for full isolation and reproducibility.
 
 4. **Test Matrix**
    - Parallel testing across architectures
    - Performance benchmarking
    - Resource monitoring
    - Test result aggregation
+   - Each test runs in a fresh Tart VM with a clean workspace.
 
 5. **Performance Analysis**
    - Cross-architecture comparisons
@@ -89,7 +89,7 @@ chip: "m1|m2|m3|intel"
 
 ### VM Management
 
-Each build uses a clean VM:
+Each build and test uses a clean Tart VM:
 ```bash
 # Base image structure
 /opt/tart/images/
@@ -130,64 +130,6 @@ Metrics collected per build:
 }
 ```
 
-## Infrastructure Overview
-
-```mermaid
-%%{init: {'theme': 'dark', 'themeVariables': { 'fontSize': '16px'}}}%%
-graph TB
-    classDef external fill:#2d3436,stroke:#e17055,stroke-width:2px,color:#fff
-    classDef network fill:#2d3436,stroke:#0984e3,stroke-width:2px,color:#fff
-    classDef compute fill:#2d3436,stroke:#00b894,stroke-width:2px,color:#fff
-    classDef storage fill:#2d3436,stroke:#6c5ce7,stroke-width:2px,color:#fff
-    classDef monitoring fill:#2d3436,stroke:#00cec9,stroke-width:2px,color:#fff
-
-    %% External Services
-    GH[GitHub] --> |Webhooks| BK[Buildkite]
-    S3[S3 Storage] --> |Artifacts| BK
-    class GH,S3,BK external
-
-    %% Network Layer
-    subgraph Network ["Network Layer (10.0.0.0/16)"]
-        direction TB
-        VPN{VPN Gateway} --> |10.0.1.0/24| Build[Build VLAN]
-        VPN --> |10.0.2.0/24| Mgmt[Management VLAN]
-        VPN --> |10.0.3.0/24| Storage[Storage VLAN]
-    end
-    class Network,VPN,Build,Mgmt,Storage network
-
-    %% Compute Layer
-    subgraph Compute ["Compute Layer"]
-        direction TB
-        Tart[Tart VM Manager] --> |Manages| VM1[VM 1]
-        Tart --> |Manages| VM2[VM 2]
-        VM1 & VM2 --> |Runs| Agent[Buildkite Agent]
-    end
-    class Compute,Tart,VM1,VM2,Agent compute
-
-    %% Storage Layer
-    subgraph Storage ["Storage Layer"]
-        direction TB
-        Cache[Build Cache] --> |NFS| VM1 & VM2
-        Images[VM Images] --> |Snapshots| Tart
-    end
-    class Storage,Cache,Images storage
-
-    %% Monitoring Layer
-    subgraph Monitoring ["Monitoring Stack"]
-        direction TB
-        Prom[Prometheus] --> |Scrapes| Node[Node Exporter]
-        Prom --> |Metrics| Graf[Grafana]
-        Alert[AlertManager] --> |Alerts| Graf
-    end
-    class Monitoring,Prom,Node,Graf,Alert monitoring
-
-    %% Connections
-    BK --> VPN
-    Network --> Compute
-    Compute --> Storage
-    Compute --> Monitoring
-```
-
 ## Installation Flow
 
 ```mermaid
@@ -198,7 +140,6 @@ graph TD
     classDef data fill:#2d3436,stroke:#6c5ce7,stroke-width:2px,color:#fff
     classDef service fill:#2d3436,stroke:#00cec9,stroke-width:2px,color:#fff
 
-    %% Installation Phase
     Start[Start Installation] --> Curl[curl downloads setup script]
     Curl --> Sudo[sudo -E runs script]
     Sudo --> CheckRoot{Check root access}
@@ -206,7 +147,6 @@ graph TD
     CheckRoot -->|Yes| Prompt[Interactive prompts]
     class Start,Curl,Sudo,CheckRoot,Error,Prompt phase
 
-    %% Configuration Phase
     Prompt --> |Required| BuildkiteToken[Buildkite Token]
     Prompt --> |Required| GrafanaPass[Grafana Password]
     Prompt --> |Choose| VPNType{VPN Type}
@@ -218,13 +158,11 @@ graph TD
     class VPNType phase
     class WG,TS,UV component
 
-    %% Installation Phase
     WG & TS & UV --> InstallCore[Install Core Components]
     InstallCore --> |Homebrew| CoreDeps[Core Dependencies]
     CoreDeps --> Components[Components Setup]
     class InstallCore,CoreDeps phase
 
-    %% Component Setup
     Components --> Tart[Tart VM Manager]
     Components --> BA[Buildkite Agent]
     Components --> Prom[Prometheus]
@@ -232,19 +170,16 @@ graph TD
     class Components phase
     class Tart,BA,Prom,Graf service
 
-    %% Service Configuration
     Tart --> |VM Images| VMDir[/opt/tart/images]
     BA --> |Config| BAConfig[/opt/buildkite-agent]
     Prom --> |Metrics| PromConfig[/opt/prometheus]
     Graf --> |Dashboard| GrafConfig[/opt/grafana]
     class VMDir,BAConfig,PromConfig,GrafConfig data
 
-    %% Service Start
     VMDir & BAConfig & PromConfig & GrafConfig --> StartServices[Start Services]
     StartServices --> |LaunchD| Running[Services Running]
     class StartServices,Running phase
 
-    %% Final Steps
     Running --> Complete[Setup Complete]
     Complete --> NextSteps[Display Next Steps]
     class Complete,NextSteps phase
@@ -261,7 +196,9 @@ The script will:
 1. Prompt for required information
 2. Install and configure all services
 3. Set up your chosen VPN type
-4. Start everything automatically
+4. Create all required Tart base VMs
+5. Start everything automatically
+6. Ensure all builds/tests run in fresh, isolated Tart VMs for every job
 
 You can also pre-set environment variables to skip prompts:
 ```bash
@@ -273,13 +210,11 @@ export VPN_TYPE="wireguard"  # or "tailscale" or "unifi"
 curl -fsSL https://raw.githubusercontent.com/oven-sh/bun/main/infrastructure/setup/setup-mac-server.sh | sudo -E bash
 ```
 
-For manual installation and more control, see the detailed setup below.
-
 ## Prerequisites
 
 ### Hardware Requirements
-- Mac Mini M2/M3 for ARM64 builds (32GB RAM, 1TB SSD recommended)
-- Mac Mini Intel for x64 builds (32GB RAM, 1TB SSD recommended)
+- Mac Mini M2/M3 for ARM64 builds (32GB RAM, 1TB SSD)
+- Mac Mini Intel for x64 builds (32GB RAM, 1TB SSD)
 - UniFi Dream Machine Pro + Switch 24 PoE
 - APC Smart PDU for remote power management
 - UPS for clean power
@@ -334,8 +269,32 @@ tart list
 
 # Check monitoring (if configured)
 curl localhost:9090  # Prometheus
-curl localhost:3000  # Grafana
+curl localhost:3400  # Grafana
 ```
+
+## VM and Build/Test Isolation
+
+- All builds and tests are run inside Tart VMs for full isolation and reproducibility.
+- Each job uses a temporary, rsynced workspace and cleans the environment inside the VM before running, ensuring no leftover artifacts or dependencies from previous runs.
+- No need to manually run or maintain a separate VM creation script; everything is handled by `setup-mac-server.sh`.
+
+## Health Checks
+
+- The `health-check.sh` script is available as a utility for diagnostics and troubleshooting (checks agent, Tart, monitoring, network, and storage).
+- It is not required for normal operation, but recommended for verifying system health after setup or upgrades.
+
+## Maintenance and Updates
+
+- To update or reconfigure, simply re-run `setup-mac-server.sh`.
+- For diagnostics, use `health-check.sh`.
+- For VM refresh, re-run the setup script or use Tart commands as needed.
+
+## Support
+
+For issues or questions:
+- Email: sam@buildarchetype.dev
+- Internal Slack: #ci-infrastructure
+- Emergency: See on-call rotation in PagerDuty
 
 ## Network Configuration
 
@@ -507,8 +466,6 @@ To connect:
 # 3. Import into your OpenVPN client
 ```
 
-Note: Previous references to Tailscale have been removed as it's not currently implemented. If you need a mesh VPN solution, you can set up Tailscale separately after installation.
-
 SSH Access:
 ```bash
 # Your SSH key was automatically added during setup
@@ -667,13 +624,6 @@ Compared to cloud services:
 - EC2: ~$500/month
 Net savings: ~$1,200/month
 ROI: ~3.5 months
-
-## Support
-
-For issues or questions:
-- Email: sam@buildarchetype.dev
-- Internal Slack: #ci-infrastructure
-- Emergency: See on-call rotation in PagerDuty
 
 ## Implementation Steps
 
