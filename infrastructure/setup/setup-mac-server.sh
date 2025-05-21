@@ -158,9 +158,25 @@ if [ "$goto_privileged_setup" = false ]; then
     if ! command -v brew &> /dev/null; then
       echo_color "$YELLOW" "Homebrew not found. Installing..."
       /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-      eval "$('/opt/homebrew/bin/brew' shellenv)"
+      # Add Homebrew to PATH for current shell
+      if [ -d "/opt/homebrew/bin" ]; then
+        eval "$('/opt/homebrew/bin/brew' shellenv)"
+        echo 'eval "$('/opt/homebrew/bin/brew' shellenv)"' >> ~/.zprofile
+      elif [ -d "/usr/local/bin" ]; then
+        eval "$('/usr/local/bin/brew' shellenv)"
+        echo 'eval "$('/usr/local/bin/brew' shellenv)"' >> ~/.bash_profile
+      fi
+      if ! command -v brew &> /dev/null; then
+        echo_color "$RED" "Homebrew installation failed or not found in PATH. Aborting."
+        exit 1
+      fi
     fi
-    brew install buildkite/buildkite/buildkite-agent prometheus grafana terraform jq yq wget git wireguard-tools tailscale openvpn node_exporter
+    # Always install Tailscale and check for it
+    brew install tailscale || { echo_color "$RED" "Failed to install Tailscale."; exit 1; }
+    if ! command -v tailscale &> /dev/null; then
+      echo_color "$RED" "Tailscale is not in PATH after installation. Aborting."; exit 1;
+    fi
+    brew install buildkite/buildkite/buildkite-agent prometheus grafana terraform jq yq wget git wireguard-tools openvpn node_exporter
     echo_color "$GREEN" "✅ Homebrew and dependencies installed."
 
     # --- Tart install via Cirrus Labs tap ---
@@ -220,9 +236,45 @@ EOF
       ;;
     tailscale)
       if [ -n "${TAILSCALE_AUTH_KEY-}" ]; then
-        tailscale up --authkey="$TAILSCALE_AUTH_KEY"
+        # Start Tailscale with auth key
+        echo_color "$BLUE" "Starting Tailscale with auth key..."
+        tailscale up --authkey="$TAILSCALE_AUTH_KEY" --hostname="bun-ci-$(hostname)"
+
+        # Wait for Tailscale to be ready
+        echo_color "$BLUE" "Waiting for Tailscale to be ready..."
+        for i in {1..30}; do
+          if tailscale status &>/dev/null; then
+            echo_color "$GREEN" "Tailscale is ready!"
+            break
+          fi
+          if [ $i -eq 30 ]; then
+            echo_color "$RED" "Tailscale failed to start within timeout"
+            exit 1
+          fi
+          sleep 1
+        done
+
+        # Get Tailscale IP
+        TAILSCALE_IP=$(tailscale ip --1)
+        echo_color "$GREEN" "Tailscale IP: $TAILSCALE_IP"
+
+        # Configure SSH access
+        echo_color "$BLUE" "Configuring SSH access..."
+        mkdir -p /etc/ssh/sshd_config.d
+        cat > /etc/ssh/sshd_config.d/tailscale.conf << EOF
+# Allow Tailscale IPs
+Match Address ${TAILSCALE_IP}
+    PermitRootLogin no
+    PasswordAuthentication no
+    PubkeyAuthentication yes
+    AllowGroups buildkite-agent wheel
+EOF
+
+        # Restart SSH to apply changes
+        launchctl kickstart -k system/com.openssh.sshd
       else
-        tailscale up
+        echo_color "$YELLOW" "No Tailscale auth key provided. Starting Tailscale in interactive mode..."
+        tailscale up --hostname="bun-ci-$(hostname)"
       fi
       ;;
     unifi)
