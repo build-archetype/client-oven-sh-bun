@@ -2,6 +2,134 @@
 
 Self-hosted CI for Bun.sh builds, focused on macOS with plans for Windows/Linux. Replaces MacStadium/EC2 with local hardware.
 
+## Build Pipeline Overview
+
+The CI pipeline is configured to handle multi-architecture builds across Apple Silicon and Intel:
+
+```mermaid
+%%{init: {'theme': 'dark', 'themeVariables': { 'fontSize': '16px'}}}%%
+graph TD
+    Start[GitHub Push] --> Trigger[Buildkite Trigger]
+    Trigger --> PrepVM[Prepare VMs]
+    PrepVM --> BuildDeps[Build Dependencies]
+    
+    subgraph "Build Matrix"
+        BuildDeps --> M1[Build M1]
+        BuildDeps --> M2[Build M2]
+        BuildDeps --> M3[Build M3]
+        BuildDeps --> Intel[Build Intel]
+    end
+    
+    subgraph "Test Matrix"
+        M1 --> TestM1[Test M1]
+        M2 --> TestM2[Test M2]
+        M3 --> TestM3[Test M3]
+        Intel --> TestIntel[Test Intel]
+    end
+    
+    TestM1 & TestM2 & TestM3 & TestIntel --> Perf[Performance Matrix]
+    Perf --> Package[Package Artifacts]
+    Package --> Report[Build Report]
+```
+
+### Pipeline Steps
+
+1. **VM Preparation**
+   - Cleanup running VMs
+   - Restore/create base images
+   - Check cache status
+   ```bash
+   tart list --running | xargs -I{} tart stop {}
+   ./infrastructure/setup/create-base-vms.sh
+   ```
+
+2. **Build Dependencies**
+   - Smart caching based on package.json/yarn.lock
+   - Keep last 5 dependency versions
+   - Cache metadata tracking
+   ```bash
+   DEPS_HASH=$(cat package.json yarn.lock | sha256sum)
+   CACHE_PATH="/opt/buildkite-agent/cache/deps-$DEPS_HASH"
+   ```
+
+3. **Build Matrix**
+   - M1 builds (arm64)
+   - M2 builds (arm64)
+   - M3 builds (arm64)
+   - Intel builds (x64)
+   Each build runs in a clean VM environment.
+
+4. **Test Matrix**
+   - Parallel testing across architectures
+   - Performance benchmarking
+   - Resource monitoring
+   - Test result aggregation
+
+5. **Performance Analysis**
+   - Cross-architecture comparisons
+   - Build time tracking
+   - Success rate monitoring
+   - Resource usage analysis
+
+6. **Artifact Management**
+   - 7-day retention policy
+   - Build artifact caching
+   - Automatic cleanup
+   - Size monitoring
+
+### Agent Configuration
+
+Agents are tagged with specific capabilities:
+```yaml
+queue: "on-prem"
+os: "darwin"
+arch: "arm64|x64"
+chip: "m1|m2|m3|intel"
+```
+
+### VM Management
+
+Each build uses a clean VM:
+```bash
+# Base image structure
+/opt/tart/images/
+  ├── base-m1.tart
+  ├── base-m2.tart
+  ├── base-m3.tart
+  └── base-intel.tart
+
+# Resource limits per VM
+- CPU: 4 cores
+- RAM: 8GB
+- Disk: 50GB
+```
+
+### Caching Strategy
+
+Two-level caching system:
+```bash
+/opt/buildkite-agent/cache/
+  ├── deps/          # Dependency cache (5 versions)
+  │   ├── deps-${hash1}/
+  │   └── deps-${hash2}/
+  └── builds/        # Build cache (7 days)
+      ├── 20240301/
+      └── 20240302/
+```
+
+### Performance Monitoring
+
+Metrics collected per build:
+```json
+{
+  "arch": "arm64|x64",
+  "chip": "m1|m2|m3|intel",
+  "build_time": "seconds",
+  "test_time": "seconds",
+  "success_rate": "percentage"
+}
+```
+
 ## Infrastructure Overview
 
 ```mermaid
@@ -546,3 +674,128 @@ For issues or questions:
 - Email: sam@buildarchetype.dev
 - Internal Slack: #ci-infrastructure
 - Emergency: See on-call rotation in PagerDuty
+
+## Implementation Steps
+
+1. **Hardware Setup**
+   ```bash
+   # Network configuration on UniFi
+   - Create VLANs (10.0.1.0/24, 10.0.2.0/24, 10.0.3.0/24)
+   - Configure PoE ports for Mac Minis
+   - Set up WAN failover if needed
+   - Configure firewall rules
+
+   # Mac Mini preparation
+   - Clean macOS install
+   - System settings configured
+   - Network interfaces tagged
+   ```
+
+2. **Run Installation**
+   ```bash
+   # Run the setup script
+   curl -fsSL https://raw.githubusercontent.com/oven-sh/bun/main/infrastructure/setup/setup-mac-server.sh | sudo -E bash
+
+   # Verify installation
+   ci-health
+   ```
+
+3. **Post-Install Configuration**
+   ```bash
+   # Set up Buildkite pipeline
+   buildkite-agent pipeline upload .buildkite/pipeline.yml
+
+   # Create base VM image
+   tart create base-macos --from-macos-version 14.0
+   tart run base-macos
+   # Install build dependencies
+   tart stop base-macos
+   tart clone base-macos build-1
+
+   # Configure alerts
+   - Set up PagerDuty/Slack in Grafana
+   - Configure alert thresholds
+   - Test alert pipeline
+   ```
+
+4. **Test Build Pipeline**
+   ```bash
+   # Run test build
+   buildkite-agent build create \
+     --pipeline your-org/test-build \
+     --commit current \
+     --branch main
+
+   # Monitor build
+   open http://localhost:3000/d/buildkite  # Grafana dashboard
+   tail -f /var/log/buildkite-agent/buildkite-agent.log
+   ```
+
+## Health Check
+
+Run `ci-health` to verify all components:
+
+```bash
+$ ci-health
+🔍 Checking CI stack health...
+
+📦 Buildkite Agent:
+  ✅ Agent connected and running
+  🏷  Tags: os=macos,arch=arm64
+
+🖥  Tart VMs:
+  ✅ Tart installed
+  📝 Running VMs: 2
+  💾 Available images: 5
+
+🔒 VPN Status:
+  ✅ WireGuard connected
+  📡 Endpoint: 10.0.0.1:51820
+
+📊 Prometheus:
+  ✅ Prometheus running
+  🎯 Targets: 3 active
+
+📈 Grafana:
+  ✅ Grafana running
+  🔗 URL: http://localhost:3000
+
+🚨 AlertManager:
+  ✅ AlertManager running
+  ⚡️ Active alerts: 0
+
+🌐 Network:
+  ✅ Build VLAN (10.0.1.0/24) configured
+  ✅ Management VLAN (10.0.2.0/24) configured
+  ✅ Storage VLAN (10.0.3.0/24) configured
+
+💾 Storage:
+  ✅ NFS mounted
+  📁 Cache size: 500G
+
+✅ All components are healthy!
+```
+
+Common issues and fixes:
+
+```bash
+# Buildkite agent not connecting
+sudo launchctl kickstart -k system/com.buildkite.buildkite-agent
+
+# VPN disconnected
+sudo wg-quick up wg0  # For WireGuard
+sudo tailscale up     # For Tailscale
+sudo openvpn --config /etc/openvpn/unifi.ovpn --daemon  # For UniFi
+
+# Prometheus/Grafana issues
+sudo launchctl kickstart -k system/com.prometheus.prometheus
+sudo launchctl kickstart -k system/com.grafana.grafana
+
+# VM issues
+tart list --running
+tart stop stuck-vm
+tart delete failed-vm
+
+# NFS issues
+sudo mount -a  # Remount all
+```

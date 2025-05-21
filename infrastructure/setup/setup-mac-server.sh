@@ -306,6 +306,155 @@ case "$VPN_TYPE" in
         ;;
 esac
 
+# Add health check function
+check_stack_health() {
+    local has_error=0
+    echo "🔍 Checking CI stack health..."
+    echo
+
+    # Check Buildkite Agent
+    echo "📦 Buildkite Agent:"
+    if buildkite-agent status &>/dev/null; then
+        echo "  ✅ Agent connected and running"
+        echo "  🏷  Tags: $(buildkite-agent status --format '{{.Tags}}')"
+    else
+        echo "  ❌ Agent not running or not connected"
+        has_error=1
+    fi
+    echo
+
+    # Check Tart
+    echo "🖥  Tart VMs:"
+    if command -v tart &>/dev/null; then
+        echo "  ✅ Tart installed"
+        echo "  📝 Running VMs: $(tart list --running | wc -l | xargs)"
+        echo "  💾 Available images: $(tart list | wc -l | xargs)"
+    else
+        echo "  ❌ Tart not installed"
+        has_error=1
+    fi
+    echo
+
+    # Check VPN
+    echo "🔒 VPN Status:"
+    case "$VPN_TYPE" in
+        wireguard)
+            if wg show &>/dev/null; then
+                echo "  ✅ WireGuard connected"
+                echo "  📡 Endpoint: $(wg show wg0 endpoints)"
+            else
+                echo "  ❌ WireGuard not connected"
+                has_error=1
+            fi
+            ;;
+        tailscale)
+            if tailscale status &>/dev/null; then
+                echo "  ✅ Tailscale connected"
+                echo "  🌐 IP: $(tailscale ip)"
+            else
+                echo "  ❌ Tailscale not connected"
+                has_error=1
+            fi
+            ;;
+        unifi)
+            if pgrep -f "openvpn.*unifi" &>/dev/null; then
+                echo "  ✅ UniFi VPN connected"
+            else
+                echo "  ❌ UniFi VPN not connected"
+                has_error=1
+            fi
+            ;;
+    esac
+    echo
+
+    # Check Prometheus
+    echo "📊 Prometheus:"
+    if curl -s http://localhost:9090/-/healthy &>/dev/null; then
+        echo "  ✅ Prometheus running"
+        echo "  🎯 Targets: $(curl -s http://localhost:9090/api/v1/targets | jq '.data.activeTargets | length') active"
+    else
+        echo "  ❌ Prometheus not running"
+        has_error=1
+    fi
+    echo
+
+    # Check Grafana
+    echo "📈 Grafana:"
+    if curl -s http://localhost:3000/api/health &>/dev/null; then
+        echo "  ✅ Grafana running"
+        echo "  🔗 URL: http://localhost:3000"
+    else
+        echo "  ❌ Grafana not running"
+        has_error=1
+    fi
+    echo
+
+    # Check AlertManager
+    echo "🚨 AlertManager:"
+    if curl -s http://localhost:9093/-/healthy &>/dev/null; then
+        echo "  ✅ AlertManager running"
+        echo "  ⚡️ Active alerts: $(curl -s http://localhost:9093/api/v2/alerts | jq '. | length')"
+    else
+        echo "  ❌ AlertManager not running"
+        has_error=1
+    fi
+    echo
+
+    # Check Network
+    echo "🌐 Network:"
+    # Check VLANs
+    if ifconfig | grep -q "vlan1"; then
+        echo "  ✅ Build VLAN (10.0.1.0/24) configured"
+    else
+        echo "  ❌ Build VLAN missing"
+        has_error=1
+    fi
+    if ifconfig | grep -q "vlan2"; then
+        echo "  ✅ Management VLAN (10.0.2.0/24) configured"
+    else
+        echo "  ❌ Management VLAN missing"
+        has_error=1
+    fi
+    if ifconfig | grep -q "vlan3"; then
+        echo "  ✅ Storage VLAN (10.0.3.0/24) configured"
+    else
+        echo "  ❌ Storage VLAN missing"
+        has_error=1
+    fi
+    echo
+
+    # Check NFS
+    echo "💾 Storage:"
+    if mount | grep -q "nfs"; then
+        echo "  ✅ NFS mounted"
+        echo "  📁 Cache size: $(df -h /opt/buildkite-agent/cache | tail -1 | awk '{print $2}')"
+    else
+        echo "  ❌ NFS not mounted"
+        has_error=1
+    fi
+    echo
+
+    if [ $has_error -eq 1 ]; then
+        echo "❌ Some components are not healthy. Check logs for details."
+        return 1
+    else
+        echo "✅ All components are healthy!"
+        return 0
+    fi
+}
+
+# Add health check command
+ci_health() {
+    check_stack_health
+}
+
+# Add to path
+echo 'alias ci-health="sudo $(which check_stack_health)"' >> ~/.zshrc
+
+# After setup complete, run health check
+echo "Running initial health check..."
+check_stack_health
+
 echo "✅ Setup complete!"
 echo "Next steps:"
 echo "1. Configure Grafana at http://localhost:3000"

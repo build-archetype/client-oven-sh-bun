@@ -1,0 +1,259 @@
+steps:
+  - label: "🔄 Prepare Build VMs"
+    key: "prepare-vms"
+    command: |
+      echo "--- 🗑 Cleanup old VMs"
+      tart list --running | xargs -I{} tart stop {}
+      
+      echo "--- 📦 Restore/Create Base Images"
+      ./infrastructure/setup/create-base-vms.sh
+      
+      echo "--- 💾 Cache Status"
+      CACHE_DIR="/opt/buildkite-agent/cache"
+      echo "Dependencies cache size: $(du -sh $CACHE_DIR/deps/* 2>/dev/null || echo 'Empty')"
+      echo "Build cache size: $(du -sh $CACHE_DIR/builds/* 2>/dev/null || echo 'Empty')"
+      
+      echo "--- 📊 Resource Check"
+      echo "Disk space:"
+      df -h /opt/tart/images /opt/buildkite-agent/cache
+      echo "Memory status:"
+      vm_stat
+      echo "CPU load:"
+      sysctl -n hw.ncpu kern.cpuload
+    agents:
+      queue: "on-prem"
+      arch: "arm64"
+
+  - label: "🏗 Build Dependencies"
+    key: "build-deps"
+    depends_on: "prepare-vms"
+    command: |
+      echo "--- 📥 Smart Cache Check"
+      CACHE_DIR="/opt/buildkite-agent/cache"
+      DEPS_HASH=$(cat package.json yarn.lock | sha256sum | cut -d' ' -f1)
+      CACHE_PATH="$CACHE_DIR/deps-$DEPS_HASH"
+      
+      if [ -d "$CACHE_PATH" ] && [ -f "$CACHE_PATH/cache.meta" ]; then
+        echo "Using cached dependencies..."
+        cp -r "$CACHE_PATH"/* .
+        echo "Cache hit from $(cat "$CACHE_PATH/cache.meta")"
+      else
+        echo "Building dependencies fresh..."
+        bun install
+        
+        # Cache with metadata
+        mkdir -p "$CACHE_PATH"
+        cp -r node_modules "$CACHE_PATH/"
+        date > "$CACHE_PATH/cache.meta"
+        echo "Dependencies cached at $(date)"
+      fi
+      
+      # Rotate old caches (keep last 5)
+      ls -t $CACHE_DIR/deps-* | tail -n +6 | xargs rm -rf
+    agents:
+      queue: "on-prem"
+      arch: "arm64"
+
+  # Matrix build for different architectures
+  - group: "🛠 Build Matrix"
+    key: "build-matrix"
+    depends_on: "build-deps"
+    steps:
+      - label: "🛠 Build Bun (M1)"
+        key: "build-bun-m1"
+        command: .buildkite/scripts/build.sh
+        env:
+          ARCH: "arm64"
+          CHIP: "m1"
+          VM_BASE: "base-m1"
+        agents:
+          queue: "on-prem"
+          arch: "arm64"
+          chip: "m1"
+
+      - label: "🛠 Build Bun (M2)"
+        key: "build-bun-m2"
+        command: .buildkite/scripts/build.sh
+        env:
+          ARCH: "arm64"
+          CHIP: "m2"
+          VM_BASE: "base-m2"
+        agents:
+          queue: "on-prem"
+          arch: "arm64"
+          chip: "m2"
+
+      - label: "🛠 Build Bun (M3)"
+        key: "build-bun-m3"
+        command: .buildkite/scripts/build.sh
+        env:
+          ARCH: "arm64"
+          CHIP: "m3"
+          VM_BASE: "base-m3"
+        agents:
+          queue: "on-prem"
+          arch: "arm64"
+          chip: "m3"
+
+      - label: "🛠 Build Bun (Intel)"
+        key: "build-bun-intel"
+        command: .buildkite/scripts/build.sh
+        env:
+          ARCH: "x64"
+          CHIP: "intel"
+          VM_BASE: "base-intel"
+        agents:
+          queue: "on-prem"
+          arch: "x64"
+          chip: "intel"
+
+  # Matrix test for different architectures
+  - group: "🧪 Test Matrix"
+    key: "test-matrix"
+    depends_on: "build-matrix"
+    steps:
+      - label: "🧪 Test Bun (M1)"
+        key: "test-bun-m1"
+        command: .buildkite/scripts/test.sh
+        env:
+          ARCH: "arm64"
+          CHIP: "m1"
+          VM_BASE: "base-m1"
+        agents:
+          queue: "on-prem"
+          arch: "arm64"
+          chip: "m1"
+
+      - label: "🧪 Test Bun (M2)"
+        key: "test-bun-m2"
+        command: .buildkite/scripts/test.sh
+        env:
+          ARCH: "arm64"
+          CHIP: "m2"
+          VM_BASE: "base-m2"
+        agents:
+          queue: "on-prem"
+          arch: "arm64"
+          chip: "m2"
+
+      - label: "🧪 Test Bun (M3)"
+        key: "test-bun-m3"
+        command: .buildkite/scripts/test.sh
+        env:
+          ARCH: "arm64"
+          CHIP: "m3"
+          VM_BASE: "base-m3"
+        agents:
+          queue: "on-prem"
+          arch: "arm64"
+          chip: "m3"
+
+      - label: "🧪 Test Bun (Intel)"
+        key: "test-bun-intel"
+        command: .buildkite/scripts/test.sh
+        env:
+          ARCH: "x64"
+          CHIP: "intel"
+          VM_BASE: "base-intel"
+        agents:
+          queue: "on-prem"
+          arch: "x64"
+          chip: "intel"
+
+  - wait
+
+  - label: "📊 Performance Matrix"
+    key: "perf-matrix"
+    command: |
+      echo "--- 📈 Collecting Performance Data"
+      buildkite-agent artifact download "bench-results-*.json" .
+      
+      echo "--- 📊 Generating Comparison"
+      cat bench-results-*.json | jq -s '
+        group_by(.arch) |
+        map({
+          arch: .[0].arch,
+          avg_build_time: (map(.build_time) | add / length),
+          avg_test_time: (map(.test_time) | add / length),
+          success_rate: (map(.success | select(. == true) | length) / length * 100)
+        })
+      ' > performance-report.json
+      
+      echo "--- 📋 Summary"
+      cat performance-report.json | jq -r '
+        .[] | "Architecture: \(.arch)\n  Build Time: \(.avg_build_time)s\n  Test Time: \(.avg_test_time)s\n  Success Rate: \(.success_rate)%\n"
+      '
+      
+      buildkite-agent artifact upload "performance-report.json"
+    agents:
+      queue: "on-prem"
+      arch: "arm64"
+
+  - label: "📦 Package Artifacts"
+    key: "package"
+    depends_on: "perf-matrix"
+    command: |
+      echo "--- 📥 Downloading Artifacts"
+      for arch in m1 m2 m3 intel; do
+        buildkite-agent artifact download "bun-darwin-$arch-*.tar.gz" .
+      done
+      
+      echo "--- 🔍 Verifying Artifacts"
+      for pkg in bun-darwin-*.tar.gz; do
+        echo "Checking $pkg..."
+        tar tzf $pkg | grep "bun$" || exit 1
+      done
+      
+      echo "--- 💾 Caching Artifacts"
+      CACHE_DIR="/opt/buildkite-agent/cache/builds"
+      BUILD_DATE=$(date +%Y%m%d)
+      mkdir -p "$CACHE_DIR/$BUILD_DATE"
+      cp bun-darwin-*.tar.gz "$CACHE_DIR/$BUILD_DATE/"
+      
+      # Keep only last 7 days of builds
+      find "$CACHE_DIR" -type d -mtime +7 -exec rm -rf {} +
+      
+      echo "--- 📊 Cache Statistics"
+      echo "Current cache size:"
+      du -sh "$CACHE_DIR"
+      echo "Cache history:"
+      ls -lh "$CACHE_DIR"
+    agents:
+      queue: "on-prem"
+      arch: "arm64"
+
+  - label: "📈 Build Report"
+    key: "report"
+    depends_on: "package"
+    command: |
+      echo "--- 📝 Build Matrix Summary"
+      buildkite-agent artifact download "performance-report.json" .
+      
+      echo "--- 🔍 Cache Efficiency"
+      CACHE_DIR="/opt/buildkite-agent/cache"
+      echo "Dependencies cache hits: $(find $CACHE_DIR/deps-* -name cache.meta | wc -l)"
+      echo "Total cache size: $(du -sh $CACHE_DIR)"
+      
+      echo "--- 📊 Resource Usage"
+      echo "VM Statistics:"
+      tart list
+      echo "Disk Usage:"
+      df -h /opt/tart/images /opt/buildkite-agent/cache
+      
+      echo "--- 🎯 Recommendations"
+      jq -r '
+        . as $data |
+        ["Recommendations:"] +
+        (map(
+          if .avg_build_time > 300 then
+            "\(.arch): Consider optimizing build time (\(.avg_build_time)s)"
+          elif .success_rate < 95 then
+            "\(.arch): Investigate reliability (\(.success_rate)%)"
+          else
+            "\(.arch): Performance acceptable"
+          end
+        )) | .[]
+      ' performance-report.json
+    agents:
+      queue: "on-prem"
+      arch: "arm64" 

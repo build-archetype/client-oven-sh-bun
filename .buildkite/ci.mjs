@@ -36,6 +36,7 @@ import {
  * @typedef {"debian" | "ubuntu" | "alpine" | "amazonlinux"} Distro
  * @typedef {"latest" | "previous" | "oldest" | "eol"} Tier
  * @typedef {"release" | "assert" | "debug" | "asan"} Profile
+ * @typedef {"m1" | "m2" | "m3" | "intel"} Chip
  */
 
 /**
@@ -45,6 +46,7 @@ import {
  * @property {Abi} [abi]
  * @property {boolean} [baseline]
  * @property {Profile} [profile]
+ * @property {Chip} [chip]
  */
 
 /**
@@ -102,8 +104,10 @@ function getTargetLabel(target) {
  * @type {Platform[]}
  */
 const buildPlatforms = [
-  { os: "darwin", arch: "aarch64", release: "14" },
-  { os: "darwin", arch: "x64", release: "14" },
+  { os: "darwin", arch: "aarch64", chip: "m1", release: "14" },
+  { os: "darwin", arch: "aarch64", chip: "m2", release: "14" },
+  { os: "darwin", arch: "aarch64", chip: "m3", release: "14" },
+  { os: "darwin", arch: "x64", chip: "intel", release: "14" },
   { os: "linux", arch: "aarch64", distro: "amazonlinux", release: "2023", features: ["docker"] },
   { os: "linux", arch: "x64", distro: "amazonlinux", release: "2023", features: ["docker"] },
   { os: "linux", arch: "x64", baseline: true, distro: "amazonlinux", release: "2023", features: ["docker"] },
@@ -295,17 +299,52 @@ function getEc2Agent(platform, options, ec2Options) {
 /**
  * @param {Platform} platform
  * @param {PipelineOptions} options
- * @returns {string}
+ * @returns {Agent}
+ */
+function getOnPremAgent(platform, options) {
+  const { os, arch, chip } = platform;
+  return {
+    queue: "on-prem",
+    os,
+    arch,
+    chip: chip || (arch === "aarch64" ? "m1" : "intel")
+  };
+}
+
+/**
+ * @param {Platform} platform
+ * @param {PipelineOptions} options
+ * @returns {Step}
+ */
+function getVMPrepStep(platform, options) {
+  return {
+    key: `${getTargetKey(platform)}-prep-vm`,
+    label: `${getTargetLabel(platform)} - prep-vm`,
+    agents: getOnPremAgent(platform, options),
+    command: [
+      'echo "--- 🗑 Cleanup old VMs"',
+      'tart list --running | xargs -I{} tart stop {}',
+      'echo "--- 📦 Restore/Create Base Images"',
+      './infrastructure/setup/create-base-vms.sh',
+      'echo "--- 💾 Cache Status"',
+      'CACHE_DIR="/opt/buildkite-agent/cache"',
+      'echo "Dependencies cache size: $(du -sh $CACHE_DIR/deps/* 2>/dev/null || echo \'Empty\')"',
+      'echo "Build cache size: $(du -sh $CACHE_DIR/builds/* 2>/dev/null || echo \'Empty\')"'
+    ].join('\n'),
+    env: getBuildEnv(platform, options)
+  };
+}
+
+/**
+ * @param {Platform} platform
+ * @param {PipelineOptions} options
+ * @returns {Agent}
  */
 function getCppAgent(platform, options) {
   const { os, arch, distro } = platform;
 
   if (os === "darwin") {
-    return {
-      queue: `build-${os}`,
-      os,
-      arch,
-    };
+    return getOnPremAgent(platform, options);
   }
 
   return getEc2Agent(platform, options, {
@@ -354,14 +393,9 @@ function getTestAgent(platform, options) {
   const { os, arch } = platform;
 
   if (os === "darwin") {
-    return {
-      queue: `test-${os}`,
-      os,
-      arch,
-    };
+    return getOnPremAgent(platform, options);
   }
 
-  // TODO: `dev-server-ssr-110.test.ts` and `next-build.test.ts` run out of memory at 8GB of memory, so use 16GB instead.
   if (os === "windows") {
     return getEc2Agent(platform, options, {
       instanceType: "c7i.2xlarge",
@@ -524,7 +558,13 @@ function getLinkBunStep(platform, options) {
  * @returns {Step}
  */
 function getBuildBunStep(platform, options) {
-  return {
+  const steps = [];
+  
+  if (platform.os === "darwin") {
+    steps.push(getVMPrepStep(platform, options));
+  }
+  
+  steps.push({
     key: `${getTargetKey(platform)}-build-bun`,
     label: `${getTargetLabel(platform)} - build-bun`,
     agents: getCppAgent(platform, options),
@@ -532,6 +572,13 @@ function getBuildBunStep(platform, options) {
     cancel_on_build_failing: isMergeQueue(),
     env: getBuildEnv(platform, options),
     command: getBuildCommand(platform, options),
+    depends_on: platform.os === "darwin" ? [`${getTargetKey(platform)}-prep-vm`] : undefined
+  });
+
+  return steps.length === 1 ? steps[0] : {
+    key: getTargetKey(platform),
+    group: getTargetLabel(platform),
+    steps
   };
 }
 
