@@ -2,111 +2,210 @@
 
 set -euo pipefail
 
-# --- USER SECTION ---
-if [ "$EUID" -ne 0 ]; then
-    echo "🍎 [User] Installing Homebrew dependencies..."
+# --- Color codes ---
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BLUE='\033[0;34m'
+NC='\033[0m'
 
-    # Install Homebrew if not present
-    if ! command -v brew &> /dev/null; then
-        echo "Installing Homebrew..."
-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-        eval "$('/opt/homebrew/bin/brew' shellenv)"
-    fi
+LOGFILE="setup-mac-server.log"
+exec > >(tee -a "$LOGFILE") 2>&1
 
-    # Install all required packages as user
-    brew install tart buildkite/buildkite/buildkite-agent prometheus grafana terraform jq yq wget git wireguard-tools tailscale openvpn node_exporter prometheus-node-exporter alertmanager
+# --- Prompt helpers ---
+echo_color() { echo -e "$1$2${NC}"; }
 
-    echo "🍎 [User] Homebrew dependencies installed."
-    echo "🍎 [User] Switching to root for system configuration..."
-    exec sudo "$0" "$@"
+# --- Check if script is being re-executed as root ---
+if [ "$EUID" -eq 0 ] && [ -n "${BUILDKITE_AGENT_TOKEN:-}" ]; then
+  echo_color "$BLUE" "Re-executing as root. Skipping prompts..."
+  # Jump to privileged setup section
+  goto_privileged_setup=true
+else
+  goto_privileged_setup=false
 fi
 
-# --- ROOT SECTION ---
-echo "🍎 [Root] Running privileged setup..."
+# --- Prompt for all inputs up front ---
+if [ "$goto_privileged_setup" = false ]; then
+  echo -e "${BLUE}Bun.sh On-Prem CI Setup${NC}"
+  echo "--------------------------------"
 
-# Function to prompt for input if env var not set
-prompt_if_not_set() {
+  prompt_secret() {
     local var_name=$1
     local prompt_text=$2
-    local is_secret=$3
+    local input=""
+    local char
 
-    if [ -z "${!var_name-}" ]; then
-        if [ "$is_secret" = "true" ]; then
-            read -rsp "$prompt_text: " input
-            echo
-        else
-            read -rp "$prompt_text: " input
+    printf "%s: " "$prompt_text"
+    stty -echo
+    while IFS= read -r -s -n1 char; do
+      # Enter key (newline) ends input
+      if [[ $char == $'\0' || $char == $'\n' ]]; then
+        break
+      fi
+      # Backspace handling
+      if [[ $char == $'\177' ]]; then
+        if [ -n "$input" ]; then
+          input="${input%?}"
+          printf '\b \b'
         fi
-        export "$var_name=$input"
+      else
+        input+="$char"
+        printf '•'
+      fi
+    done
+    stty echo
+    echo
+    if [ -n "$input" ]; then
+      eval "$var_name=\"$input\""
+    else
+      echo_color "$RED" "Value required."
+      prompt_secret "$var_name" "$prompt_text"
     fi
-}
+  }
 
-# Function to prompt for VPN choice
-prompt_vpn_choice() {
-    if [ -z "${VPN_TYPE-}" ]; then
-        echo "Select VPN type:"
-        echo "1) WireGuard (default)"
-        echo "2) Tailscale"
-        echo "3) UniFi VPN"
-        read -rp "Choice [1]: " vpn_choice
-        case "${vpn_choice:-1}" in
-            1) export VPN_TYPE="wireguard" ;;
-            2) export VPN_TYPE="tailscale" ;;
-            3) export VPN_TYPE="unifi" ;;
-            *) export VPN_TYPE="wireguard" ;;
-        esac
+  prompt_text() {
+    local var_name=$1
+    local prompt_text=$2
+    local default_value=${3:-}
+    read -rp "$prompt_text${default_value:+ [$default_value]}: " input
+    input=${input:-$default_value}
+    eval "$var_name=\"$input\""
+  }
+
+  # 0. VPN setup optional
+  while true; do
+    read -rp "Do you want to configure VPN access (WireGuard/Tailscale/UniFi)? (y/n): " vpn_enable
+    case "$(echo "$vpn_enable" | tr '[:upper:]' '[:lower:]')" in
+      y|yes) VPN_ENABLED=true; break ;;
+      n|no) VPN_ENABLED=false; break ;;
+      *) echo_color "$YELLOW" "Please enter 'y' or 'n'." ;;
+    esac
+  done
+
+  # 1. Buildkite token
+  prompt_secret BUILDKITE_AGENT_TOKEN "Enter your Buildkite Agent Token"
+
+  # 2. Grafana password
+  prompt_secret GRAFANA_ADMIN_PASSWORD "Enter Grafana admin password"
+
+  # 3. VPN type and details (if enabled)
+  if [ "$VPN_ENABLED" = true ]; then
+    while true; do
+      echo_color "$BLUE" "Select VPN type:"
+      echo "  1) WireGuard (default)"
+      echo "  2) Tailscale"
+      echo "  3) UniFi VPN"
+      read -rp "Choice [1]: " vpn_choice
+      case "${vpn_choice:-1}" in
+        1|"") VPN_TYPE="wireguard"; break ;;
+        2) VPN_TYPE="tailscale"; break ;;
+        3) VPN_TYPE="unifi"; break ;;
+        *) echo_color "$YELLOW" "Invalid choice. Please enter 1, 2, or 3." ;;
+      esac
+    done
+    case "$VPN_TYPE" in
+      wireguard)
+        prompt_secret WIREGUARD_PRIVATE_KEY "Enter WireGuard private key"
+        prompt_secret WIREGUARD_PUBLIC_KEY "Enter WireGuard peer public key"
+        prompt_text WIREGUARD_ENDPOINT "Enter WireGuard endpoint" "vpn.example.com"
+        ;;
+      tailscale)
+        prompt_text TAILSCALE_AUTH_KEY "Enter Tailscale auth key (optional)" ""
+        ;;
+      unifi)
+        prompt_text UNIFI_VPN_USER "Enter UniFi VPN username" ""
+        prompt_secret UNIFI_VPN_PASSWORD "Enter UniFi VPN password"
+        prompt_text UNIFI_VPN_SERVER "Enter UniFi VPN server" ""
+        ;;
+    esac
+  fi
+
+  # 4. Optional network config
+  prompt_text BUILD_VLAN "Build VLAN" "10.0.1.0/24"
+  prompt_text MGMT_VLAN "Management VLAN" "10.0.2.0/24"
+  prompt_text STORAGE_VLAN "Storage VLAN" "10.0.3.0/24"
+
+  # --- Show summary and confirm ---
+  echo_color "$YELLOW" "\nSummary of your choices:"
+  echo "  Buildkite Agent Token:   [hidden]"
+  echo "  Grafana Admin Password:   [hidden]"
+  echo "  VPN Setup:                $([[ "$VPN_ENABLED" = true ]] && echo "Enabled" || echo "Skipped")"
+  if [ "$VPN_ENABLED" = true ]; then
+    echo "  VPN Type:                 $VPN_TYPE"
+    case "$VPN_TYPE" in
+      wireguard)
+        echo "  WireGuard Endpoint:       $WIREGUARD_ENDPOINT" ;;
+      tailscale)
+        echo "  Tailscale Auth Key:       ${TAILSCALE_AUTH_KEY:-[none]}" ;;
+      unifi)
+        echo "  UniFi VPN User:           $UNIFI_VPN_USER"
+        echo "  UniFi VPN Server:         $UNIFI_VPN_SERVER" ;;
+    esac
+  fi
+  echo "  Build VLAN:               $BUILD_VLAN"
+  echo "  Management VLAN:          $MGMT_VLAN"
+  echo "  Storage VLAN:             $STORAGE_VLAN"
+
+  read -rp "Proceed with installation? (y/n): " confirm
+  if [[ "$confirm" != "y" ]]; then
+    echo_color "$RED" "Aborted by user."
+    exit 1
+  fi
+
+  # --- Homebrew install section (user) ---
+  if [ "$EUID" -ne 0 ]; then
+    echo_color "$BLUE" "\n[1/3] Installing Homebrew and dependencies..."
+    if ! command -v brew &> /dev/null; then
+      echo_color "$YELLOW" "Homebrew not found. Installing..."
+      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      eval "$('/opt/homebrew/bin/brew' shellenv)"
     fi
-}
+    brew install buildkite/buildkite/buildkite-agent prometheus grafana terraform jq yq wget git wireguard-tools tailscale openvpn node_exporter
+    echo_color "$GREEN" "✅ Homebrew and dependencies installed."
 
-echo "Welcome to Bun.sh CI Setup"
-echo "-------------------------"
-echo "Press enter to use defaults or provide custom values."
-echo
+    # --- Tart install via Cirrus Labs tap ---
+    if ! command -v tart &> /dev/null; then
+      echo_color "$YELLOW" "Tart is not installed. Installing from cirruslabs/cli tap..."
+      brew tap cirruslabs/cli
+      brew install cirruslabs/cli/tart
+      if command -v tart &> /dev/null; then
+        echo_color "$GREEN" "✅ Tart installed successfully."
+      else
+        echo_color "$RED" "Tart installation failed. Please install manually from https://github.com/cirruslabs/tart."
+        exit 1
+      fi
+    else
+      echo_color "$GREEN" "Tart is already installed."
+    fi
 
-prompt_if_not_set BUILDKITE_AGENT_TOKEN "Enter your Buildkite Agent Token" true
-prompt_if_not_set GRAFANA_ADMIN_PASSWORD "Enter Grafana admin password" true
+    echo_color "$BLUE" "Switching to root for system configuration..."
+    export_vars="BUILDKITE_AGENT_TOKEN=\"$BUILDKITE_AGENT_TOKEN\" GRAFANA_ADMIN_PASSWORD=\"$GRAFANA_ADMIN_PASSWORD\" VPN_ENABLED=\"$VPN_ENABLED\" BUILD_VLAN=\"$BUILD_VLAN\" MGMT_VLAN=\"$MGMT_VLAN\" STORAGE_VLAN=\"$STORAGE_VLAN\""
+    if [ "$VPN_ENABLED" = true ]; then
+      export_vars+=" VPN_TYPE=\"$VPN_TYPE\""
+      case "$VPN_TYPE" in
+        wireguard)
+          export_vars+=" WIREGUARD_PRIVATE_KEY=\"$WIREGUARD_PRIVATE_KEY\" WIREGUARD_PUBLIC_KEY=\"$WIREGUARD_PUBLIC_KEY\" WIREGUARD_ENDPOINT=\"$WIREGUARD_ENDPOINT\"" ;;
+        tailscale)
+          export_vars+=" TAILSCALE_AUTH_KEY=\"$TAILSCALE_AUTH_KEY\"" ;;
+        unifi)
+          export_vars+=" UNIFI_VPN_USER=\"$UNIFI_VPN_USER\" UNIFI_VPN_PASSWORD=\"$UNIFI_VPN_PASSWORD\" UNIFI_VPN_SERVER=\"$UNIFI_VPN_SERVER\"" ;;
+      esac
+    fi
+    eval exec sudo $export_vars "$0" "$@"
+  fi
+fi
 
-echo
-echo "VPN Configuration"
-echo "----------------"
-prompt_vpn_choice
+# --- Privileged setup (root) ---
+echo_color "$BLUE" "\n[2/3] Running privileged setup..."
 
-case "${VPN_TYPE}" in
+mkdir -p /opt/buildkite-agent /opt/tart/images /opt/prometheus /opt/grafana /var/log/buildkite-agent
+
+# VPN setup (if enabled)
+if [ "$VPN_ENABLED" = true ]; then
+  case "$VPN_TYPE" in
     wireguard)
-        prompt_if_not_set WIREGUARD_PRIVATE_KEY "Enter WireGuard private key" true
-        prompt_if_not_set WIREGUARD_PUBLIC_KEY "Enter WireGuard peer public key" true
-        prompt_if_not_set WIREGUARD_ENDPOINT "Enter WireGuard endpoint" false
-        ;;
-    tailscale)
-        prompt_if_not_set TAILSCALE_AUTH_KEY "Enter Tailscale auth key (optional)" true
-        ;;
-    unifi)
-        prompt_if_not_set UNIFI_VPN_USER "Enter UniFi VPN username" false
-        prompt_if_not_set UNIFI_VPN_PASSWORD "Enter UniFi VPN password" true
-        prompt_if_not_set UNIFI_VPN_SERVER "Enter UniFi VPN server" false
-        ;;
-esac
-
-echo
-echo "Optional Network Configuration"
-echo "----------------------------"
-prompt_if_not_set BUILD_VLAN "Build VLAN [default: 10.0.1.0/24]" false
-prompt_if_not_set MGMT_VLAN "Management VLAN [default: 10.0.2.0/24]" false
-prompt_if_not_set STORAGE_VLAN "Storage VLAN [default: 10.0.3.0/24]" false
-
-# Create necessary directories
-mkdir -p /opt/buildkite-agent
-mkdir -p /opt/tart/images
-mkdir -p /opt/prometheus
-mkdir -p /opt/grafana
-mkdir -p /var/log/buildkite-agent
-
-# Set up VPN
-echo "Setting up VPN..."
-case "$VPN_TYPE" in
-    wireguard)
-        mkdir -p /etc/wireguard
-        cat > /etc/wireguard/wg0.conf << EOF
+      mkdir -p /etc/wireguard
+      cat > /etc/wireguard/wg0.conf << EOF
 [Interface]
 PrivateKey = ${WIREGUARD_PRIVATE_KEY}
 Address = 10.0.0.2/24
@@ -118,36 +217,30 @@ Endpoint = ${WIREGUARD_ENDPOINT}:51820
 AllowedIPs = 10.0.0.0/24
 PersistentKeepalive = 25
 EOF
-        ;;
+      ;;
     tailscale)
-        if [ -n "${TAILSCALE_AUTH_KEY-}" ]; then
-            echo "Setting up Tailscale with auth key..."
-            tailscale up --authkey="$TAILSCALE_AUTH_KEY"
-        else
-            echo "Setting up Tailscale..."
-            echo "Please run 'tailscale up' and follow the authentication prompts"
-            tailscale up
-        fi
-        ;;
+      if [ -n "${TAILSCALE_AUTH_KEY-}" ]; then
+        tailscale up --authkey="$TAILSCALE_AUTH_KEY"
+      else
+        tailscale up
+      fi
+      ;;
     unifi)
-        mkdir -p /etc/openvpn
-        cat > /etc/openvpn/auth.txt << EOF
+      mkdir -p /etc/openvpn
+      cat > /etc/openvpn/auth.txt << EOF
 ${UNIFI_VPN_USER}
 ${UNIFI_VPN_PASSWORD}
 EOF
-        chmod 600 /etc/openvpn/auth.txt
-        
-        echo "Downloading UniFi VPN configuration..."
-        curl -k -u "${UNIFI_VPN_USER}:${UNIFI_VPN_PASSWORD}" \
-            "https://${UNIFI_VPN_SERVER}:943/remote/client.ovpn" \
-            -o /etc/openvpn/unifi.ovpn
-        
-        echo "auth-user-pass /etc/openvpn/auth.txt" >> /etc/openvpn/unifi.ovpn
-        ;;
-esac
+      chmod 600 /etc/openvpn/auth.txt
+      curl -k -u "${UNIFI_VPN_USER}:${UNIFI_VPN_PASSWORD}" \
+        "https://${UNIFI_VPN_SERVER}:943/remote/client.ovpn" \
+        -o /etc/openvpn/unifi.ovpn
+      echo "auth-user-pass /etc/openvpn/auth.txt" >> /etc/openvpn/unifi.ovpn
+      ;;
+  esac
+fi
 
-# Set up Buildkite Agent
-echo "Setting up Buildkite Agent..."
+# Buildkite Agent config
 cat > /opt/buildkite-agent/buildkite-agent.cfg << EOF
 token="${BUILDKITE_AGENT_TOKEN}"
 name="%hostname-%n"
@@ -157,13 +250,11 @@ hooks-path="/opt/buildkite-agent/hooks"
 plugins-path="/opt/buildkite-agent/plugins"
 EOF
 
-# Set up Prometheus
-echo "Setting up Prometheus..."
+# Prometheus config
 cat > /opt/prometheus/prometheus.yml << EOF
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
-
 scrape_configs:
   - job_name: 'node'
     static_configs:
@@ -173,20 +264,17 @@ scrape_configs:
       - targets: ['localhost:9200']
 EOF
 
-# Set up Grafana
-echo "Setting up Grafana..."
+# Grafana config
 cat > /opt/grafana/grafana.ini << EOF
 [server]
-http_port = 3000
+http_port = 3400
 domain = localhost
-
 [security]
 admin_user = admin
 admin_password = ${GRAFANA_ADMIN_PASSWORD}
 EOF
 
-# Set up SSH
-echo "Setting up SSH..."
+# SSH config
 cat > /etc/ssh/sshd_config.d/build-server.conf << EOF
 PermitRootLogin no
 PasswordAuthentication no
@@ -194,276 +282,130 @@ PubkeyAuthentication yes
 AllowGroups buildkite-agent wheel
 EOF
 
-# Create services
-echo "Creating launch agents..."
-
-# Buildkite Agent
-cat > /Library/LaunchDaemons/com.buildkite.buildkite-agent.plist << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.buildkite.buildkite-agent</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/opt/homebrew/bin/buildkite-agent</string>
-        <string>start</string>
-    </array>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    </dict>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>/var/log/buildkite-agent/buildkite-agent.log</string>
-    <key>StandardErrorPath</key>
-    <string>/var/log/buildkite-agent/buildkite-agent.log</string>
-</dict>
-</plist>
-EOF
-
-# Prometheus
-cat > /Library/LaunchDaemons/com.prometheus.prometheus.plist << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.prometheus.prometheus</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/opt/homebrew/bin/prometheus</string>
-        <string>--config.file=/opt/prometheus/prometheus.yml</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>/var/log/prometheus.log</string>
-    <key>StandardErrorPath</key>
-    <string>/var/log/prometheus.log</string>
-</dict>
-</plist>
-EOF
-
-# Start services
-echo "Starting services..."
-launchctl load /Library/LaunchDaemons/com.buildkite.buildkite-agent.plist
-launchctl load /Library/LaunchDaemons/com.prometheus.prometheus.plist
-
-# Start VPN service if applicable
-case "$VPN_TYPE" in
+# --- Final summary and next steps ---
+echo_color "$GREEN" "\n[3/3] Setup complete!"
+echo_color "$BLUE" "Log file: $LOGFILE"
+echo_color "$YELLOW" "Summary of what was done:"
+echo "  - Homebrew and dependencies installed"
+echo "  - Tart installed via Cirrus Labs tap"
+echo "  - Buildkite agent configured"
+echo "  - Prometheus and Grafana configured"
+echo "  - SSH configuration updated"
+if [ "$VPN_ENABLED" = true ]; then
+  echo "  - VPN setup completed"
+fi
+echo_color "$YELLOW" "Next steps:"
+echo "  1. Configure Grafana at http://localhost:3400 (user: admin, pass: $GRAFANA_ADMIN_PASSWORD)"
+echo "  2. Open Prometheus at http://localhost:9090 (no login required by default)"
+echo "  3. Add your SSH keys to ~/.ssh/authorized_keys"
+if [ "$VPN_ENABLED" = true ]; then
+  case "$VPN_TYPE" in
     wireguard)
-        echo "Starting WireGuard..."
-        wg-quick up wg0
-        ;;
+      echo "  4. Test WireGuard connection: wg show" ;;
     tailscale)
-        echo "Starting Tailscale..."
-        launchctl load /Library/LaunchDaemons/com.tailscale.tailscaled.plist
-        ;;
+      echo "  4. Test Tailscale connection: tailscale status" ;;
     unifi)
-        echo "Starting UniFi VPN..."
-        openvpn --config /etc/openvpn/unifi.ovpn --daemon
-        ;;
-esac
+      echo "  4. Test UniFi VPN connection: openvpn --status" ;;
+  esac
+else
+  echo "  4. VPN setup was skipped (local access only)" ;
+fi
+echo "  5. Set up Tart images in /opt/tart/images"
+echo "  6. Review and customize Prometheus config"
+echo "  7. Buildkite is ready to run. Start the agent with: sudo -u buildkite-agent /opt/buildkite-agent/bin/buildkite-agent start"
+echo "  8. Create base VMs with: tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest sequoia-base"
+echo "  9. Start Buildkite agent with: sudo -u buildkite-agent /opt/buildkite-agent/bin/buildkite-agent start"
+echo_color "$GREEN" "\nAll done!"
 
-# Add health check function
-check_stack_health() {
-    local has_error=0
-    echo "🔍 Checking CI stack health..."
-    echo
+# --- Prompt to create all base VMs (single y/n) ---
+read -rp "Do you want to create the base VMs? (y/n): " yn_vms
+if [[ "$(echo "$yn_vms" | tr '[:upper:]' '[:lower:]')" == "y" ]]; then
+  base_vms=("base-macos-arm" "base-macos-intel" "base-m1" "base-m2" "base-m3" "base-m4")
+  echo_color "$BLUE" "Creating all base VMs..."
+  for vm in "${base_vms[@]}"; do
+    tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest "$vm"
+  done
+fi
 
-    # Check Buildkite Agent
-    echo "📦 Buildkite Agent:"
-    if buildkite-agent status &>/dev/null; then
-        echo "  ✅ Agent connected and running"
-        echo "  🏷  Tags: $(buildkite-agent status --format '{{.Tags}}')"
-    else
-        echo "  ❌ Agent not running or not connected"
-        has_error=1
-    fi
-    echo
+# --- Write Buildkite agent config to Homebrew location ---
+BK_CFG="/opt/homebrew/etc/buildkite-agent/buildkite-agent.cfg"
+echo_color "$BLUE" "Writing Buildkite agent config to $BK_CFG..."
+sudo mkdir -p /opt/homebrew/etc/buildkite-agent
+sudo tee "$BK_CFG" > /dev/null << EOF
+token="$BUILDKITE_AGENT_TOKEN"
+name="%hostname-%n"
+tags="os=macos,arch=$(uname -m)"
+build-path="/opt/buildkite-agent/builds"
+hooks-path="/opt/buildkite-agent/hooks"
+plugins-path="/opt/buildkite-agent/plugins"
+EOF
+sudo chown buildkite-agent:staff "$BK_CFG"
 
-    # Check Tart
-    echo "🖥  Tart VMs:"
-    if command -v tart &>/dev/null; then
-        echo "  ✅ Tart installed"
-        echo "  📝 Running VMs: $(tart list --running | wc -l | xargs)"
-        echo "  💾 Available images: $(tart list | wc -l | xargs)"
-    else
-        echo "  ❌ Tart not installed"
-        has_error=1
-    fi
-    echo
+# --- Ensure buildkite-agent user exists before starting agent ---
+if ! id -u buildkite-agent >/dev/null 2>&1; then
+  echo_color "$YELLOW" "Creating buildkite-agent user..."
+  sudo dscl . -create /Users/buildkite-agent
+  sudo dscl . -create /Users/buildkite-agent UserShell /bin/bash
+  sudo dscl . -create /Users/buildkite-agent RealName "Buildkite Agent"
+  sudo dscl . -create /Users/buildkite-agent UniqueID "$(dscl . -list /Users UniqueID | awk '{print $2}' | sort -n | tail -1 | awk '{print $1+1}')"
+  sudo dscl . -create /Users/buildkite-agent PrimaryGroupID 20
+  sudo dscl . -create /Users/buildkite-agent NFSHomeDirectory /Users/buildkite-agent
+  sudo mkdir -p /Users/buildkite-agent
+  sudo chown buildkite-agent:staff /Users/buildkite-agent
+  sudo dscl . -append /Groups/wheel GroupMembership buildkite-agent
+  echo_color "$GREEN" "User 'buildkite-agent' created."
+fi
 
-    # Check VPN
-    echo "🔒 VPN Status:"
-    case "$VPN_TYPE" in
-        wireguard)
-            if wg show &>/dev/null; then
-                echo "  ✅ WireGuard connected"
-                echo "  📡 Endpoint: $(wg show wg0 endpoints)"
-            else
-                echo "  ❌ WireGuard not connected"
-                has_error=1
-            fi
-            ;;
-        tailscale)
-            if tailscale status &>/dev/null; then
-                echo "  ✅ Tailscale connected"
-                echo "  🌐 IP: $(tailscale ip)"
-            else
-                echo "  ❌ Tailscale not connected"
-                has_error=1
-            fi
-            ;;
-        unifi)
-            if pgrep -f "openvpn.*unifi" &>/dev/null; then
-                echo "  ✅ UniFi VPN connected"
-            else
-                echo "  ❌ UniFi VPN not connected"
-                has_error=1
-            fi
-            ;;
-    esac
-    echo
+# --- Start Buildkite agent as buildkite-agent user using Homebrew path and correct HOME ---
+AGENT_BIN="$(brew --prefix buildkite-agent)/bin/buildkite-agent"
+echo_color "$BLUE" "Starting Buildkite agent as 'buildkite-agent' using $AGENT_BIN..."
+sudo mkdir -p /opt/buildkite-agent/builds
+sudo chown -R buildkite-agent:staff /opt/buildkite-agent
+sudo mkdir -p /Users/buildkite-agent
+sudo chown buildkite-agent:staff /Users/buildkite-agent
+sudo -u buildkite-agent env HOME=/Users/buildkite-agent "$AGENT_BIN" start --config "$BK_CFG" &
 
-    # Check Prometheus
-    echo "📊 Prometheus:"
-    if curl -s http://localhost:9090/-/healthy &>/dev/null; then
-        echo "  ✅ Prometheus running"
-        echo "  🎯 Targets: $(curl -s http://localhost:9090/api/v1/targets | jq '.data.activeTargets | length') active"
-    else
-        echo "  ❌ Prometheus not running"
-        has_error=1
-    fi
-    echo
+# --- Update Grafana config to use port 3400 ---
+sed -i '' 's/^http_port = .*/http_port = 3400/' /opt/grafana/grafana.ini 2>/dev/null || true
 
-    # Check Grafana
-    echo "📈 Grafana:"
-    if curl -s http://localhost:3000/api/health &>/dev/null; then
-        echo "  ✅ Grafana running"
-        echo "  🔗 URL: http://localhost:3000"
-    else
-        echo "  ❌ Grafana not running"
-        has_error=1
-    fi
-    echo
+# --- Start Prometheus server if not running ---
+if ! pgrep -f 'prometheus' > /dev/null; then
+  echo_color "$BLUE" "Starting Prometheus server on port 9090..."
+  (prometheus --config.file=/opt/prometheus/prometheus.yml --storage.tsdb.path=/opt/prometheus &)
+  sleep 2
+  if pgrep -f 'prometheus' > /dev/null; then
+    echo_color "$GREEN" "Prometheus started successfully on http://localhost:9090"
+  else
+    echo_color "$RED" "Failed to start Prometheus. Please check logs or try manually: prometheus --config.file=/opt/prometheus/prometheus.yml --storage.tsdb.path=/opt/prometheus"
+  fi
+else
+  echo_color "$GREEN" "Prometheus is already running."
+fi
 
-    # Check AlertManager
-    echo "🚨 AlertManager:"
-    if curl -s http://localhost:9093/-/healthy &>/dev/null; then
-        echo "  ✅ AlertManager running"
-        echo "  ⚡️ Active alerts: $(curl -s http://localhost:9093/api/v2/alerts | jq '. | length')"
-    else
-        echo "  ❌ AlertManager not running"
-        has_error=1
-    fi
-    echo
+# --- Start Grafana server if not running (port 3400) ---
+sed -i '' 's/^http_port = .*/http_port = 3400/' /opt/grafana/grafana.ini 2>/dev/null || true
+if ! pgrep -f 'grafana server' > /dev/null; then
+  echo_color "$BLUE" "Starting Grafana server on port 3400..."
+  (grafana server --config=/opt/grafana/grafana.ini --homepath=$(brew --prefix grafana)/share/grafana &)
+  sleep 2
+  if pgrep -f 'grafana server' > /dev/null; then
+    echo_color "$GREEN" "Grafana started successfully on http://localhost:3400"
+  else
+    echo_color "$RED" "Failed to start Grafana. Please check logs or try manually: grafana server --config=/opt/grafana/grafana.ini --homepath=$(brew --prefix grafana)/share/grafana"
+  fi
+else
+  echo_color "$GREEN" "Grafana is already running."
+fi
 
-    # Check Network
-    echo "🌐 Network:"
-    # Check VLANs
-    if ifconfig | grep -q "vlan1"; then
-        echo "  ✅ Build VLAN (10.0.1.0/24) configured"
-    else
-        echo "  ❌ Build VLAN missing"
-        has_error=1
-    fi
-    if ifconfig | grep -q "vlan2"; then
-        echo "  ✅ Management VLAN (10.0.2.0/24) configured"
-    else
-        echo "  ❌ Management VLAN missing"
-        has_error=1
-    fi
-    if ifconfig | grep -q "vlan3"; then
-        echo "  ✅ Storage VLAN (10.0.3.0/24) configured"
-    else
-        echo "  ❌ Storage VLAN missing"
-        has_error=1
-    fi
-    echo
-
-    # Check NFS
-    echo "💾 Storage:"
-    if mount | grep -q "nfs"; then
-        echo "  ✅ NFS mounted"
-        echo "  📁 Cache size: $(df -h /opt/buildkite-agent/cache | tail -1 | awk '{print $2}')"
-    else
-        echo "  ❌ NFS not mounted"
-        has_error=1
-    fi
-    echo
-
-    if [ $has_error -eq 1 ]; then
-        echo "❌ Some components are not healthy. Check logs for details."
-        return 1
-    else
-        echo "✅ All components are healthy!"
-        return 0
-    fi
-}
-
-# Add health check command
-ci_health() {
-    check_stack_health
-}
-
-# Add to path
-echo 'alias ci-health="sudo $(which check_stack_health)"' >> ~/.zshrc
-
-# After setup complete, run health check
-echo "Running initial health check..."
-check_stack_health
-
-echo "✅ Setup complete!"
-echo "Next steps:"
-echo "1. Configure Grafana at http://localhost:3000"
-echo "2. Add your SSH keys to ~/.ssh/authorized_keys"
-
-# VPN-specific next steps
-case "$VPN_TYPE" in
-    wireguard)
-        echo "3. Test WireGuard connection: wg show"
-        ;;
-    tailscale)
-        echo "3. Test Tailscale connection: tailscale status"
-        ;;
-    unifi)
-        echo "3. Test UniFi VPN connection: openvpn --status"
-        ;;
-esac
-
-echo "4. Set up Tart images in /opt/tart/images"
-echo "5. Review and customize Prometheus config"
-
-# Print environment variables for future use
+# --- After starting Prometheus and Grafana, print login info ---
+echo_color "$YELLOW" "\nAccess your monitoring dashboards:"
+echo "  - Prometheus: http://localhost:9090 (no login required by default)"
+echo "  - Grafana:    http://localhost:3400"
+echo "      Username: admin"
+echo "      Password: $GRAFANA_ADMIN_PASSWORD"
 echo ""
-echo "🔑 Save these environment variables for future use:"
-echo "export VPN_TYPE='${VPN_TYPE}'"
-echo "export BUILDKITE_AGENT_TOKEN='${BUILDKITE_AGENT_TOKEN}'"
+echo_color "$YELLOW" "If you want to secure Prometheus with a password, see: https://prometheus.io/docs/prometheus/latest/configuration/https/ (not set by this script)"
 
-# VPN-specific variables
-case "$VPN_TYPE" in
-    wireguard)
-        echo "export WIREGUARD_PRIVATE_KEY='${WIREGUARD_PRIVATE_KEY}'"
-        echo "export WIREGUARD_PUBLIC_KEY='${WIREGUARD_PUBLIC_KEY}'"
-        echo "export WIREGUARD_ENDPOINT='${WIREGUARD_ENDPOINT}'"
-        ;;
-    tailscale)
-        [ -n "${TAILSCALE_AUTH_KEY-}" ] && echo "export TAILSCALE_AUTH_KEY='${TAILSCALE_AUTH_KEY}'"
-        ;;
-    unifi)
-        echo "export UNIFI_VPN_USER='${UNIFI_VPN_USER}'"
-        echo "export UNIFI_VPN_PASSWORD='${UNIFI_VPN_PASSWORD}'"
-        echo "export UNIFI_VPN_SERVER='${UNIFI_VPN_SERVER}'"
-        ;;
-esac
-
-echo "export GRAFANA_ADMIN_PASSWORD='${GRAFANA_ADMIN_PASSWORD}'"
+# --- Automatically open Prometheus and Grafana in browser ---
+open http://localhost:9090
+open http://localhost:3400

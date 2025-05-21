@@ -1250,4 +1250,18 @@ async function main() {
   }
 }
 
+// Add Mac-only filter support
+const onlyMac = process.env.ONLY_MAC === "1" || process.argv.includes("--only-mac");
+if (onlyMac) {
+  console.log("[ci.mjs] Mac-only mode enabled: only generating darwin build/test steps.");
+}
+
+// Filter build and test platforms if Mac-only mode is enabled
+const filteredBuildPlatforms = onlyMac
+  ? buildPlatforms.filter(p => p.os === "darwin")
+  : buildPlatforms;
+const filteredTestPlatforms = onlyMac
+  ? testPlatforms.filter(p => p.os === "darwin")
+  : testPlatforms;
+
 await main();
