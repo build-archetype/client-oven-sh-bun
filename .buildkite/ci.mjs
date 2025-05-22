@@ -28,6 +28,7 @@ import {
   uploadArtifact,
   writeFile,
 } from "../scripts/utils.mjs";
+import { randomUUID } from "node:crypto";
 
 /**
  * @typedef {"linux" | "darwin" | "windows"} Os
@@ -468,16 +469,16 @@ function getBuildVendorStep(platform, options) {
   };
 
   if (os === "darwin") {
+    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
       command: [
-        'VM_NAME=bun-build-$(date +%s)',
-        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME',
-        'tart run $VM_NAME --no-graphics &',
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
+        `tart run ${vmName} --no-graphics &`,
         'sleep 30',
         'echo "--- 🏗 Building vendor"',
-        `tart exec $VM_NAME -- ${getBuildCommand(platform, options)} --target dependencies`,
-        'tart delete $VM_NAME',
+        `tart exec ${vmName} -- ${getBuildCommand(platform, options)} --target dependencies`,
+        `tart delete ${vmName}`,
       ].join(' && '),
     };
   }
@@ -509,17 +510,17 @@ function getBuildCppStep(platform, options) {
   };
 
   if (os === "darwin") {
+    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
       command: [
-        'VM_NAME=bun-build-$(date +%s)',
-        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME',
-        'tart run $VM_NAME --no-graphics &',
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
+        `tart run ${vmName} --no-graphics &`,
         'sleep 30',
         'echo "--- 🏗 Building C++"',
-        `tart exec $VM_NAME -- ${command} --target bun`,
-        `tart exec $VM_NAME -- ${command} --target dependencies`,
-        'tart delete $VM_NAME',
+        `tart exec ${vmName} -- ${command} --target bun`,
+        `tart exec ${vmName} -- ${command} --target dependencies`,
+        `tart delete ${vmName}`,
       ].join(' && '),
     };
   }
@@ -565,16 +566,16 @@ function getBuildZigStep(platform, options) {
   };
 
   if (os === "darwin") {
+    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
       command: [
-        'VM_NAME=bun-build-$(date +%s)',
-        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME',
-        'tart run $VM_NAME --no-graphics &',
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
+        `tart run ${vmName} --no-graphics &`,
         'sleep 30',
         'echo "--- 🏗 Building Zig"',
-        `tart exec $VM_NAME -- ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
-        'tart delete $VM_NAME',
+        `tart exec ${vmName} -- ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
+        `tart delete ${vmName}`,
       ].join(' && '),
     };
   }
@@ -606,16 +607,16 @@ function getLinkBunStep(platform, options) {
   };
 
   if (os === "darwin") {
+    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
       command: [
-        'VM_NAME=bun-build-$(date +%s)',
-        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME',
-        'tart run $VM_NAME --no-graphics &',
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
+        `tart run ${vmName} --no-graphics &`,
         'sleep 30',
         'echo "--- 🔗 Linking Bun"',
-        `tart exec $VM_NAME -- ${getBuildCommand(platform, options)} --target bun`,
-        'tart delete $VM_NAME',
+        `tart exec ${vmName} -- ${getBuildCommand(platform, options)} --target bun`,
+        `tart delete ${vmName}`,
       ].join(' && '),
     };
   }
@@ -686,16 +687,16 @@ function getTestBunStep(platform, options, testOptions = {}) {
   };
 
   if (os === "darwin") {
+    const vmName = `bun-test-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
       command: [
-        'VM_NAME=bun-test-$(date +%s)',
-        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME',
-        'tart run $VM_NAME --no-graphics &',
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
+        `tart run ${vmName} --no-graphics &`,
         'sleep 30',
         'echo "--- 🧪 Testing"',
-        `tart exec $VM_NAME -- ./scripts/runner.node.mjs ${args.join(" ")}`,
-        'tart delete $VM_NAME',
+        `tart exec ${vmName} -- ./scripts/runner.node.mjs ${args.join(" ")}`,
+        `tart delete ${vmName}`,
       ].join(' && '),
     };
   }
