@@ -1,6 +1,18 @@
-# Bun.sh CI Infrastructure
+
 
 Self-hosted CI for Bun.sh builds, focused on macOS with plans for Windows/Linux. Replaces MacStadium/EC2 with local hardware.
+
+## Usage -- Quick Start
+
+Clone the init script and run it:
+
+```bash
+curl -O https://raw.githubusercontent.com/build-archetype/client-oven-sh-bun/feat/sam/on-prem-mac-ci/infrastructure/setup/setup-mac-server.sh
+chmod +x setup-mac-server.sh
+./setup-mac-server.sh
+```
+
+
 
 ## Build Pipeline Overview
 
