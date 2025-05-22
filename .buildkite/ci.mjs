@@ -474,7 +474,7 @@ function getBuildVendorStep(platform, options) {
       ...baseStep,
       command: [
         `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `tart run ${vmName} --no-graphics &`,
+        `(tart run ${vmName} --no-graphics) &`,
         'sleep 30',
         'echo "--- 🏗 Building vendor"',
         `tart exec ${vmName} -- ${getBuildCommand(platform, options)} --target dependencies`,
@@ -515,7 +515,7 @@ function getBuildCppStep(platform, options) {
       ...baseStep,
       command: [
         `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `tart run ${vmName} --no-graphics &`,
+        `(tart run ${vmName} --no-graphics) &`,
         'sleep 30',
         'echo "--- 🏗 Building C++"',
         `tart exec ${vmName} -- ${command} --target bun`,
@@ -571,7 +571,7 @@ function getBuildZigStep(platform, options) {
       ...baseStep,
       command: [
         `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `tart run ${vmName} --no-graphics &`,
+        `(tart run ${vmName} --no-graphics) &`,
         'sleep 30',
         'echo "--- 🏗 Building Zig"',
         `tart exec ${vmName} -- ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
@@ -612,7 +612,7 @@ function getLinkBunStep(platform, options) {
       ...baseStep,
       command: [
         `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `tart run ${vmName} --no-graphics &`,
+        `(tart run ${vmName} --no-graphics) &`,
         'sleep 30',
         'echo "--- 🔗 Linking Bun"',
         `tart exec ${vmName} -- ${getBuildCommand(platform, options)} --target bun`,
@@ -692,7 +692,7 @@ function getTestBunStep(platform, options, testOptions = {}) {
       ...baseStep,
       command: [
         `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `tart run ${vmName} --no-graphics &`,
+        `(tart run ${vmName} --no-graphics) &`,
         'sleep 30',
         'echo "--- 🧪 Testing"',
         `tart exec ${vmName} -- ./scripts/runner.node.mjs ${args.join(" ")}`,
