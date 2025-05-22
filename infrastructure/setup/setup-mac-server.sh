@@ -382,10 +382,15 @@ EOF
   esac
 fi
 
+# Get the logged-in username and hostname for agent naming
+AGENT_USER=$(whoami)
+AGENT_HOST=$(hostname)
+AGENT_NAME="${AGENT_USER}-${AGENT_HOST}"
+
 # Buildkite Agent config
 cat > /opt/buildkite-agent/buildkite-agent.cfg << EOF
 token="${BUILDKITE_AGENT_TOKEN}"
-name="%hostname-%n"
+name="${AGENT_NAME}"
 tags="os=darwin,arch=aarch64,queue=darwin,tart=true"
 build-path="/opt/buildkite-agent/builds"
 hooks-path="/opt/buildkite-agent/hooks"
@@ -482,7 +487,7 @@ echo_color "$BLUE" "Writing Buildkite agent config to $BK_CFG..."
 sudo mkdir -p /opt/homebrew/etc/buildkite-agent
 sudo tee "$BK_CFG" > /dev/null << EOF
 token="$BUILDKITE_AGENT_TOKEN"
-name="%hostname-%n"
+name="${AGENT_NAME}"
 tags="os=darwin,arch=aarch64,queue=darwin,tart=true"
 build-path="/opt/buildkite-agent/builds"
 hooks-path="/opt/buildkite-agent/hooks"
