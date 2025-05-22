@@ -1,5 +1,7 @@
 #!/bin/bash
 
+
+
 set -euo pipefail
 
 # Only show welcome/confirmation if not already in privileged (sudo/root) mode
@@ -376,7 +378,7 @@ fi
 cat > /opt/buildkite-agent/buildkite-agent.cfg << EOF
 token="${BUILDKITE_AGENT_TOKEN}"
 name="%hostname-%n"
-tags="os=macos,arch=$(uname -m)"
+tags="os=macos,arch=$(uname -m),queue=build-darwin"
 build-path="/opt/buildkite-agent/builds"
 hooks-path="/opt/buildkite-agent/hooks"
 plugins-path="/opt/buildkite-agent/plugins"
@@ -447,6 +449,13 @@ echo "  6. Review and customize Prometheus config"
 echo "  7. Buildkite is ready to run. Start the agent with: sudo -u buildkite-agent /opt/buildkite-agent/bin/buildkite-agent start"
 echo "  8. Create base VMs with: tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest sequoia-base"
 echo "  9. Start Buildkite agent with: sudo -u buildkite-agent /opt/buildkite-agent/bin/buildkite-agent start"
+echo "  10. Use these Buildkite aliases:"
+echo "      - bk-start: Start the agent"
+echo "      - bk-stop: Stop the agent"
+echo "      - bk-restart: Restart the agent"
+echo "      - bk-status: Check agent status"
+echo "      - bk-token: View the agent token"
+echo "      - bk-update-config: Edit agent config"
 echo_color "$GREEN" "\nAll done!"
 
 # --- Prompt to create all base VMs (single y/n) ---
@@ -466,12 +475,55 @@ sudo mkdir -p /opt/homebrew/etc/buildkite-agent
 sudo tee "$BK_CFG" > /dev/null << EOF
 token="$BUILDKITE_AGENT_TOKEN"
 name="%hostname-%n"
-tags="os=macos,arch=$(uname -m)"
+tags="os=macos,arch=$(uname -m),queue=build-darwin"
 build-path="/opt/buildkite-agent/builds"
 hooks-path="/opt/buildkite-agent/hooks"
 plugins-path="/opt/buildkite-agent/plugins"
 EOF
 sudo chown buildkite-agent:staff "$BK_CFG"
+
+# --- Save Buildkite token and create aliases ---
+echo_color "$BLUE" "Setting up Buildkite aliases and token storage..."
+# Create a secure directory for the token
+sudo mkdir -p /opt/buildkite-agent/.secrets
+echo "$BUILDKITE_AGENT_TOKEN" | sudo tee /opt/buildkite-agent/.secrets/token > /dev/null
+sudo chown -R buildkite-agent:staff /opt/buildkite-agent/.secrets
+sudo chmod 700 /opt/buildkite-agent/.secrets
+sudo chmod 600 /opt/buildkite-agent/.secrets/token
+
+# Create aliases for the buildkite-agent user
+sudo tee /Users/buildkite-agent/.zshrc > /dev/null << 'EOF'
+# Buildkite aliases
+alias bk='buildkite-agent'
+alias bk-start='sudo -u buildkite-agent /opt/homebrew/bin/buildkite-agent start'
+alias bk-stop='sudo -u buildkite-agent /opt/homebrew/bin/buildkite-agent stop'
+alias bk-restart='bk-stop && bk-start'
+alias bk-status='sudo -u buildkite-agent /opt/homebrew/bin/buildkite-agent status'
+alias bk-token='cat /opt/buildkite-agent/.secrets/token'
+
+# Function to update Buildkite config
+bk-update-config() {
+  sudo vim /opt/homebrew/etc/buildkite-agent/buildkite-agent.cfg
+  bk-restart
+}
+EOF
+
+# Also add aliases for the current user
+tee ~/.zshrc > /dev/null << 'EOF'
+# Buildkite aliases
+alias bk='buildkite-agent'
+alias bk-start='sudo -u buildkite-agent /opt/homebrew/bin/buildkite-agent start'
+alias bk-stop='sudo -u buildkite-agent /opt/homebrew/bin/buildkite-agent stop'
+alias bk-restart='bk-stop && bk-start'
+alias bk-status='sudo -u buildkite-agent /opt/homebrew/bin/buildkite-agent status'
+alias bk-token='sudo cat /opt/buildkite-agent/.secrets/token'
+
+# Function to update Buildkite config
+bk-update-config() {
+  sudo vim /opt/homebrew/etc/buildkite-agent/buildkite-agent.cfg
+  bk-restart
+}
+EOF
 
 # --- Start Buildkite agent as buildkite-agent user using Homebrew path and correct HOME ---
 AGENT_BIN="$(brew --prefix buildkite-agent)/bin/buildkite-agent"

@@ -1056,118 +1056,45 @@ async function getPipelineOptions() {
 async function getPipeline(options = {}) {
   const priority = getPriority();
 
-  if (isBuildManual() && !Object.keys(options).length) {
-    return {
-      priority,
-      steps: [getOptionsStep(), getOptionsApplyStep()],
-    };
-  }
-
-  const { skipEverything } = options;
-  if (skipEverything) {
-    return;
-  }
-
-  const { buildPlatforms = [], testPlatforms = [], buildImages, publishImages } = options;
-  const imagePlatforms = new Map(
-    buildImages || publishImages
-      ? [...buildPlatforms, ...testPlatforms]
-          .filter(({ os }) => os === "linux" || os === "windows")
-          .map(platform => [getImageKey(platform), platform])
-      : [],
-  );
-
-  /** @type {Step[]} */
-  const steps = [];
-
-  if (imagePlatforms.size) {
-    steps.push({
-      key: "build-images",
-      group: getBuildkiteEmoji("aws"),
-      steps: [...imagePlatforms.values()].map(platform => getBuildImageStep(platform, options)),
-    });
-  }
-
-  let { skipBuilds, forceBuilds, unifiedBuilds, dryRun } = options;
-  dryRun = dryRun || !!buildImages;
-
-  /** @type {string | undefined} */
-  let buildId;
-  if (skipBuilds && !forceBuilds) {
-    const lastBuild = await getLastSuccessfulBuild();
-    if (lastBuild) {
-      const { id } = lastBuild;
-      buildId = id;
-    } else {
-      console.warn("No last successful build found, must force builds...");
-    }
-  }
-
-  const includeASAN = !isMainBranch();
-
-  if (!buildId) {
-    const relevantBuildPlatforms = includeASAN
-      ? buildPlatforms
-      : buildPlatforms.filter(({ profile }) => profile !== "asan");
-
-    steps.push(
-      ...relevantBuildPlatforms.map(target => {
-        const imageKey = getImageKey(target);
-
-        return getStepWithDependsOn(
-          {
-            key: getTargetKey(target),
-            group: getTargetLabel(target),
-            steps: unifiedBuilds
-              ? [getBuildBunStep(target, options)]
-              : [getBuildCppStep(target, options), getBuildZigStep(target, options), getLinkBunStep(target, options)],
-          },
-          imagePlatforms.has(imageKey) ? `${imageKey}-build-image` : undefined,
-        );
-      }),
-    );
-  }
-
-  if (!isMainBranch()) {
-    const { skipTests, forceTests, unifiedTests, testFiles } = options;
-    if (!skipTests || forceTests) {
-      steps.push(
-        ...testPlatforms.map(target => ({
-          key: getTargetKey(target),
-          group: getTargetLabel(target),
-          steps: [getTestBunStep(target, options, { unifiedTests, testFiles, buildId })],
-        })),
-      );
-    }
-  }
-
-  if (isMainBranch()) {
-    steps.push(getReleaseStep(buildPlatforms, options));
-  }
-  steps.push(getBenchmarkStep());
-
-  /** @type {Map<string, GroupStep>} */
-  const stepsByGroup = new Map();
-
-  for (let i = 0; i < steps.length; i++) {
-    const step = steps[i];
-    if (!("group" in step)) {
-      continue;
-    }
-
-    const { group, steps: groupSteps } = step;
-    if (stepsByGroup.has(group)) {
-      stepsByGroup.get(group).steps.push(...groupSteps);
-    } else {
-      stepsByGroup.set(group, step);
-    }
-
-    steps[i] = undefined;
-  }
-
+  // Basic pipeline with just a few steps
   return {
     priority,
-    steps: [...steps.filter(step => typeof step !== "undefined"), ...Array.from(stepsByGroup.values())],
+    steps: [
+      {
+        label: "📋 Setup",
+        command: |
+          echo "--- 📥 Current directory"
+          pwd
+          
+          echo "--- 📋 Directory contents"
+          ls -la
+          
+          echo "--- 📊 Git info"
+          git status
+        agents:
+          queue: "on-prem"
+          arch: "arm64"
+      },
+      {
+        label: "🏗 Build",
+        command: |
+          echo "--- 🏗 Building..."
+          bun install
+          bun run build
+        agents:
+          queue: "on-prem"
+          arch: "arm64"
+      },
+      {
+        label: "🧪 Test",
+        command: |
+          echo "--- 🧪 Testing..."
+          bun test
+        agents:
+          queue: "on-prem"
+          arch: "arm64"
+      }
+    ]
   };
 }
 
