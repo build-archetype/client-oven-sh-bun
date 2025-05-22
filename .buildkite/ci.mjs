@@ -995,7 +995,7 @@ function getOptionsStep() {
  * @returns {Step}
  */
 function getOptionsApplyStep() {
-  const command = getEnv("BUILDKITE_COMMAND");
+  const command = getEnv("BUILDKITE_COMMAND", false) || "node .buildkite/ci.mjs";
   return {
     key: "options-apply",
     label: getBuildkiteEmoji("gear"),
