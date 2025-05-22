@@ -1191,54 +1191,12 @@ async function getPipeline(options = {}) {
   // Add build steps for each platform
   for (const platform of filteredBuildPlatforms) {
     const { os } = platform;
-    
     if (os === "darwin") {
-      // macOS build steps with Tart VMs
-      steps.push({
-        key: `${getTargetKey(platform)}-prepare-vm`,
-        label: `${getTargetLabel(platform)} - prepare-vm`,
-        agents: getCppAgent(platform, options),
-        command: `echo "--- 🧹 Cleanup old VMs"
-tart list | grep "bun-build-" | xargs -r tart delete
-echo "--- 📦 Create fresh VM"
-tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest bun-build-$(date +%s)
-echo "--- 🔄 Start VM"
-tart run bun-build-$(date +%s) --no-graphics &
-sleep 30  # Wait for VM to boot
-echo "--- 📝 Save VM name"
-echo "VM_NAME=bun-build-$(date +%s)" > .vm-name`,
-      });
-
-      // Build vendor dependencies
-      steps.push({
-        ...getBuildVendorStep(platform, options),
-        command: `echo "--- 🏗 Building vendor"
-tart exec $(cat .vm-name) -- ${getBuildCommand(platform, options)} --target dependencies`,
-      });
-
-      // Build C++
-      steps.push({
-        ...getBuildCppStep(platform, options),
-        command: `echo "--- 🏗 Building C++"
-tart exec $(cat .vm-name) -- ${getBuildCommand(platform, options)} --target bun
-tart exec $(cat .vm-name) -- ${getBuildCommand(platform, options)} --target dependencies`,
-      });
-
-      // Build Zig
-      steps.push({
-        ...getBuildZigStep(platform, options),
-        command: `echo "--- 🏗 Building Zig"
-tart exec $(cat .vm-name) -- ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${getBuildToolchain(platform)}`,
-      });
-
-      // Link Bun
-      steps.push({
-        ...getLinkBunStep(platform, options),
-        command: `echo "--- 🔗 Linking Bun"
-tart exec $(cat .vm-name) -- ${getBuildCommand(platform, options)} --target bun
-echo "--- 🧹 Cleanup VM"
-tart delete $(cat .vm-name)`,
-      });
+      // Only add the self-contained steps for macOS
+      steps.push(getBuildVendorStep(platform, options));
+      steps.push(getBuildCppStep(platform, options));
+      steps.push(getBuildZigStep(platform, options));
+      steps.push(getLinkBunStep(platform, options));
     } else {
       // Original steps for non-macOS platforms
       steps.push(getBuildVendorStep(platform, options));
@@ -1251,31 +1209,9 @@ tart delete $(cat .vm-name)`,
   // Add test steps for each platform
   for (const platform of filteredTestPlatforms) {
     const { os } = platform;
-    
     if (os === "darwin") {
-      // macOS test steps with Tart VMs
-      steps.push({
-        key: `${getPlatformKey(platform)}-prepare-test-vm`,
-        label: `${getPlatformLabel(platform)} - prepare-test-vm`,
-        agents: getTestAgent(platform, options),
-        command: `echo "--- 🧹 Cleanup old VMs"
-tart list | grep "bun-test-" | xargs -r tart delete
-echo "--- 📦 Create fresh VM"
-tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest bun-test-$(date +%s)
-echo "--- 🔄 Start VM"
-tart run bun-test-$(date +%s) --no-graphics &
-sleep 30  # Wait for VM to boot
-echo "--- 📝 Save VM name"
-echo "VM_NAME=bun-test-$(date +%s)" > .vm-name`,
-      });
-
-      steps.push({
-        ...getTestBunStep(platform, options),
-        command: `echo "--- 🧪 Testing"
-tart exec $(cat .vm-name) -- ./scripts/runner.node.mjs ${getTestArgs(platform, options).join(" ")}
-echo "--- 🧹 Cleanup VM"
-tart delete $(cat .vm-name)`,
-      });
+      // Only add the self-contained test step for macOS
+      steps.push(getTestBunStep(platform, options));
     } else {
       // Original test steps for non-macOS platforms
       steps.push(getTestBunStep(platform, options));
