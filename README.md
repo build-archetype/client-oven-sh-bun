@@ -397,3 +397,5 @@ Refer to the [Project > Contributing](https://bun.sh/docs/project/contributing) 
 ## License
 
 Refer to the [Project > License](https://bun.sh/docs/project/licensing) page for information about Bun's licensing.
+
+> **Note:** For public repositories, configure your Buildkite pipeline to use the HTTPS repository URL (e.g., `https://github.com/build-archetype/client-oven-sh-bun.git`) instead of the SSH URL. This avoids authentication issues during checkout, as HTTPS does not require an SSH key for public repos.

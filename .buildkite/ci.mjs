@@ -834,6 +834,7 @@ function getOptionsStep() {
     key: "options",
     block: getBuildkiteEmoji("clipboard"),
     blocked_state: "running",
+    command: "echo 'Waiting for manual input...'",
     fields: [
       {
         key: "canary",
