@@ -1,4 +1,8 @@
 steps:
+steps:
+  - label: ":buildkite: Upload steps"
+    command: "buildkite-agent pipeline upload .buildkite/test-pipeline.yml"
+
   - label: "📦 Clone and List"
     command: |
       echo "--- 📥 Cloning repository"
