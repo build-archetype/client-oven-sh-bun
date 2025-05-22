@@ -470,14 +470,15 @@ function getBuildVendorStep(platform, options) {
   if (os === "darwin") {
     return {
       ...baseStep,
-      command: `VM_NAME=bun-build-$(date +%s)
-
-tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME
-tart run $VM_NAME --no-graphics &
-sleep 30
-echo "--- 🏗 Building vendor"
-tart exec $VM_NAME -- ${getBuildCommand(platform, options)} --target dependencies
-tart delete $VM_NAME`,
+      command: [
+        'VM_NAME=bun-build-$(date +%s)',
+        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME',
+        'tart run $VM_NAME --no-graphics &',
+        'sleep 30',
+        'echo "--- 🏗 Building vendor"',
+        `tart exec $VM_NAME -- ${getBuildCommand(platform, options)} --target dependencies`,
+        'tart delete $VM_NAME',
+      ].join('\n'),
     };
   }
 
@@ -510,15 +511,16 @@ function getBuildCppStep(platform, options) {
   if (os === "darwin") {
     return {
       ...baseStep,
-      command: `VM_NAME=bun-build-$(date +%s)
-
-tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME
-tart run $VM_NAME --no-graphics &
-sleep 30
-echo "--- 🏗 Building C++"
-tart exec $VM_NAME -- ${command} --target bun
-tart exec $VM_NAME -- ${command} --target dependencies
-tart delete $VM_NAME`,
+      command: [
+        'VM_NAME=bun-build-$(date +%s)',
+        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME',
+        'tart run $VM_NAME --no-graphics &',
+        'sleep 30',
+        'echo "--- 🏗 Building C++"',
+        `tart exec $VM_NAME -- ${command} --target bun`,
+        `tart exec $VM_NAME -- ${command} --target dependencies`,
+        'tart delete $VM_NAME',
+      ].join('\n'),
     };
   }
 
@@ -565,14 +567,15 @@ function getBuildZigStep(platform, options) {
   if (os === "darwin") {
     return {
       ...baseStep,
-      command: `VM_NAME=bun-build-$(date +%s)
-
-tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME
-tart run $VM_NAME --no-graphics &
-sleep 30
-echo "--- 🏗 Building Zig"
-tart exec $VM_NAME -- ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}
-tart delete $VM_NAME`,
+      command: [
+        'VM_NAME=bun-build-$(date +%s)',
+        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME',
+        'tart run $VM_NAME --no-graphics &',
+        'sleep 30',
+        'echo "--- 🏗 Building Zig"',
+        `tart exec $VM_NAME -- ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
+        'tart delete $VM_NAME',
+      ].join('\n'),
     };
   }
 
@@ -605,14 +608,15 @@ function getLinkBunStep(platform, options) {
   if (os === "darwin") {
     return {
       ...baseStep,
-      command: `VM_NAME=bun-build-$(date +%s)
-
-tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME
-tart run $VM_NAME --no-graphics &
-sleep 30
-echo "--- 🔗 Linking Bun"
-tart exec $VM_NAME -- ${getBuildCommand(platform, options)} --target bun
-tart delete $VM_NAME`,
+      command: [
+        'VM_NAME=bun-build-$(date +%s)',
+        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME',
+        'tart run $VM_NAME --no-graphics &',
+        'sleep 30',
+        'echo "--- 🔗 Linking Bun"',
+        `tart exec $VM_NAME -- ${getBuildCommand(platform, options)} --target bun`,
+        'tart delete $VM_NAME',
+      ].join('\n'),
     };
   }
 
@@ -684,14 +688,15 @@ function getTestBunStep(platform, options, testOptions = {}) {
   if (os === "darwin") {
     return {
       ...baseStep,
-      command: `VM_NAME=bun-test-$(date +%s)
-
-tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME
-tart run $VM_NAME --no-graphics &
-sleep 30
-echo "--- 🧪 Testing"
-tart exec $VM_NAME -- ./scripts/runner.node.mjs ${args.join(" ")}
-tart delete $VM_NAME`,
+      command: [
+        'VM_NAME=bun-test-$(date +%s)',
+        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME',
+        'tart run $VM_NAME --no-graphics &',
+        'sleep 30',
+        'echo "--- 🧪 Testing"',
+        `tart exec $VM_NAME -- ./scripts/runner.node.mjs ${args.join(" ")}`,
+        'tart delete $VM_NAME',
+      ].join('\n'),
     };
   }
 
