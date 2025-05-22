@@ -386,7 +386,7 @@ fi
 cat > /opt/buildkite-agent/buildkite-agent.cfg << EOF
 token="${BUILDKITE_AGENT_TOKEN}"
 name="%hostname-%n"
-tags="os=macos,arch=aarch64,queue=darwin"
+tags="os=darwin,arch=aarch64,queue=darwin"
 build-path="/opt/buildkite-agent/builds"
 hooks-path="/opt/buildkite-agent/hooks"
 plugins-path="/opt/buildkite-agent/plugins"
@@ -483,7 +483,7 @@ sudo mkdir -p /opt/homebrew/etc/buildkite-agent
 sudo tee "$BK_CFG" > /dev/null << EOF
 token="$BUILDKITE_AGENT_TOKEN"
 name="%hostname-%n"
-tags="os=macos,arch=aarch64,queue=darwin"
+tags="os=darwin,arch=aarch64,queue=darwin"
 build-path="/opt/buildkite-agent/builds"
 hooks-path="/opt/buildkite-agent/hooks"
 plugins-path="/opt/buildkite-agent/plugins"
