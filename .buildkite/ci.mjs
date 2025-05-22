@@ -1056,43 +1056,66 @@ async function getPipelineOptions() {
 async function getPipeline(options = {}) {
   const priority = getPriority();
 
-  // Basic pipeline with just a few steps
   return {
     priority,
     steps: [
       {
         label: "📋 Setup",
-        command: |
-          echo "--- 📥 Current directory"
-          pwd
-          
-          echo "--- 📋 Directory contents"
-          ls -la
-          
-          echo "--- 📊 Git info"
-          git status
-        agents:
-          queue: "on-prem"
+        command: `echo "--- 📥 Current directory"
+pwd
+echo "--- 📋 Directory contents"
+ls -la
+echo "--- 📊 Git info"
+git status`,
+        agents: {
+          queue: "build-darwin",
           arch: "arm64"
+        }
+      },
+      {
+        label: "🖥️ Prepare VM",
+        command: `echo "--- 🧹 Cleanup old VMs"
+tart list | grep "bun-build-" | xargs -r tart delete
+echo "--- 📦 Create fresh VM"
+tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest bun-build-$(date +%s)
+echo "--- 🔄 Start VM"
+tart run bun-build-$(date +%s) --no-graphics &
+sleep 30  # Wait for VM to boot
+echo "--- 📝 Save VM name"
+echo "VM_NAME=bun-build-$(date +%s)" > .vm-name`,
+        agents: {
+          queue: "build-darwin",
+          arch: "arm64"
+        }
       },
       {
         label: "🏗 Build",
-        command: |
-          echo "--- 🏗 Building..."
-          bun install
-          bun run build
-        agents:
-          queue: "on-prem"
+        command: `echo "--- 📦 Install dependencies"
+tart exec $(cat .vm-name) -- brew install bun
+echo "--- 🏗 Building..."
+tart exec $(cat .vm-name) -- bash -c "cd /Users/buildkite-agent/builds && bun install && bun run build"`,
+        agents: {
+          queue: "build-darwin",
           arch: "arm64"
+        }
       },
       {
         label: "🧪 Test",
-        command: |
-          echo "--- 🧪 Testing..."
-          bun test
-        agents:
-          queue: "on-prem"
+        command: `echo "--- 🧪 Testing..."
+tart exec $(cat .vm-name) -- bash -c "cd /Users/buildkite-agent/builds && bun test"`,
+        agents: {
+          queue: "build-darwin",
           arch: "arm64"
+        }
+      },
+      {
+        label: "🧹 Cleanup",
+        command: `echo "--- 🧹 Cleanup VM"
+tart delete $(cat .vm-name)`,
+        agents: {
+          queue: "build-darwin",
+          arch: "arm64"
+        }
       }
     ]
   };

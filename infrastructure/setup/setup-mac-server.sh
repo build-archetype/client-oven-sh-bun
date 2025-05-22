@@ -206,8 +206,16 @@ if [ "$goto_privileged_setup" = false ]; then
     if ! command -v tailscale &> /dev/null; then
       echo_color "$RED" "Tailscale is not in PATH after installation. Aborting."; exit 1;
     fi
-    brew install buildkite/buildkite/buildkite-agent prometheus grafana terraform jq yq wget git wireguard-tools openvpn node_exporter
+    brew install buildkite/buildkite/buildkite-agent prometheus grafana terraform jq yq wget git wireguard-tools openvpn node_exporter node
     echo_color "$GREEN" "✅ Homebrew and dependencies installed."
+
+    # Verify Node.js installation
+    if ! command -v node &> /dev/null; then
+      echo_color "$RED" "Node.js installation failed or not found in PATH. Aborting."
+      exit 1
+    fi
+    NODE_VERSION=$(node --version)
+    echo_color "$GREEN" "✅ Node.js installed (version: $NODE_VERSION)"
 
     # --- Tart install via Cirrus Labs tap ---
     if ! command -v tart &> /dev/null; then
