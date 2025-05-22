@@ -36,7 +36,6 @@ import {
  * @typedef {"debian" | "ubuntu" | "alpine" | "amazonlinux"} Distro
  * @typedef {"latest" | "previous" | "oldest" | "eol"} Tier
  * @typedef {"release" | "assert" | "debug" | "asan"} Profile
- * @typedef {"m1" | "m2" | "m3" | "intel"} Chip
  */
 
 /**
@@ -46,7 +45,6 @@ import {
  * @property {Abi} [abi]
  * @property {boolean} [baseline]
  * @property {Profile} [profile]
- * @property {Chip} [chip]
  */
 
 /**
@@ -104,10 +102,8 @@ function getTargetLabel(target) {
  * @type {Platform[]}
  */
 const buildPlatforms = [
-  { os: "darwin", arch: "aarch64", chip: "m1", release: "14" },
-  { os: "darwin", arch: "aarch64", chip: "m2", release: "14" },
-  { os: "darwin", arch: "aarch64", chip: "m3", release: "14" },
-  { os: "darwin", arch: "x64", chip: "intel", release: "14" },
+  { os: "darwin", arch: "aarch64", release: "14" },
+  { os: "darwin", arch: "x64", release: "14" },
   { os: "linux", arch: "aarch64", distro: "amazonlinux", release: "2023", features: ["docker"] },
   { os: "linux", arch: "x64", distro: "amazonlinux", release: "2023", features: ["docker"] },
   { os: "linux", arch: "x64", baseline: true, distro: "amazonlinux", release: "2023", features: ["docker"] },
@@ -299,52 +295,17 @@ function getEc2Agent(platform, options, ec2Options) {
 /**
  * @param {Platform} platform
  * @param {PipelineOptions} options
- * @returns {Agent}
- */
-function getOnPremAgent(platform, options) {
-  const { os, arch, chip } = platform;
-  return {
-    queue: "on-prem",
-    os,
-    arch,
-    chip: chip || (arch === "aarch64" ? "m1" : "intel")
-  };
-}
-
-/**
- * @param {Platform} platform
- * @param {PipelineOptions} options
- * @returns {Step}
- */
-function getVMPrepStep(platform, options) {
-  return {
-    key: `${getTargetKey(platform)}-prep-vm`,
-    label: `${getTargetLabel(platform)} - prep-vm`,
-    agents: getOnPremAgent(platform, options),
-    command: [
-      'echo "--- 🗑 Cleanup old VMs"',
-      'tart list --running | xargs -I{} tart stop {}',
-      'echo "--- 📦 Restore/Create Base Images"',
-      './infrastructure/setup/create-base-vms.sh',
-      'echo "--- 💾 Cache Status"',
-      'CACHE_DIR="/opt/buildkite-agent/cache"',
-      'echo "Dependencies cache size: $(du -sh $CACHE_DIR/deps/* 2>/dev/null || echo \'Empty\')"',
-      'echo "Build cache size: $(du -sh $CACHE_DIR/builds/* 2>/dev/null || echo \'Empty\')"'
-    ].join('\n'),
-    env: getBuildEnv(platform, options)
-  };
-}
-
-/**
- * @param {Platform} platform
- * @param {PipelineOptions} options
- * @returns {Agent}
+ * @returns {string}
  */
 function getCppAgent(platform, options) {
   const { os, arch, distro } = platform;
 
   if (os === "darwin") {
-    return getOnPremAgent(platform, options);
+    return {
+      queue: `build-${os}`,
+      os,
+      arch,
+    };
   }
 
   return getEc2Agent(platform, options, {
@@ -393,9 +354,14 @@ function getTestAgent(platform, options) {
   const { os, arch } = platform;
 
   if (os === "darwin") {
-    return getOnPremAgent(platform, options);
+    return {
+      queue: `test-${os}`,
+      os,
+      arch,
+    };
   }
 
+  // TODO: `dev-server-ssr-110.test.ts` and `next-build.test.ts` run out of memory at 8GB of memory, so use 16GB instead.
   if (os === "windows") {
     return getEc2Agent(platform, options, {
       instanceType: "c7i.2xlarge",
@@ -449,10 +415,8 @@ function getBuildEnv(target, options) {
  * @returns {string}
  */
 function getBuildCommand(target, options) {
-  if (target.os === "darwin") {
-    return "./.buildkite/scripts/build.sh";
-  }
   const { profile } = target;
+
   const label = profile || "release";
   return `bun run build:${label}`;
 }
@@ -560,13 +524,7 @@ function getLinkBunStep(platform, options) {
  * @returns {Step}
  */
 function getBuildBunStep(platform, options) {
-  const steps = [];
-  
-  if (platform.os === "darwin") {
-    steps.push(getVMPrepStep(platform, options));
-  }
-  
-  steps.push({
+  return {
     key: `${getTargetKey(platform)}-build-bun`,
     label: `${getTargetLabel(platform)} - build-bun`,
     agents: getCppAgent(platform, options),
@@ -574,13 +532,6 @@ function getBuildBunStep(platform, options) {
     cancel_on_build_failing: isMergeQueue(),
     env: getBuildEnv(platform, options),
     command: getBuildCommand(platform, options),
-    depends_on: platform.os === "darwin" ? [`${getTargetKey(platform)}-prep-vm`] : undefined
-  });
-
-  return steps.length === 1 ? steps[0] : {
-    key: getTargetKey(platform),
-    group: getTargetLabel(platform),
-    steps
   };
 }
 
@@ -624,7 +575,10 @@ function getTestBunStep(platform, options, testOptions = {}) {
     cancel_on_build_failing: isMergeQueue(),
     parallelism: unifiedTests ? undefined : os === "darwin" ? 2 : 10,
     timeout_in_minutes: profile === "asan" ? 90 : 30,
-    command: getTestCommand(platform, options),
+    command:
+      os === "windows"
+        ? `node .\\scripts\\runner.node.mjs ${args.join(" ")}`
+        : `./scripts/runner.node.mjs ${args.join(" ")}`,
   };
 }
 
@@ -834,7 +788,6 @@ function getOptionsStep() {
     key: "options",
     block: getBuildkiteEmoji("clipboard"),
     blocked_state: "running",
-    command: "echo 'Waiting for manual input...'",
     fields: [
       {
         key: "canary",
@@ -995,7 +948,7 @@ function getOptionsStep() {
  * @returns {Step}
  */
 function getOptionsApplyStep() {
-  const command = getEnv("BUILDKITE_COMMAND", false) || "node .buildkite/ci.mjs";
+  const command = getEnv("BUILDKITE_COMMAND");
   return {
     key: "options-apply",
     label: getBuildkiteEmoji("gear"),
@@ -1249,19 +1202,5 @@ async function main() {
     }
   }
 }
-
-// Add Mac-only filter support
-const onlyMac = process.env.ONLY_MAC === "1" || process.argv.includes("--only-mac");
-if (onlyMac) {
-  console.log("[ci.mjs] Mac-only mode enabled: only generating darwin build/test steps.");
-}
-
-// Filter build and test platforms if Mac-only mode is enabled
-const filteredBuildPlatforms = onlyMac
-  ? buildPlatforms.filter(p => p.os === "darwin")
-  : buildPlatforms;
-const filteredTestPlatforms = onlyMac
-  ? testPlatforms.filter(p => p.os === "darwin")
-  : testPlatforms;
 
 await main();
