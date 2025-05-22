@@ -305,6 +305,7 @@ function getCppAgent(platform, options) {
       queue: `build-${os}`,
       os,
       arch,
+      tart: true,
     };
   }
 
@@ -358,6 +359,7 @@ function getTestAgent(platform, options) {
       queue: `test-${os}`,
       os,
       arch,
+      tart: true,
     };
   }
 
@@ -422,18 +424,82 @@ function getBuildCommand(target, options) {
 }
 
 /**
+ * @returns {Promise<boolean>}
+ */
+async function checkTartAvailability() {
+  try {
+    // Check if tart is installed
+    await spawnSafe(["which", "tart"]);
+    
+    // Check if we can list VMs
+    const { stdout } = await spawnSafe(["tart", "list"], { stdio: "pipe" });
+    
+    // Check if we have the base image
+    const { stdout: images } = await spawnSafe(["tart", "list", "images"], { stdio: "pipe" });
+    if (!images.includes("ghcr.io/cirruslabs/macos-sequoia-base:latest")) {
+      console.log("Base image not found, attempting to pull...");
+      await spawnSafe(["tart", "pull", "ghcr.io/cirruslabs/macos-sequoia-base:latest"]);
+    }
+    
+    return true;
+  } catch (error) {
+    console.error("Tart environment check failed:", error);
+    return false;
+  }
+}
+
+/**
  * @param {Platform} platform
  * @param {PipelineOptions} options
  * @returns {Step}
  */
 function getBuildVendorStep(platform, options) {
-  return {
+  const { os } = platform;
+  const baseStep = {
     key: `${getTargetKey(platform)}-build-vendor`,
     label: `${getTargetLabel(platform)} - build-vendor`,
     agents: getCppAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
     env: getBuildEnv(platform, options),
+  };
+
+  if (os === "darwin") {
+    return {
+      ...baseStep,
+      command: `echo "--- 🔍 Checking Tart environment"
+if ! command -v tart &> /dev/null; then
+  echo "Tart is not installed"
+  exit 1
+fi
+
+echo "--- 📋 Available Tart images"
+tart list images
+
+echo "--- 🧹 Cleanup old VMs"
+tart list | grep "bun-build-" | xargs -r tart delete
+
+echo "--- 📦 Create fresh VM"
+if ! tart list images | grep -q "ghcr.io/cirruslabs/macos-sequoia-base:latest"; then
+  echo "Base image not found, pulling..."
+  tart pull ghcr.io/cirruslabs/macos-sequoia-base:latest
+fi
+tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest bun-build-$(date +%s)
+
+echo "--- 🔄 Start VM"
+tart run bun-build-$(date +%s) --no-graphics &
+sleep 30  # Wait for VM to boot
+
+echo "--- 📝 Save VM name"
+echo "VM_NAME=bun-build-$(date +%s)" > .vm-name
+
+echo "--- 🏗 Building vendor"
+tart exec $(cat .vm-name) -- ${getBuildCommand(platform, options)} --target dependencies`,
+    };
+  }
+
+  return {
+    ...baseStep,
     command: `${getBuildCommand(platform, options)} --target dependencies`,
   };
 }
@@ -444,8 +510,9 @@ function getBuildVendorStep(platform, options) {
  * @returns {Step}
  */
 function getBuildCppStep(platform, options) {
+  const { os } = platform;
   const command = getBuildCommand(platform, options);
-  return {
+  const baseStep = {
     key: `${getTargetKey(platform)}-build-cpp`,
     label: `${getTargetLabel(platform)} - build-cpp`,
     agents: getCppAgent(platform, options),
@@ -455,9 +522,19 @@ function getBuildCppStep(platform, options) {
       BUN_CPP_ONLY: "ON",
       ...getBuildEnv(platform, options),
     },
-    // We used to build the C++ dependencies and bun in seperate steps.
-    // However, as long as the zig build takes longer than both sequentially,
-    // it's cheaper to run them in the same step. Can be revisited in the future.
+  };
+
+  if (os === "darwin") {
+    return {
+      ...baseStep,
+      command: `echo "--- 🏗 Building C++"
+tart exec $(cat .vm-name) -- ${command} --target bun
+tart exec $(cat .vm-name) -- ${command} --target dependencies`,
+    };
+  }
+
+  return {
+    ...baseStep,
     command: [`${command} --target bun`, `${command} --target dependencies`],
   };
 }
@@ -484,16 +561,29 @@ function getBuildToolchain(target) {
  * @returns {Step}
  */
 function getBuildZigStep(platform, options) {
+  const { os } = platform;
   const toolchain = getBuildToolchain(platform);
-  return {
+  const baseStep = {
     key: `${getTargetKey(platform)}-build-zig`,
     label: `${getTargetLabel(platform)} - build-zig`,
     agents: getZigAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
     env: getBuildEnv(platform, options),
-    command: `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
     timeout_in_minutes: 35,
+  };
+
+  if (os === "darwin") {
+    return {
+      ...baseStep,
+      command: `echo "--- 🏗 Building Zig"
+tart exec $(cat .vm-name) -- ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
+    };
+  }
+
+  return {
+    ...baseStep,
+    command: `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
   };
 }
 
@@ -503,7 +593,8 @@ function getBuildZigStep(platform, options) {
  * @returns {Step}
  */
 function getLinkBunStep(platform, options) {
-  return {
+  const { os } = platform;
+  const baseStep = {
     key: `${getTargetKey(platform)}-build-bun`,
     label: `${getTargetLabel(platform)} - build-bun`,
     depends_on: [`${getTargetKey(platform)}-build-cpp`, `${getTargetKey(platform)}-build-zig`],
@@ -514,6 +605,20 @@ function getLinkBunStep(platform, options) {
       BUN_LINK_ONLY: "ON",
       ...getBuildEnv(platform, options),
     },
+  };
+
+  if (os === "darwin") {
+    return {
+      ...baseStep,
+      command: `echo "--- 🔗 Linking Bun"
+tart exec $(cat .vm-name) -- ${getBuildCommand(platform, options)} --target bun
+echo "--- 🧹 Cleanup VM"
+tart delete $(cat .vm-name)`,
+    };
+  }
+
+  return {
+    ...baseStep,
     command: `${getBuildCommand(platform, options)} --target bun`,
   };
 }
@@ -566,7 +671,7 @@ function getTestBunStep(platform, options, testOptions = {}) {
     depends.push(`${getTargetKey(platform)}-build-bun`);
   }
 
-  return {
+  const baseStep = {
     key: `${getPlatformKey(platform)}-test-bun`,
     label: `${getPlatformLabel(platform)} - test-bun`,
     depends_on: depends,
@@ -575,6 +680,46 @@ function getTestBunStep(platform, options, testOptions = {}) {
     cancel_on_build_failing: isMergeQueue(),
     parallelism: unifiedTests ? undefined : os === "darwin" ? 2 : 10,
     timeout_in_minutes: profile === "asan" ? 90 : 30,
+  };
+
+  if (os === "darwin") {
+    return {
+      ...baseStep,
+      command: `echo "--- 🔍 Checking Tart environment"
+if ! command -v tart &> /dev/null; then
+  echo "Tart is not installed"
+  exit 1
+fi
+
+echo "--- 📋 Available Tart images"
+tart list images
+
+echo "--- 🧹 Cleanup old VMs"
+tart list | grep "bun-test-" | xargs -r tart delete
+
+echo "--- 📦 Create fresh VM"
+if ! tart list images | grep -q "ghcr.io/cirruslabs/macos-sequoia-base:latest"; then
+  echo "Base image not found, pulling..."
+  tart pull ghcr.io/cirruslabs/macos-sequoia-base:latest
+fi
+tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest bun-test-$(date +%s)
+
+echo "--- 🔄 Start VM"
+tart run bun-test-$(date +%s) --no-graphics &
+sleep 30  # Wait for VM to boot
+
+echo "--- 📝 Save VM name"
+echo "VM_NAME=bun-test-$(date +%s)" > .vm-name
+
+echo "--- 🧪 Testing"
+tart exec $(cat .vm-name) -- ./scripts/runner.node.mjs ${args.join(" ")}
+echo "--- 🧹 Cleanup VM"
+tart delete $(cat .vm-name)`,
+    };
+  }
+
+  return {
+    ...baseStep,
     command:
       os === "windows"
         ? `node .\\scripts\\runner.node.mjs ${args.join(" ")}`
@@ -1055,25 +1200,27 @@ async function getPipelineOptions() {
  */
 async function getPipeline(options = {}) {
   const priority = getPriority();
+  const steps = [];
 
-  return {
-    priority,
-    steps: [
-      {
-        label: "📋 Setup",
-        command: `echo "--- 📥 Current directory"
-pwd
-echo "--- 📋 Directory contents"
-ls -la
-echo "--- 📊 Git info"
-git status`,
-        agents: {
-          queue: "build-darwin",
-          arch: "arm64"
-        }
-      },
-      {
-        label: "🖥️ Prepare VM",
+  // Add options step for manual builds
+  if (isBuildManual()) {
+    steps.push(getOptionsStep());
+    steps.push(getOptionsApplyStep());
+  }
+
+  // Get filtered platforms based on options
+  const { buildPlatforms: filteredBuildPlatforms = buildPlatforms, testPlatforms: filteredTestPlatforms = testPlatforms } = options;
+
+  // Add build steps for each platform
+  for (const platform of filteredBuildPlatforms) {
+    const { os } = platform;
+    
+    if (os === "darwin") {
+      // macOS build steps with Tart VMs
+      steps.push({
+        key: `${getTargetKey(platform)}-prepare-vm`,
+        label: `${getTargetLabel(platform)} - prepare-vm`,
+        agents: getCppAgent(platform, options),
         command: `echo "--- 🧹 Cleanup old VMs"
 tart list | grep "bun-build-" | xargs -r tart delete
 echo "--- 📦 Create fresh VM"
@@ -1083,42 +1230,112 @@ tart run bun-build-$(date +%s) --no-graphics &
 sleep 30  # Wait for VM to boot
 echo "--- 📝 Save VM name"
 echo "VM_NAME=bun-build-$(date +%s)" > .vm-name`,
-        agents: {
-          queue: "build-darwin",
-          arch: "arm64"
-        }
-      },
-      {
-        label: "🏗 Build",
-        command: `echo "--- 📦 Install dependencies"
-tart exec $(cat .vm-name) -- brew install bun
-echo "--- 🏗 Building..."
-tart exec $(cat .vm-name) -- bash -c "cd /Users/buildkite-agent/builds && bun install && bun run build"`,
-        agents: {
-          queue: "build-darwin",
-          arch: "arm64"
-        }
-      },
-      {
-        label: "🧪 Test",
-        command: `echo "--- 🧪 Testing..."
-tart exec $(cat .vm-name) -- bash -c "cd /Users/buildkite-agent/builds && bun test"`,
-        agents: {
-          queue: "build-darwin",
-          arch: "arm64"
-        }
-      },
-      {
-        label: "🧹 Cleanup",
-        command: `echo "--- 🧹 Cleanup VM"
+      });
+
+      // Build vendor dependencies
+      steps.push({
+        ...getBuildVendorStep(platform, options),
+        command: `echo "--- 🏗 Building vendor"
+tart exec $(cat .vm-name) -- ${getBuildCommand(platform, options)} --target dependencies`,
+      });
+
+      // Build C++
+      steps.push({
+        ...getBuildCppStep(platform, options),
+        command: `echo "--- 🏗 Building C++"
+tart exec $(cat .vm-name) -- ${getBuildCommand(platform, options)} --target bun
+tart exec $(cat .vm-name) -- ${getBuildCommand(platform, options)} --target dependencies`,
+      });
+
+      // Build Zig
+      steps.push({
+        ...getBuildZigStep(platform, options),
+        command: `echo "--- 🏗 Building Zig"
+tart exec $(cat .vm-name) -- ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${getBuildToolchain(platform)}`,
+      });
+
+      // Link Bun
+      steps.push({
+        ...getLinkBunStep(platform, options),
+        command: `echo "--- 🔗 Linking Bun"
+tart exec $(cat .vm-name) -- ${getBuildCommand(platform, options)} --target bun
+echo "--- 🧹 Cleanup VM"
 tart delete $(cat .vm-name)`,
-        agents: {
-          queue: "build-darwin",
-          arch: "arm64"
-        }
-      }
-    ]
+      });
+    } else {
+      // Original steps for non-macOS platforms
+      steps.push(getBuildVendorStep(platform, options));
+      steps.push(getBuildCppStep(platform, options));
+      steps.push(getBuildZigStep(platform, options));
+      steps.push(getLinkBunStep(platform, options));
+    }
+  }
+
+  // Add test steps for each platform
+  for (const platform of filteredTestPlatforms) {
+    const { os } = platform;
+    
+    if (os === "darwin") {
+      // macOS test steps with Tart VMs
+      steps.push({
+        key: `${getPlatformKey(platform)}-prepare-test-vm`,
+        label: `${getPlatformLabel(platform)} - prepare-test-vm`,
+        agents: getTestAgent(platform, options),
+        command: `echo "--- 🧹 Cleanup old VMs"
+tart list | grep "bun-test-" | xargs -r tart delete
+echo "--- 📦 Create fresh VM"
+tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest bun-test-$(date +%s)
+echo "--- 🔄 Start VM"
+tart run bun-test-$(date +%s) --no-graphics &
+sleep 30  # Wait for VM to boot
+echo "--- 📝 Save VM name"
+echo "VM_NAME=bun-test-$(date +%s)" > .vm-name`,
+      });
+
+      steps.push({
+        ...getTestBunStep(platform, options),
+        command: `echo "--- 🧪 Testing"
+tart exec $(cat .vm-name) -- ./scripts/runner.node.mjs ${getTestArgs(platform, options).join(" ")}
+echo "--- 🧹 Cleanup VM"
+tart delete $(cat .vm-name)`,
+      });
+    } else {
+      // Original test steps for non-macOS platforms
+      steps.push(getTestBunStep(platform, options));
+    }
+  }
+
+  // Add release step if needed
+  if (!options.skipBuilds) {
+    steps.push(getReleaseStep(filteredBuildPlatforms, options));
+  }
+
+  // Add benchmark step
+  steps.push(getBenchmarkStep());
+
+  return {
+    priority,
+    steps,
   };
+}
+
+/**
+ * @param {Platform} platform
+ * @param {PipelineOptions} options
+ * @returns {string[]}
+ */
+function getTestArgs(platform, options) {
+  const { buildId, unifiedTests, testFiles } = options;
+  const args = [`--step=${getTargetKey(platform)}-build-bun`];
+  
+  if (buildId) {
+    args.push(`--build-id=${buildId}`);
+  }
+  if (testFiles) {
+    args.push(...testFiles.map(testFile => `--include=${testFile}`));
+  }
+  
+  return args;
 }
 
 async function main() {
