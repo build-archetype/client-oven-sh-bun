@@ -291,6 +291,7 @@ function getEc2Agent(platform, options, ec2Options) {
     "cpu-count": cpuCount,
     "threads-per-core": threadsPerCore,
     "preemptible": false,
+    queue: "darwin",
   };
 }
 
@@ -304,7 +305,7 @@ function getCppAgent(platform, options) {
 
   if (os === "darwin") {
     return {
-      queue: `build-${os}`,
+      queue: "darwin",
       os,
       arch,
       tart: true,
@@ -358,7 +359,7 @@ function getTestAgent(platform, options) {
 
   if (os === "darwin") {
     return {
-      queue: `test-${os}`,
+      queue: "darwin",
       os,
       arch,
       tart: true,
@@ -759,7 +760,7 @@ function getBuildImageStep(platform, options) {
     key: `${getImageKey(platform)}-build-image`,
     label: `${getImageLabel(platform)} - build-image`,
     agents: {
-      queue: "build-image",
+      queue: "darwin",
     },
     env: {
       DEBUG: "1",
@@ -784,7 +785,7 @@ function getReleaseStep(buildPlatforms, options) {
     key: "release",
     label: getBuildkiteEmoji("rocket"),
     agents: {
-      queue: "test-darwin",
+      queue: "darwin",
     },
     depends_on: buildPlatforms.map(platform => `${getTargetKey(platform)}-build-bun`),
     env: {
@@ -803,7 +804,7 @@ function getBenchmarkStep() {
     key: "benchmark",
     label: "📊",
     agents: {
-      queue: "build-image",
+      queue: "darwin",
     },
     depends_on: `linux-x64-build-bun`,
     command: "node .buildkite/scripts/upload-benchmark.mjs",
