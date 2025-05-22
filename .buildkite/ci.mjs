@@ -478,7 +478,7 @@ function getBuildVendorStep(platform, options) {
         'echo "--- 🏗 Building vendor"',
         `tart exec $VM_NAME -- ${getBuildCommand(platform, options)} --target dependencies`,
         'tart delete $VM_NAME',
-      ].join('\n'),
+      ].join(' && '),
     };
   }
 
@@ -520,7 +520,7 @@ function getBuildCppStep(platform, options) {
         `tart exec $VM_NAME -- ${command} --target bun`,
         `tart exec $VM_NAME -- ${command} --target dependencies`,
         'tart delete $VM_NAME',
-      ].join('\n'),
+      ].join(' && '),
     };
   }
 
@@ -575,7 +575,7 @@ function getBuildZigStep(platform, options) {
         'echo "--- 🏗 Building Zig"',
         `tart exec $VM_NAME -- ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
         'tart delete $VM_NAME',
-      ].join('\n'),
+      ].join(' && '),
     };
   }
 
@@ -616,7 +616,7 @@ function getLinkBunStep(platform, options) {
         'echo "--- 🔗 Linking Bun"',
         `tart exec $VM_NAME -- ${getBuildCommand(platform, options)} --target bun`,
         'tart delete $VM_NAME',
-      ].join('\n'),
+      ].join(' && '),
     };
   }
 
@@ -696,7 +696,7 @@ function getTestBunStep(platform, options, testOptions = {}) {
         'echo "--- 🧪 Testing"',
         `tart exec $VM_NAME -- ./scripts/runner.node.mjs ${args.join(" ")}`,
         'tart delete $VM_NAME',
-      ].join('\n'),
+      ].join(' && '),
     };
   }
 
