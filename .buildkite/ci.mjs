@@ -470,34 +470,14 @@ function getBuildVendorStep(platform, options) {
   if (os === "darwin") {
     return {
       ...baseStep,
-      command: `echo "--- 🔍 Checking Tart environment"
-if ! command -v tart &> /dev/null; then
-  echo "Tart is not installed"
-  exit 1
-fi
+      command: `VM_NAME=bun-build-$(date +%s)
 
-echo "--- 📋 Available Tart images"
-tart list images
-
-echo "--- 🧹 Cleanup old VMs"
-tart list | grep "bun-build-" | xargs -r tart delete
-
-echo "--- 📦 Create fresh VM"
-if ! tart list images | grep -q "ghcr.io/cirruslabs/macos-sequoia-base:latest"; then
-  echo "Base image not found, pulling..."
-  tart pull ghcr.io/cirruslabs/macos-sequoia-base:latest
-fi
-tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest bun-build-$(date +%s)
-
-echo "--- 🔄 Start VM"
-tart run bun-build-$(date +%s) --no-graphics &
-sleep 30  # Wait for VM to boot
-
-echo "--- 📝 Save VM name"
-echo "VM_NAME=bun-build-$(date +%s)" > .vm-name
-
+tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME
+tart run $VM_NAME --no-graphics &
+sleep 30
 echo "--- 🏗 Building vendor"
-tart exec $(cat .vm-name) -- ${getBuildCommand(platform, options)} --target dependencies`,
+tart exec $VM_NAME -- ${getBuildCommand(platform, options)} --target dependencies
+tart delete $VM_NAME`,
     };
   }
 
@@ -530,9 +510,15 @@ function getBuildCppStep(platform, options) {
   if (os === "darwin") {
     return {
       ...baseStep,
-      command: `echo "--- 🏗 Building C++"
-tart exec $(cat .vm-name) -- ${command} --target bun
-tart exec $(cat .vm-name) -- ${command} --target dependencies`,
+      command: `VM_NAME=bun-build-$(date +%s)
+
+tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME
+tart run $VM_NAME --no-graphics &
+sleep 30
+echo "--- 🏗 Building C++"
+tart exec $VM_NAME -- ${command} --target bun
+tart exec $VM_NAME -- ${command} --target dependencies
+tart delete $VM_NAME`,
     };
   }
 
@@ -579,8 +565,14 @@ function getBuildZigStep(platform, options) {
   if (os === "darwin") {
     return {
       ...baseStep,
-      command: `echo "--- 🏗 Building Zig"
-tart exec $(cat .vm-name) -- ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
+      command: `VM_NAME=bun-build-$(date +%s)
+
+tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME
+tart run $VM_NAME --no-graphics &
+sleep 30
+echo "--- 🏗 Building Zig"
+tart exec $VM_NAME -- ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}
+tart delete $VM_NAME`,
     };
   }
 
@@ -613,10 +605,14 @@ function getLinkBunStep(platform, options) {
   if (os === "darwin") {
     return {
       ...baseStep,
-      command: `echo "--- 🔗 Linking Bun"
-tart exec $(cat .vm-name) -- ${getBuildCommand(platform, options)} --target bun
-echo "--- 🧹 Cleanup VM"
-tart delete $(cat .vm-name)`,
+      command: `VM_NAME=bun-build-$(date +%s)
+
+tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME
+tart run $VM_NAME --no-graphics &
+sleep 30
+echo "--- 🔗 Linking Bun"
+tart exec $VM_NAME -- ${getBuildCommand(platform, options)} --target bun
+tart delete $VM_NAME`,
     };
   }
 
@@ -688,36 +684,14 @@ function getTestBunStep(platform, options, testOptions = {}) {
   if (os === "darwin") {
     return {
       ...baseStep,
-      command: `echo "--- 🔍 Checking Tart environment"
-if ! command -v tart &> /dev/null; then
-  echo "Tart is not installed"
-  exit 1
-fi
+      command: `VM_NAME=bun-test-$(date +%s)
 
-echo "--- 📋 Available Tart images"
-tart list images
-
-echo "--- 🧹 Cleanup old VMs"
-tart list | grep "bun-test-" | xargs -r tart delete
-
-echo "--- 📦 Create fresh VM"
-if ! tart list images | grep -q "ghcr.io/cirruslabs/macos-sequoia-base:latest"; then
-  echo "Base image not found, pulling..."
-  tart pull ghcr.io/cirruslabs/macos-sequoia-base:latest
-fi
-tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest bun-test-$(date +%s)
-
-echo "--- 🔄 Start VM"
-tart run bun-test-$(date +%s) --no-graphics &
-sleep 30  # Wait for VM to boot
-
-echo "--- 📝 Save VM name"
-echo "VM_NAME=bun-test-$(date +%s)" > .vm-name
-
+tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest $VM_NAME
+tart run $VM_NAME --no-graphics &
+sleep 30
 echo "--- 🧪 Testing"
-tart exec $(cat .vm-name) -- ./scripts/runner.node.mjs ${args.join(" ")}
-echo "--- 🧹 Cleanup VM"
-tart delete $(cat .vm-name)`,
+tart exec $VM_NAME -- ./scripts/runner.node.mjs ${args.join(" ")}
+tart delete $VM_NAME`,
     };
   }
 
