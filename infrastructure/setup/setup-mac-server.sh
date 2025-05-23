@@ -182,7 +182,7 @@ if [ "$goto_privileged_setup" = false ]; then
         echo "  Cloudflare Tunnel Token:  [hidden]" ;;
     esac
   else
-    echo "  VPN Setup:                Skipped" ;;
+    echo "  VPN Setup:                Skipped"
   fi
   echo "  Build VLAN:               $BUILD_VLAN"
   echo "  Management VLAN:          $MGMT_VLAN"
