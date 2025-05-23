@@ -473,7 +473,7 @@ function getBuildVendorStep(platform, options) {
       ...baseStep,
       plugins: [
         {
-          "cirruslabs/tart#v2.27.0": {
+          "cirruslabs/tart": {
             image: "ghcr.io/cirruslabs/macos-sequoia-base:latest",
             ssh_username: "admin",
             ssh_password: "admin",
