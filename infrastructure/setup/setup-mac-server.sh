@@ -232,6 +232,20 @@ if [ "$goto_privileged_setup" = false ]; then
       echo_color "$GREEN" "Tart is already installed."
     fi
 
+    # --- Install sshpass for Tart plugin ---
+    if ! command -v sshpass &> /dev/null; then
+      echo_color "$YELLOW" "sshpass is not installed. Installing from cirruslabs/cli tap..."
+      brew install cirruslabs/cli/sshpass
+      if command -v sshpass &> /dev/null; then
+        echo_color "$GREEN" "✅ sshpass installed successfully."
+      else
+        echo_color "$RED" "sshpass installation failed. Please install manually: brew install cirruslabs/cli/sshpass"
+        exit 1
+      fi
+    else
+      echo_color "$GREEN" "sshpass is already installed."
+    fi
+
     echo_color "$BLUE" "Switching to root for system configuration..."
     export_vars="BUILDKITE_AGENT_TOKEN=\"$BUILDKITE_AGENT_TOKEN\" GRAFANA_ADMIN_PASSWORD=\"$GRAFANA_ADMIN_PASSWORD\" VPN_ENABLED=\"$VPN_ENABLED\" BUILD_VLAN=\"$BUILD_VLAN\" MGMT_VLAN=\"$MGMT_VLAN\" STORAGE_VLAN=\"$STORAGE_VLAN\""
     if [ "$VPN_ENABLED" = true ]; then

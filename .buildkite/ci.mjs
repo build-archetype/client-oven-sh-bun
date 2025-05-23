@@ -473,17 +473,20 @@ function getBuildVendorStep(platform, options) {
       ...baseStep,
       plugins: [
         {
-          "cirruslabs/tart#main": {
+          "cirruslabs/tart#v0.2.0": {
             image: "ghcr.io/cirruslabs/macos-sequoia-base:latest",
-            cpu: 4,
-            memory: 8192,
-            "disk-size": 50,
-            timeout: 300
+            ssh_username: "admin",
+            ssh_password: "admin",
+            headless: true,
+            always_pull: true,
+            softnet: false
           }
         }
       ],
       command: [
         'echo "--- 🏗 Building vendor"',
+        'tart list',
+        'tart list images',
         `${getBuildCommand(platform, options)} --target dependencies`
       ]
     };
@@ -520,17 +523,20 @@ function getBuildCppStep(platform, options) {
       ...baseStep,
       plugins: [
         {
-          "cirruslabs/tart#main": {
+          "cirruslabs/tart#v0.2.0": {
             image: "ghcr.io/cirruslabs/macos-sequoia-base:latest",
-            cpu: 4,
-            memory: 8192,
-            "disk-size": 50,
-            timeout: 300
+            ssh_username: "admin",
+            ssh_password: "admin",
+            headless: true,
+            always_pull: true,
+            softnet: false
           }
         }
       ],
       command: [
         'echo "--- 🏗 Building C++"',
+        'tart list',
+        'tart list images',
         `${command} --target bun`,
         `${command} --target dependencies`
       ]
@@ -703,17 +709,20 @@ function getTestBunStep(platform, options, testOptions = {}) {
       ...baseStep,
       plugins: [
         {
-          "cirruslabs/tart#main": {
+          "cirruslabs/tart#v0.2.0": {
             image: "ghcr.io/cirruslabs/macos-sequoia-base:latest",
-            cpu: 4,
-            memory: 8192,
-            "disk-size": 50,
-            timeout: 300
+            ssh_username: "admin",
+            ssh_password: "admin",
+            headless: true,
+            always_pull: true,
+            softnet: false
           }
         }
       ],
       command: [
         'echo "--- 🧪 Testing"',
+        'tart list',
+        'tart list images',
         `./scripts/runner.node.mjs ${args.join(" ")}`
       ]
     };
