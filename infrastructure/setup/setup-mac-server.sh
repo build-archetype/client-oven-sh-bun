@@ -459,7 +459,7 @@ cat > /etc/ssh/sshd_config.d/build-server.conf << EOF
 PermitRootLogin no
 PasswordAuthentication no
 PubkeyAuthentication yes
-AllowGroups buildkite-agent wheel
+AllowGroups wheel
 EOF
 
 # --- Final summary and next steps ---
@@ -494,9 +494,9 @@ else
 fi
 echo "  5. Set up Tart images in /opt/tart/images"
 echo "  6. Review and customize Prometheus config"
-echo "  7. Buildkite is ready to run. Start the agent with: sudo -u buildkite-agent /opt/buildkite-agent/bin/buildkite-agent start"
+echo "  7. Buildkite is ready to run. Start the agent with: $AGENT_BIN start"
 echo "  8. Create base VMs with: tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest sequoia-base"
-echo "  9. Start Buildkite agent with: sudo -u buildkite-agent /opt/buildkite-agent/bin/buildkite-agent start"
+echo "  9. Start Buildkite agent with: $AGENT_BIN start"
 echo "  10. Use these Buildkite aliases:"
 echo "      - bk-start: Start the agent"
 echo "      - bk-stop: Stop the agent"
@@ -528,9 +528,9 @@ build-path="/opt/buildkite-agent/builds"
 hooks-path="/opt/buildkite-agent/hooks"
 plugins-path="/opt/buildkite-agent/plugins"
 EOF
-sudo chown buildkite-agent:staff "$BK_CFG"
+sudo chown $(whoami):staff "$BK_CFG"
 
-# --- Start Buildkite agent as buildkite-agent user using Homebrew path and correct HOME ---
+# --- Start Buildkite agent using Homebrew path ---
 AGENT_BIN="$(brew --prefix buildkite-agent)/bin/buildkite-agent"
 echo_color "$BLUE" "Starting Buildkite agent using $AGENT_BIN..."
 sudo mkdir -p /opt/buildkite-agent/builds
