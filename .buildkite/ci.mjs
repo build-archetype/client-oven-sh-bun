@@ -465,33 +465,34 @@ function getBuildVendorStep(platform, options) {
     agents: getCppAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
-    env: getBuildEnv(platform, options),
+    env: getBuildEnv(platform, options)
   };
 
   if (os === "darwin") {
-    const vmName = `bun-build-${Date.now()}`;
+    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
       command: [
-        `tart list | awk '/stopped/ && $1 == "local" {print $2}' | xargs -n1 tart delete`,
-        `log stream --predicate 'process == "tart" OR process CONTAINS "Virtualization"' > tart.log 2>&1 &`,
-        `TART_LOG_PID=$!`,
-        `trap 'kill $TART_LOG_PID || true; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart --version`,
-        `uname -m`,
-        `which tart`,
-        `ls -l $(which tart)`,
-        `tart list`,
-        `tart pull ghcr.io/cirruslabs/macos-sequoia-base:latest`,
-        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
+        'TART_LOG_PID=$!',
+        `trap 'kill $TART_LOG_PID || true; tart delete ${vmName} || true; buildkite-agent artifact upload tart.log || true' EXIT`,
+        'tart --version || echo "Failed to get tart version"',
+        'uname -m || echo "Failed to get architecture"',
+        'which tart || echo "Failed to find tart"',
+        'ls -l $(which tart) || echo "Failed to list tart"',
+        'tart list || echo "Failed to list VMs"',
+        'tart pull ghcr.io/cirruslabs/macos-sequoia-base:latest || echo "Failed to pull base image"',
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName} || echo "Failed to clone VM"`,
         `(tart run ${vmName} --no-graphics) &`,
         'sleep 30',
         'echo "--- 🏗 Building vendor"',
+        'echo "Waiting for VM to be healthy..."',
+        `until tart exec ${vmName} -- echo "VM is healthy" > /dev/null 2>&1; do sleep 10; done`,
         `tart exec ${vmName} -- sh -c '${getBuildCommand(platform, options)} --target dependencies 2>&1 | tee /tmp/build.log'`,
         `tart copy-from ${vmName}:/tmp/build.log ./build.log || echo "No build log found"`,
-        `buildkite-agent artifact upload build.log || echo "No build log to upload"`,
-        `tart delete ${vmName}`,
-      ],
+        'buildkite-agent artifact upload build.log || echo "No build log to upload"'
+      ]
     };
   }
 
@@ -517,8 +518,8 @@ function getBuildCppStep(platform, options) {
     cancel_on_build_failing: isMergeQueue(),
     env: {
       BUN_CPP_ONLY: "ON",
-      ...getBuildEnv(platform, options),
-    },
+      ...getBuildEnv(platform, options)
+    }
   };
 
   if (os === "darwin") {
@@ -526,14 +527,25 @@ function getBuildCppStep(platform, options) {
     return {
       ...baseStep,
       command: [
-        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
+        'TART_LOG_PID=$!',
+        `trap 'kill $TART_LOG_PID || true; tart delete ${vmName} || true; buildkite-agent artifact upload tart.log || true' EXIT`,
+        'tart --version || echo "Failed to get tart version"',
+        'uname -m || echo "Failed to get architecture"',
+        'which tart || echo "Failed to find tart"',
+        'ls -l $(which tart) || echo "Failed to list tart"',
+        'tart list || echo "Failed to list VMs"',
+        'tart pull ghcr.io/cirruslabs/macos-sequoia-base:latest || echo "Failed to pull base image"',
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName} || echo "Failed to clone VM"`,
         `(tart run ${vmName} --no-graphics) &`,
         'sleep 30',
         'echo "--- 🏗 Building C++"',
-        `tart exec ${vmName} -- ${command} --target bun`,
-        `tart exec ${vmName} -- ${command} --target dependencies`,
-        `tart delete ${vmName}`,
-      ],
+        'echo "Waiting for VM to be healthy..."',
+        `until tart exec ${vmName} -- echo "VM is healthy" > /dev/null 2>&1; do sleep 10; done`,
+        `tart exec ${vmName} -- sh -c '${command} --target bun'`,
+        `tart exec ${vmName} -- sh -c '${command} --target dependencies'`
+      ]
     };
   }
 
