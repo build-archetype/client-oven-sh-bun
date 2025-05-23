@@ -2694,11 +2694,18 @@ export function toYaml(obj, indent = 0) {
       if (key === "command") {
         // Special handling for command arrays in pipeline steps
         if (value.length === 1) {
-          result += `${spaces}${key}: ${value[0]}\n`;
+          const lines = value[0].split('\n');
+          if (lines.length === 1) {
+            result += `${spaces}${key}: ${value[0]}\n`;
+          } else {
+            result += `${spaces}${key}: |\n`;
+            lines.forEach(line => {
+              result += `${spaces}  ${line}\n`;
+            });
+          }
         } else {
           result += `${spaces}${key}:\n`;
           value.forEach(item => {
-            // Properly indent multi-line commands
             const lines = item.split('\n');
             if (lines.length === 1) {
               result += `${spaces}- ${item}\n`;
