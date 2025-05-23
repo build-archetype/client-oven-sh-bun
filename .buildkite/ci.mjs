@@ -499,7 +499,7 @@ function getBuildVendorStep(platform, options) {
         '  echo "VM status before health check:"',
         '  tart list | grep "${vmName}" || echo "VM not found in list"',
         '  echo "Attempting to connect to VM..."',
-        '  if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) echo "VM is healthy" > /dev/null 2>&1; then',
+        '  if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") echo "VM is healthy" > /dev/null 2>&1; then',
         '    echo "VM is healthy"',
         '    break',
         '  fi',
@@ -520,13 +520,13 @@ function getBuildVendorStep(platform, options) {
         '  attempt=$((attempt + 1))',
         'done',
         'echo "Setting up workspace in VM..."',
-        'sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) "sudo umount \"/Volumes/My Shared Files\" || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"',
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") "sudo umount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
         'echo "Running build command..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) 'cd ~/workspace/workspace && echo "Current directory: $(pwd)" && echo "Directory contents:" && ls -la && echo "Environment:" && env && echo "Running build command..." && ${getBuildCommand(platform, options)} --target dependencies 2>&1 | tee /tmp/build.log'`,
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") 'cd ~/workspace/workspace && echo "Current directory: $(pwd)" && echo "Directory contents:" && ls -la && echo "Environment:" && env && echo "Running build command..." && ${getBuildCommand(platform, options)} --target dependencies 2>&1 | tee /tmp/build.log'`,
         'echo "Build completed. Uploading logs..."',
         'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
         'echo "VM console output:"',
-        'tart console ${vmName}'
+        `tart console "${vmName}"`
       ]
     };
   }
@@ -588,7 +588,7 @@ function getBuildCppStep(platform, options) {
         '  echo "VM status before health check:"',
         '  tart list | grep "${vmName}" || echo "VM not found in list"',
         '  echo "Attempting to connect to VM..."',
-        '  if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) echo "VM is healthy" > /dev/null 2>&1; then',
+        '  if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") echo "VM is healthy" > /dev/null 2>&1; then',
         '    echo "VM is healthy"',
         '    break',
         '  fi',
@@ -609,10 +609,10 @@ function getBuildCppStep(platform, options) {
         '  attempt=$((attempt + 1))',
         'done',
         'echo "Setting up workspace in VM..."',
-        'sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) "sudo umount \"/Volumes/My Shared Files\" || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"',
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") "sudo umount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
         'echo "Running build commands..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) 'cd ~/workspace/workspace && ${command} --target bun'`,
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) 'cd ~/workspace/workspace && ${command} --target dependencies'`
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") 'cd ~/workspace/workspace && ${command} --target bun'`,
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") 'cd ~/workspace/workspace && ${command} --target dependencies'`
       ]
     };
   }
@@ -677,7 +677,7 @@ function getBuildZigStep(platform, options) {
         '  echo "VM status before health check:"',
         '  tart list | grep "${vmName}" || echo "VM not found in list"',
         '  echo "Attempting to connect to VM..."',
-        '  if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) echo "VM is healthy" > /dev/null 2>&1; then',
+        '  if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") echo "VM is healthy" > /dev/null 2>&1; then',
         '    echo "VM is healthy"',
         '    break',
         '  fi',
@@ -698,9 +698,9 @@ function getBuildZigStep(platform, options) {
         '  attempt=$((attempt + 1))',
         'done',
         'echo "Setting up workspace in VM..."',
-        'sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) "sudo umount \"/Volumes/My Shared Files\" || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"',
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") "sudo umount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
         'echo "Running build command..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) 'cd ~/workspace/workspace && ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}'`,
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") 'cd ~/workspace/workspace && ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}'`,
         `tart delete ${vmName}`,
       ],
     };
@@ -752,7 +752,7 @@ function getLinkBunStep(platform, options) {
         '  echo "VM status before health check:"',
         '  tart list | grep "${vmName}" || echo "VM not found in list"',
         '  echo "Attempting to connect to VM..."',
-        '  if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) echo "VM is healthy" > /dev/null 2>&1; then',
+        '  if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") echo "VM is healthy" > /dev/null 2>&1; then',
         '    echo "VM is healthy"',
         '    break',
         '  fi',
@@ -773,9 +773,9 @@ function getLinkBunStep(platform, options) {
         '  attempt=$((attempt + 1))',
         'done',
         'echo "Setting up workspace in VM..."',
-        'sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) "sudo umount \"/Volumes/My Shared Files\" || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"',
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") "sudo umount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
         'echo "Running build command..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) 'cd ~/workspace/workspace && ${getBuildCommand(platform, options)} --target bun'`,
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") 'cd ~/workspace/workspace && ${getBuildCommand(platform, options)} --target bun'`,
         `tart delete ${vmName}`,
       ],
     };
@@ -866,7 +866,7 @@ function getTestBunStep(platform, options, testOptions = {}) {
         '  echo "VM status before health check:"',
         '  tart list | grep "${vmName}" || echo "VM not found in list"',
         '  echo "Attempting to connect to VM..."',
-        '  if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) echo "VM is healthy" > /dev/null 2>&1; then',
+        '  if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") echo "VM is healthy" > /dev/null 2>&1; then',
         '    echo "VM is healthy"',
         '    break',
         '  fi',
@@ -887,9 +887,9 @@ function getTestBunStep(platform, options, testOptions = {}) {
         '  attempt=$((attempt + 1))',
         'done',
         'echo "Setting up workspace in VM..."',
-        'sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) "sudo umount \"/Volumes/My Shared Files\" || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"',
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") "sudo umount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
         'echo "Running tests..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) 'cd ~/workspace/workspace && ./scripts/runner.node.mjs ${args.join(" ")}'`,
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") 'cd ~/workspace/workspace && ./scripts/runner.node.mjs ${args.join(" ")}'`,
         `tart delete ${vmName}`,
       ],
     };
