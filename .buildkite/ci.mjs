@@ -487,7 +487,9 @@ function getBuildVendorStep(platform, options) {
         `(tart run ${vmName} --no-graphics) &`,
         'sleep 30',
         'echo "--- 🏗 Building vendor"',
-        `tart exec ${vmName} -- ${getBuildCommand(platform, options)} --target dependencies`,
+        `tart exec ${vmName} -- sh -c '${getBuildCommand(platform, options)} --target dependencies 2>&1 | tee /tmp/build.log'`,
+        `tart copy-from ${vmName}:/tmp/build.log ./build.log || echo "No build log found"`,
+        `buildkite-agent artifact upload build.log || echo "No build log to upload"`,
         `tart delete ${vmName}`,
       ],
     };
