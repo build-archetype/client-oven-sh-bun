@@ -469,21 +469,23 @@ function getBuildVendorStep(platform, options) {
   };
 
   if (os === "darwin") {
-    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
-      command: [
-        `which tart`,
-        `ls -l $(which tart)`,
-        `tart --version`,
-        `tart list`,
-        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `(tart run ${vmName} --no-graphics) &`,
-        'sleep 30',
-        'echo "--- 🏗 Building vendor"',
-        `tart exec ${vmName} -- ${getBuildCommand(platform, options)} --target dependencies`,
-        `tart delete ${vmName}`,
+      plugins: [
+        {
+          "cirruslabs/tart#main": {
+            image: "ghcr.io/cirruslabs/macos-sequoia-base:latest",
+            cpu: 4,
+            memory: 8192,
+            "disk-size": 50,
+            timeout: 300
+          }
+        }
       ],
+      command: [
+        'echo "--- 🏗 Building vendor"',
+        `${getBuildCommand(platform, options)} --target dependencies`
+      ]
     };
   }
 
@@ -514,18 +516,24 @@ function getBuildCppStep(platform, options) {
   };
 
   if (os === "darwin") {
-    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
-      command: [
-        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `(tart run ${vmName} --no-graphics) &`,
-        'sleep 30',
-        'echo "--- 🏗 Building C++"',
-        `tart exec ${vmName} -- ${command} --target bun`,
-        `tart exec ${vmName} -- ${command} --target dependencies`,
-        `tart delete ${vmName}`,
+      plugins: [
+        {
+          "cirruslabs/tart#main": {
+            image: "ghcr.io/cirruslabs/macos-sequoia-base:latest",
+            cpu: 4,
+            memory: 8192,
+            "disk-size": 50,
+            timeout: 300
+          }
+        }
       ],
+      command: [
+        'echo "--- 🏗 Building C++"',
+        `${command} --target bun`,
+        `${command} --target dependencies`
+      ]
     };
   }
 
@@ -691,17 +699,23 @@ function getTestBunStep(platform, options, testOptions = {}) {
   };
 
   if (os === "darwin") {
-    const vmName = `bun-test-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
-      command: [
-        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `(tart run ${vmName} --no-graphics) &`,
-        'sleep 30',
-        'echo "--- 🧪 Testing"',
-        `tart exec ${vmName} -- ./scripts/runner.node.mjs ${args.join(" ")}`,
-        `tart delete ${vmName}`,
+      plugins: [
+        {
+          "cirruslabs/tart#main": {
+            image: "ghcr.io/cirruslabs/macos-sequoia-base:latest",
+            cpu: 4,
+            memory: 8192,
+            "disk-size": 50,
+            timeout: 300
+          }
+        }
       ],
+      command: [
+        'echo "--- 🧪 Testing"',
+        `./scripts/runner.node.mjs ${args.join(" ")}`
+      ]
     };
   }
 
