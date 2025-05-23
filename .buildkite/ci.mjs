@@ -473,8 +473,12 @@ function getBuildVendorStep(platform, options) {
     return {
       ...baseStep,
       command: [
-        'tart --version',
-        'tart list',
+        `brew uninstall tart`,
+        `brew untap cirruslabs/tart`,
+        `brew install cirruslabs/cli/tart`,
+        `which tart`,
+        `tart --version`,
+        `tart list`,
         `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
         `(tart run ${vmName} --no-graphics) &`,
         'sleep 30',
@@ -516,8 +520,6 @@ function getBuildCppStep(platform, options) {
     return {
       ...baseStep,
       command: [
-        'tart --version',
-        'tart list',
         `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
         `(tart run ${vmName} --no-graphics) &`,
         'sleep 30',
@@ -574,8 +576,6 @@ function getBuildZigStep(platform, options) {
     return {
       ...baseStep,
       command: [
-        'tart --version',
-        'tart list',
         `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
         `(tart run ${vmName} --no-graphics) &`,
         'sleep 30',
@@ -617,8 +617,6 @@ function getLinkBunStep(platform, options) {
     return {
       ...baseStep,
       command: [
-        'tart --version',
-        'tart list',
         `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
         `(tart run ${vmName} --no-graphics) &`,
         'sleep 30',
@@ -699,8 +697,6 @@ function getTestBunStep(platform, options, testOptions = {}) {
     return {
       ...baseStep,
       command: [
-        'tart --version',
-        'tart list',
         `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
         `(tart run ${vmName} --no-graphics) &`,
         'sleep 30',
