@@ -102,13 +102,22 @@ if [ "$goto_privileged_setup" = false ]; then
     eval "$var_name=\"$input\""
   }
 
-  # 0. VPN setup optional
+  # 0. VPN type selection (always shown)
   while true; do
-    read -rp "Do you want to configure VPN access (WireGuard/Tailscale/UniFi)? (y/n): " vpn_enable
-    case "$(echo "$vpn_enable" | tr '[:upper:]' '[:lower:]')" in
-      y|yes) VPN_ENABLED=true; break ;;
-      n|no) VPN_ENABLED=false; break ;;
-      *) echo_color "$YELLOW" "Please enter 'y' or 'n'." ;;
+    echo_color "$BLUE" "Select VPN type:"
+    echo "  0) None"
+    echo "  1) Tailscale (default)"
+    echo "  2) WireGuard"
+    echo "  3) UniFi VPN"
+    echo "  4) Cloudflare Tunnel"
+    read -rp "Choice [1]: " vpn_choice
+    case "${vpn_choice:-1}" in
+      0) VPN_TYPE="none"; VPN_ENABLED=false; break ;;
+      1|"") VPN_TYPE="tailscale"; VPN_ENABLED=true; break ;;
+      2) VPN_TYPE="wireguard"; VPN_ENABLED=true; break ;;
+      3) VPN_TYPE="unifi"; VPN_ENABLED=true; break ;;
+      4) VPN_TYPE="cloudflare"; VPN_ENABLED=true; break ;;
+      *) echo_color "$YELLOW" "Invalid choice. Please enter 0, 1, 2, 3, or 4." ;;
     esac
   done
 
@@ -118,28 +127,9 @@ if [ "$goto_privileged_setup" = false ]; then
   # 2. Grafana password
   prompt_secret GRAFANA_ADMIN_PASSWORD "Enter Grafana admin password"
 
-  # 3. VPN type and details (if enabled)
+  # 3. VPN details (if enabled)
   if [ "$VPN_ENABLED" = true ]; then
-    while true; do
-      echo_color "$BLUE" "Select VPN type:"
-      echo "  0) None"
-      echo "  1) Tailscale (default)"
-      echo "  2) WireGuard"
-      echo "  3) UniFi VPN"
-      echo "  4) Cloudflare Tunnel"
-      read -rp "Choice [1]: " vpn_choice
-      case "${vpn_choice:-1}" in
-        0) VPN_TYPE="none"; break ;;
-        1|"") VPN_TYPE="tailscale"; break ;;
-        2) VPN_TYPE="wireguard"; break ;;
-        3) VPN_TYPE="unifi"; break ;;
-        4) VPN_TYPE="cloudflare"; break ;;
-        *) echo_color "$YELLOW" "Invalid choice. Please enter 0, 1, 2, 3, or 4." ;;
-      esac
-    done
     case "$VPN_TYPE" in
-      none)
-        VPN_ENABLED=false ;;
       wireguard)
         prompt_secret WIREGUARD_PRIVATE_KEY "Enter WireGuard private key"
         prompt_secret WIREGUARD_PUBLIC_KEY "Enter WireGuard peer public key"
