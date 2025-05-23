@@ -473,9 +473,6 @@ function getBuildVendorStep(platform, options) {
     return {
       ...baseStep,
       command: [
-        `brew uninstall tart`,
-        `brew untap cirruslabs/tart`,
-        `brew install cirruslabs/cli/tart`,
         `which tart`,
         `tart --version`,
         `tart list`,
