@@ -499,7 +499,7 @@ if [ "$VPN_ENABLED" = true ]; then
       echo "  4. Test Cloudflare Tunnel connection: cloudflared tunnel info" ;;
   esac
 else
-  echo "  4. VPN setup was skipped (local access only)" ;
+  echo "  4. VPN setup was skipped (local access only)"
 fi
 echo "  5. Set up Tart images in /opt/tart/images"
 echo "  6. Review and customize Prometheus config"
