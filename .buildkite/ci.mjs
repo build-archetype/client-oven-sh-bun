@@ -475,6 +475,10 @@ function getBuildVendorStep(platform, options) {
       command: [
         `tart list | awk '/stopped/ && $1 == "local" {print $2}' | xargs -n1 tart delete`,
         `which tart`,
+        `file $(which tart)`,
+        `tart --version`,
+        `uname -m`,
+        `which tart`,
         `ls -l $(which tart)`,
         `tart --version`,
         `tart list`,
