@@ -473,13 +473,14 @@ function getBuildVendorStep(platform, options) {
       ...baseStep,
       plugins: [
         {
-          "cirruslabs/tart#v0.2.0": {
+          "cirruslabs/tart#v2.27.0": {
             image: "ghcr.io/cirruslabs/macos-sequoia-base:latest",
             ssh_username: "admin",
             ssh_password: "admin",
             headless: true,
             always_pull: true,
-            softnet: false
+            softnet: false,
+            run: true
           }
         }
       ],
@@ -487,6 +488,7 @@ function getBuildVendorStep(platform, options) {
         'echo "--- 🏗 Building vendor"',
         'tart list',
         'tart list images',
+        'tart status',
         `${getBuildCommand(platform, options)} --target dependencies`
       ]
     };

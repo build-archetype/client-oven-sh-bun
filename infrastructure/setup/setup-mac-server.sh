@@ -396,6 +396,34 @@ EOF
   esac
 fi
 
+# --- Cloudflare Tunnel Setup ---
+echo_color "$BLUE" "Setting up Cloudflare Tunnel..."
+
+# Install cloudflared if not present
+if ! command -v cloudflared &> /dev/null; then
+  echo_color "$YELLOW" "Installing cloudflared..."
+  brew install cloudflared
+  if ! command -v cloudflared &> /dev/null; then
+    echo_color "$RED" "Failed to install cloudflared. Please install manually: brew install cloudflared"
+    exit 1
+  fi
+fi
+
+# Prompt for tunnel token
+if [ -z "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
+  echo_color "$YELLOW" "Please provide your Cloudflare Tunnel token:"
+  read -r CLOUDFLARE_TUNNEL_TOKEN
+fi
+
+# Install the service with the token
+echo_color "$BLUE" "Installing Cloudflare Tunnel service..."
+sudo cloudflared service install "$CLOUDFLARE_TUNNEL_TOKEN"
+
+echo_color "$GREEN" "✅ Cloudflare Tunnel setup complete."
+echo_color "$BLUE" "You can check the status with:"
+echo "  - Check service: launchctl list | grep cloudflare"
+echo "  - Check tunnel status: cloudflared tunnel info"
+
 # Get the logged-in username and hostname for agent naming
 AGENT_USER=$(whoami)
 AGENT_HOST=$(hostname)
