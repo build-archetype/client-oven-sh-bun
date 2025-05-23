@@ -469,15 +469,16 @@ function getBuildVendorStep(platform, options) {
   };
 
   if (os === "darwin") {
-    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
+    const vmName = `bun-build-${Date.now()}`;
     return {
       ...baseStep,
       command: [
-        `tart list | awk '/stopped/ {print $2}' | xargs -n1 tart delete`,
+        `tart list | awk '/stopped/ && $1 == "local" {print $2}' | xargs -n1 tart delete`,
         `which tart`,
         `ls -l $(which tart)`,
         `tart --version`,
         `tart list`,
+        `tart pull ghcr.io/cirruslabs/macos-sequoia-base:latest`,
         `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
         `(tart run ${vmName} --no-graphics) &`,
         'sleep 30',
