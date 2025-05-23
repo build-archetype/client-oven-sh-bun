@@ -29,6 +29,7 @@ import {
   writeFile,
 } from "../scripts/utils.mjs";
 import { randomUUID } from "node:crypto";
+import fs from "fs";
 
 /**
  * @typedef {"linux" | "darwin" | "windows"} Os
@@ -422,7 +423,6 @@ function getBuildEnv(target, options) {
  */
 function getBuildCommand(target, options) {
   const { profile } = target;
-
   const label = profile || "release";
   return `bun run build:${label}`;
 }
@@ -514,27 +514,28 @@ function getBuildVendorStep(platform, options) {
 
   if (os === "darwin") {
     const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
+    const buildCommand = getBuildCommand(platform, options);
     return {
       ...baseStep,
       command: [
         'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
-        'trap \'kill $TART_LOG_PID || true; tart delete ${vmName} || true; buildkite-agent artifact upload tart.log || true\' EXIT',
+        `trap 'kill $TART_LOG_PID || true; tart delete ${vmName} || true; buildkite-agent artifact upload tart.log || true' EXIT`,
         'tart --version || echo "Failed to get tart version"',
         'uname -m || echo "Failed to get architecture"',
         'which tart || echo "Failed to find tart"',
         'ls -l $(which tart) || echo "Failed to list tart"',
         'tart list || echo "Failed to list VMs"',
         'tart pull ghcr.io/cirruslabs/macos-sequoia-base:latest || echo "Failed to pull base image"',
-        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName} || echo "Failed to clone VM"',
-        '(tart run ${vmName} --no-graphics) &',
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName} || echo "Failed to clone VM"`,
+        `(tart run ${vmName} --no-graphics) &`,
         'sleep 30',
         'echo "--- 🏗 Building vendor"',
         'echo "Waiting for VM to be healthy..."',
-        'for i in {1..5}; do if tart exec ${vmName} -- echo "VM is healthy" > /dev/null 2>&1; then echo "VM is healthy"; break; fi; if [ $i -eq 5 ]; then echo "VM failed to become healthy after 5 attempts"; exit 1; fi; echo "Attempt $i: VM not ready yet, waiting..."; sleep 10; done',
-        'tart exec ${vmName} -- sh -c \'${getBuildCommand(platform, options)} --target dependencies 2>&1 | tee /tmp/build.log\'',
-        'tart copy-from ${vmName}:/tmp/build.log ./build.log || echo "No build log found"',
+        `for i in {1..5}; do if tart exec ${vmName} -- echo "VM is healthy" > /dev/null 2>&1; then echo "VM is healthy"; break; fi; if [ $i -eq 5 ]; then echo "VM failed to become healthy after 5 attempts"; exit 1; fi; echo "Attempt $i: VM not ready yet, waiting..."; sleep 10; done`,
+        `tart exec ${vmName} -- sh -c '${buildCommand} --target dependencies 2>&1 | tee /tmp/build.log'`,
+        `tart copy-from ${vmName}:/tmp/build.log ./build.log || echo "No build log found"`,
         'buildkite-agent artifact upload build.log || echo "No build log to upload"',
       ],
     };
@@ -751,14 +752,7 @@ function getBuildBunStep(platform, options) {
 function getTestBunStep(platform, options, testOptions = {}) {
   const { os, profile } = platform;
   const { buildId, unifiedTests, testFiles } = testOptions;
-
-  const args = [`--step=${getTargetKey(platform)}-build-bun`];
-  if (buildId) {
-    args.push(`--build-id=${buildId}`);
-  }
-  if (testFiles) {
-    args.push(...testFiles.map(testFile => `--include=${testFile}`));
-  }
+  const args = getTestArgs(platform, { buildId, unifiedTests, testFiles });
 
   const depends = [];
   if (!buildId) {
@@ -784,20 +778,20 @@ function getTestBunStep(platform, options, testOptions = {}) {
         'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
-        'trap \'kill $TART_LOG_PID || true; tart delete ${vmName} || true; buildkite-agent artifact upload tart.log || true\' EXIT',
+        `trap 'kill $TART_LOG_PID || true; tart delete ${vmName} || true; buildkite-agent artifact upload tart.log || true' EXIT`,
         'tart --version || echo "Failed to get tart version"',
         'uname -m || echo "Failed to get architecture"',
         'which tart || echo "Failed to find tart"',
         'ls -l $(which tart) || echo "Failed to list tart"',
         'tart list || echo "Failed to list VMs"',
         'tart pull ghcr.io/cirruslabs/macos-sequoia-base:latest || echo "Failed to pull base image"',
-        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName} || echo "Failed to clone VM"',
-        '(tart run ${vmName} --no-graphics) &',
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName} || echo "Failed to clone VM"`,
+        `(tart run ${vmName} --no-graphics) &`,
         'sleep 30',
         'echo "--- 🧪 Testing"',
         'echo "Waiting for VM to be healthy..."',
-        'for i in {1..5}; do if tart exec ${vmName} -- echo "VM is healthy" > /dev/null 2>&1; then echo "VM is healthy"; break; fi; if [ $i -eq 5 ]; then echo "VM failed to become healthy after 5 attempts"; exit 1; fi; echo "Attempt $i: VM not ready yet, waiting..."; sleep 10; done',
-        'tart exec ${vmName} -- ./scripts/runner.node.mjs ${args.join(" ")}',
+        `for i in {1..5}; do if tart exec ${vmName} -- echo "VM is healthy" > /dev/null 2>&1; then echo "VM is healthy"; break; fi; if [ $i -eq 5 ]; then echo "VM failed to become healthy after 5 attempts"; exit 1; fi; echo "Attempt $i: VM not ready yet, waiting..."; sleep 10; done`,
+        `tart exec ${vmName} -- ./scripts/runner.node.mjs ${args}`,
       ],
     };
   }
@@ -806,8 +800,8 @@ function getTestBunStep(platform, options, testOptions = {}) {
     ...baseStep,
     command:
       os === "windows"
-        ? `node .\\scripts\\runner.node.mjs ${args.join(" ")}`
-        : `./scripts/runner.node.mjs ${args.join(" ")}`,
+        ? `node .\\scripts\\runner.node.mjs ${args}`
+        : `./scripts/runner.node.mjs ${args}`,
   };
 }
 
@@ -1355,7 +1349,7 @@ function getTestArgs(platform, options) {
     args.push(...testFiles.map(testFile => `--include=${testFile}`));
   }
   
-  return args;
+  return args.join(" ");
 }
 
 async function main() {
@@ -1374,19 +1368,45 @@ async function main() {
 
   const content = toYaml(pipeline);
   const contentPath = join(process.cwd(), ".buildkite", "ci.yml");
-  writeFile(contentPath, content);
-
-  console.log("Generated pipeline:");
-  console.log(" - Path:", contentPath);
-  console.log(" - Size:", (content.length / 1024).toFixed(), "KB");
-
-  if (isBuildkite) {
-    startGroup("Uploading pipeline...");
-    try {
-      await spawnSafe(["buildkite-agent", "pipeline", "upload", contentPath], { stdio: "inherit" });
-    } finally {
-      await uploadArtifact(contentPath);
+  
+  // Add debug logging
+  console.log("Pipeline content length:", content.length);
+  console.log("Pipeline content preview:", content.substring(0, 500) + "...");
+  
+  try {
+    writeFile(contentPath, content);
+    console.log("Successfully wrote pipeline to:", contentPath);
+    
+    if (isBuildkite) {
+      startGroup("Uploading pipeline...");
+      try {
+        // Add debug flag to get more information
+        await spawnSafe(["buildkite-agent", "pipeline", "upload", "--debug", contentPath], { 
+          stdio: "inherit",
+          env: {
+            ...process.env,
+            DEBUG: "1"
+          }
+        });
+      } catch (error) {
+        console.error("Failed to upload pipeline:", error);
+        // Try to read the file to verify it exists and is readable
+        try {
+          const stats = await fs.promises.stat(contentPath);
+          console.log("Pipeline file stats:", stats);
+          const content = await fs.promises.readFile(contentPath, 'utf8');
+          console.log("Pipeline file content preview:", content.substring(0, 500) + "...");
+        } catch (readError) {
+          console.error("Failed to read pipeline file:", readError);
+        }
+        throw error;
+      } finally {
+        await uploadArtifact(contentPath);
+      }
     }
+  } catch (error) {
+    console.error("Failed to process pipeline:", error);
+    throw error;
   }
 }
 
