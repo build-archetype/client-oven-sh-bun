@@ -474,6 +474,7 @@ function getBuildVendorStep(platform, options) {
       ...baseStep,
       command: [
         `which tart`,
+        `ls -l $(which tart)`,
         `tart --version`,
         `tart list`,
         `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
