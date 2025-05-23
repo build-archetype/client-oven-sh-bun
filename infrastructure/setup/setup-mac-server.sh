@@ -266,21 +266,6 @@ fi
 # --- Privileged setup (root) ---
 echo_color "$BLUE" "\n[2/3] Running privileged setup..."
 
-# Ensure buildkite-agent user exists before any chown or file operations
-if ! id -u buildkite-agent >/dev/null 2>&1; then
-  echo_color "$YELLOW" "Creating buildkite-agent user..."
-  sudo dscl . -create /Users/buildkite-agent
-  sudo dscl . -create /Users/buildkite-agent UserShell /bin/bash
-  sudo dscl . -create /Users/buildkite-agent RealName "Buildkite Agent"
-  sudo dscl . -create /Users/buildkite-agent UniqueID "$(dscl . -list /Users UniqueID | awk '{print $2}' | sort -n | tail -1 | awk '{print $1+1}')"
-  sudo dscl . -create /Users/buildkite-agent PrimaryGroupID 20
-  sudo dscl . -create /Users/buildkite-agent NFSHomeDirectory /Users/buildkite-agent
-  sudo mkdir -p /Users/buildkite-agent
-  sudo chown buildkite-agent:staff /Users/buildkite-agent
-  sudo dscl . -append /Groups/wheel GroupMembership buildkite-agent
-  echo_color "$GREEN" "User 'buildkite-agent' created."
-fi
-
 mkdir -p /opt/buildkite-agent /opt/tart/images /opt/prometheus /opt/grafana /var/log/buildkite-agent
 
 # --- Prevent system sleep (server mode) ---
@@ -537,57 +522,12 @@ plugins-path="/opt/buildkite-agent/plugins"
 EOF
 sudo chown buildkite-agent:staff "$BK_CFG"
 
-# --- Save Buildkite token and create aliases ---
-echo_color "$BLUE" "Setting up Buildkite aliases and token storage..."
-# Create a secure directory for the token
-sudo mkdir -p /opt/buildkite-agent/.secrets
-echo "$BUILDKITE_AGENT_TOKEN" | sudo tee /opt/buildkite-agent/.secrets/token > /dev/null
-sudo chown -R buildkite-agent:staff /opt/buildkite-agent/.secrets
-sudo chmod 700 /opt/buildkite-agent/.secrets
-sudo chmod 600 /opt/buildkite-agent/.secrets/token
-
-# Create aliases for the buildkite-agent user
-sudo tee /Users/buildkite-agent/.zshrc > /dev/null << 'EOF'
-# Buildkite aliases
-alias bk='buildkite-agent'
-alias bk-start='sudo -u buildkite-agent /opt/homebrew/bin/buildkite-agent start'
-alias bk-stop='sudo -u buildkite-agent /opt/homebrew/bin/buildkite-agent stop'
-alias bk-restart='bk-stop && bk-start'
-alias bk-status='sudo -u buildkite-agent /opt/homebrew/bin/buildkite-agent status'
-alias bk-token='cat /opt/buildkite-agent/.secrets/token'
-
-# Function to update Buildkite config
-bk-update-config() {
-  sudo vim /opt/homebrew/etc/buildkite-agent/buildkite-agent.cfg
-  bk-restart
-}
-EOF
-
-# Also add aliases for the current user
-tee ~/.zshrc > /dev/null << 'EOF'
-# Buildkite aliases
-alias bk='buildkite-agent'
-alias bk-start='sudo -u buildkite-agent /opt/homebrew/bin/buildkite-agent start'
-alias bk-stop='sudo -u buildkite-agent /opt/homebrew/bin/buildkite-agent stop'
-alias bk-restart='bk-stop && bk-start'
-alias bk-status='sudo -u buildkite-agent /opt/homebrew/bin/buildkite-agent status'
-alias bk-token='sudo cat /opt/buildkite-agent/.secrets/token'
-
-# Function to update Buildkite config
-bk-update-config() {
-  sudo vim /opt/homebrew/etc/buildkite-agent/buildkite-agent.cfg
-  bk-restart
-}
-EOF
-
 # --- Start Buildkite agent as buildkite-agent user using Homebrew path and correct HOME ---
 AGENT_BIN="$(brew --prefix buildkite-agent)/bin/buildkite-agent"
-echo_color "$BLUE" "Starting Buildkite agent as 'buildkite-agent' using $AGENT_BIN..."
+echo_color "$BLUE" "Starting Buildkite agent using $AGENT_BIN..."
 sudo mkdir -p /opt/buildkite-agent/builds
-sudo chown -R buildkite-agent:staff /opt/buildkite-agent
-sudo mkdir -p /Users/buildkite-agent
-sudo chown buildkite-agent:staff /Users/buildkite-agent
-sudo -u buildkite-agent env HOME=/Users/buildkite-agent "$AGENT_BIN" start --config "$BK_CFG" &
+sudo chown -R $(whoami):staff /opt/buildkite-agent
+"$AGENT_BIN" start --config "$BK_CFG" &
 
 # --- Update Grafana config to use port 3400 ---
 sed -i '' 's/^http_port = .*/http_port = 3400/' /opt/grafana/grafana.ini 2>/dev/null || true
