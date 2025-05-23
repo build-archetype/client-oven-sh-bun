@@ -453,6 +453,50 @@ async function checkTartAvailability() {
 }
 
 /**
+ * @param {string} vmName
+ * @returns {Promise<boolean>}
+ */
+async function checkVmHealth(vmName) {
+  try {
+    // Check if VM exists and is running
+    const { stdout } = await spawnSafe(["tart", "list"], { stdio: "pipe" });
+    if (!stdout.includes(vmName)) {
+      console.error(`VM ${vmName} not found`);
+      return false;
+    }
+
+    // Try to get VM IP
+    const { stdout: ip } = await spawnSafe(["tart", "ip", vmName], { stdio: "pipe" });
+    if (!ip.trim()) {
+      console.error(`VM ${vmName} has no IP address`);
+      return false;
+    }
+
+    // Try a simple command to verify VM is responsive
+    await spawnSafe(["tart", "exec", vmName, "--", "echo", "VM is healthy"], { stdio: "pipe" });
+    return true;
+  } catch (error) {
+    console.error(`VM health check failed for ${vmName}:`, error);
+    return false;
+  }
+}
+
+/**
+ * @param {string} vmName
+ * @returns {Promise<void>}
+ */
+async function waitForVmHealth(vmName, maxAttempts = 5) {
+  for (let i = 0; i < maxAttempts; i++) {
+    if (await checkVmHealth(vmName)) {
+      return;
+    }
+    console.log(`Waiting for VM ${vmName} to be healthy (attempt ${i + 1}/${maxAttempts})...`);
+    await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds between attempts
+  }
+  throw new Error(`VM ${vmName} failed to become healthy after ${maxAttempts} attempts`);
+}
+
+/**
  * @param {Platform} platform
  * @param {PipelineOptions} options
  * @returns {Step}
@@ -469,28 +513,39 @@ function getBuildVendorStep(platform, options) {
   };
 
   if (os === "darwin") {
-    const vmName = `bun-build-${Date.now()}`;
+    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
       command: [
-        `tart list | awk '/stopped/ && $1 == "local" {print $2}' | xargs -n1 tart delete`,
-        `log stream --predicate 'process == "tart" OR process CONTAINS "Virtualization"' > tart.log 2>&1 &`,
-        `TART_LOG_PID=$!`,
-        `trap 'kill $TART_LOG_PID || true; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart --version`,
-        `uname -m`,
-        `which tart`,
-        `ls -l $(which tart)`,
-        `tart list`,
-        `tart pull ghcr.io/cirruslabs/macos-sequoia-base:latest`,
-        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `(tart run ${vmName} --no-graphics) &`,
-        'sleep 30',
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
+        'TART_LOG_PID=$!',
+        'trap \'kill $TART_LOG_PID || true; tart delete ${vmName} || true; buildkite-agent artifact upload tart.log || true\' EXIT',
+        'tart --version || echo "Failed to get tart version"',
+        'uname -m || echo "Failed to get architecture"',
+        'which tart || echo "Failed to find tart"',
+        'ls -l $(which tart) || echo "Failed to list tart"',
+        'tart list || echo "Failed to list VMs"',
+        'tart pull ghcr.io/cirruslabs/macos-sequoia-base:latest || echo "Failed to pull base image"',
+        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName} || echo "Failed to clone VM"',
+        '(tart run ${vmName} --no-graphics) &',
+        'echo "Waiting for VM to start..."',
+        'for i in {1..5}; do',
+        '  if tart exec ${vmName} -- echo "VM is ready" 2>/dev/null; then',
+        '    echo "VM is ready!"',
+        '    break',
+        '  fi',
+        '  if [ $i -eq 5 ]; then',
+        '    echo "VM failed to start after 5 attempts"',
+        '    exit 1',
+        '  fi',
+        '  echo "Waiting for VM to be ready (attempt $i/5)..."',
+        '  sleep 10',
+        'done',
         'echo "--- 🏗 Building vendor"',
-        `tart exec ${vmName} -- sh -c '${getBuildCommand(platform, options)} --target dependencies 2>&1 | tee /tmp/build.log'`,
-        `tart copy-from ${vmName}:/tmp/build.log ./build.log || echo "No build log found"`,
-        `buildkite-agent artifact upload build.log || echo "No build log to upload"`,
-        `tart delete ${vmName}`,
+        'tart exec ${vmName} -- sh -c \'${getBuildCommand(platform, options)} --target dependencies 2>&1 | tee /tmp/build.log\'',
+        'tart copy-from ${vmName}:/tmp/build.log ./build.log || echo "No build log found"',
+        'buildkite-agent artifact upload build.log || echo "No build log to upload"',
       ],
     };
   }
@@ -526,13 +581,22 @@ function getBuildCppStep(platform, options) {
     return {
       ...baseStep,
       command: [
-        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `(tart run ${vmName} --no-graphics) &`,
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
+        'TART_LOG_PID=$!',
+        'trap \'kill $TART_LOG_PID || true; tart delete ${vmName} || true; buildkite-agent artifact upload tart.log || true\' EXIT',
+        'tart --version || echo "Failed to get tart version"',
+        'uname -m || echo "Failed to get architecture"',
+        'which tart || echo "Failed to find tart"',
+        'ls -l $(which tart) || echo "Failed to list tart"',
+        'tart list || echo "Failed to list VMs"',
+        'tart pull ghcr.io/cirruslabs/macos-sequoia-base:latest || echo "Failed to pull base image"',
+        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName} || echo "Failed to clone VM"',
+        '(tart run ${vmName} --no-graphics) &',
         'sleep 30',
         'echo "--- 🏗 Building C++"',
-        `tart exec ${vmName} -- ${command} --target bun`,
-        `tart exec ${vmName} -- ${command} --target dependencies`,
-        `tart delete ${vmName}`,
+        'tart exec ${vmName} -- sh -c \'${command} --target bun\'',
+        'tart exec ${vmName} -- sh -c \'${command} --target dependencies\'',
       ],
     };
   }
@@ -582,12 +646,21 @@ function getBuildZigStep(platform, options) {
     return {
       ...baseStep,
       command: [
-        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `(tart run ${vmName} --no-graphics) &`,
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
+        'TART_LOG_PID=$!',
+        'trap \'kill $TART_LOG_PID || true; tart delete ${vmName} || true; buildkite-agent artifact upload tart.log || true\' EXIT',
+        'tart --version || echo "Failed to get tart version"',
+        'uname -m || echo "Failed to get architecture"',
+        'which tart || echo "Failed to find tart"',
+        'ls -l $(which tart) || echo "Failed to list tart"',
+        'tart list || echo "Failed to list VMs"',
+        'tart pull ghcr.io/cirruslabs/macos-sequoia-base:latest || echo "Failed to pull base image"',
+        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName} || echo "Failed to clone VM"',
+        '(tart run ${vmName} --no-graphics) &',
         'sleep 30',
         'echo "--- 🏗 Building Zig"',
-        `tart exec ${vmName} -- ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
-        `tart delete ${vmName}`,
+        'tart exec ${vmName} -- sh -c \'${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}\'',
       ],
     };
   }
@@ -623,12 +696,21 @@ function getLinkBunStep(platform, options) {
     return {
       ...baseStep,
       command: [
-        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `(tart run ${vmName} --no-graphics) &`,
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
+        'TART_LOG_PID=$!',
+        'trap \'kill $TART_LOG_PID || true; tart delete ${vmName} || true; buildkite-agent artifact upload tart.log || true\' EXIT',
+        'tart --version || echo "Failed to get tart version"',
+        'uname -m || echo "Failed to get architecture"',
+        'which tart || echo "Failed to find tart"',
+        'ls -l $(which tart) || echo "Failed to list tart"',
+        'tart list || echo "Failed to list VMs"',
+        'tart pull ghcr.io/cirruslabs/macos-sequoia-base:latest || echo "Failed to pull base image"',
+        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName} || echo "Failed to clone VM"',
+        '(tart run ${vmName} --no-graphics) &',
         'sleep 30',
         'echo "--- 🔗 Linking Bun"',
-        `tart exec ${vmName} -- ${getBuildCommand(platform, options)} --target bun`,
-        `tart delete ${vmName}`,
+        'tart exec ${vmName} -- sh -c \'${getBuildCommand(platform, options)} --target bun\'',
       ],
     };
   }
@@ -703,12 +785,21 @@ function getTestBunStep(platform, options, testOptions = {}) {
     return {
       ...baseStep,
       command: [
-        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `(tart run ${vmName} --no-graphics) &`,
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
+        'TART_LOG_PID=$!',
+        'trap \'kill $TART_LOG_PID || true; tart delete ${vmName} || true; buildkite-agent artifact upload tart.log || true\' EXIT',
+        'tart --version || echo "Failed to get tart version"',
+        'uname -m || echo "Failed to get architecture"',
+        'which tart || echo "Failed to find tart"',
+        'ls -l $(which tart) || echo "Failed to list tart"',
+        'tart list || echo "Failed to list VMs"',
+        'tart pull ghcr.io/cirruslabs/macos-sequoia-base:latest || echo "Failed to pull base image"',
+        'tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName} || echo "Failed to clone VM"',
+        '(tart run ${vmName} --no-graphics) &',
         'sleep 30',
         'echo "--- 🧪 Testing"',
-        `tart exec ${vmName} -- ./scripts/runner.node.mjs ${args.join(" ")}`,
-        `tart delete ${vmName}`,
+        'tart exec ${vmName} -- ./scripts/runner.node.mjs ${args.join(" ")}',
       ],
     };
   }
