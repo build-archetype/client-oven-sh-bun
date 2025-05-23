@@ -499,7 +499,7 @@ function getBuildVendorStep(platform, options) {
         '  echo "VM status before health check:"',
         '  tart list | grep "${vmName}" || echo "VM not found in list"',
         '  echo "Attempting to connect to VM..."',
-        '  if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") echo "VM is healthy" > /dev/null 2>&1; then',
+        '  if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) echo "VM is healthy" > /dev/null 2>&1; then',
         '    echo "VM is healthy"',
         '    break',
         '  fi',
@@ -520,13 +520,20 @@ function getBuildVendorStep(platform, options) {
         '  attempt=$((attempt + 1))',
         'done',
         'echo "Setting up workspace in VM..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") "sudo umount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
+        'VM_IP=$(tart ip ${vmName})',
+        'if [ -z "$VM_IP" ]; then',
+        '  echo "Failed to get VM IP address"',
+        '  exit 1',
+        'fi',
+        'echo "VM IP: $VM_IP"',
+        'sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "sudo umount \'/Volumes/My Shared Files\' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"',
         'echo "Running build command..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") 'cd ~/workspace/workspace && echo "Current directory: $(pwd)" && echo "Directory contents:" && ls -la && echo "Environment:" && env && echo "Running build command..." && ${getBuildCommand(platform, options)} --target dependencies 2>&1 | tee /tmp/build.log'`,
+        'BUILD_CMD="cd ~/workspace/workspace && echo \\"Current directory: \\$(pwd)\\" && echo \\"Directory contents:\\" && ls -la && echo \\"Environment:\\" && env && echo \\"Running build command...\\" && ${getBuildCommand(platform, options)} --target dependencies 2>&1 | tee /tmp/build.log"',
+        'sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "$BUILD_CMD"',
         'echo "Build completed. Uploading logs..."',
         'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
         'echo "VM console output:"',
-        `tart console "${vmName}"`
+        'tart console ${vmName}'
       ]
     };
   }
