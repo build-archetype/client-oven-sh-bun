@@ -469,33 +469,21 @@ function getBuildVendorStep(platform, options) {
   };
 
   if (os === "darwin") {
+    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
-      plugins: [
-        {
-          "cirruslabs/tart#v0.2.0": {
-            image: "ghcr.io/cirruslabs/macos-sequoia-base:latest",
-            ssh_username: "admin",
-            ssh_password: "admin",
-            headless: true,
-            always_pull: true,
-            softnet: false,
-            run: true
-          }
-        }
-      ],
       command: [
+        `which tart`,
+        `ls -l $(which tart)`,
+        `tart --version`,
+        `tart list`,
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
+        `(tart run ${vmName} --no-graphics) &`,
+        'sleep 30',
         'echo "--- 🏗 Building vendor"',
-        'echo "Current directory: $(pwd)"',
-        'echo "Tart version: $(tart --version)"',
-        'echo "Listing VMs:"',
-        'tart list',
-        'echo "Listing images:"',
-        'tart list images',
-        'echo "VM status:"',
-        'tart status',
-        `${getBuildCommand(platform, options)} --target dependencies`
-      ]
+        `tart exec ${vmName} -- ${getBuildCommand(platform, options)} --target dependencies`,
+        `tart delete ${vmName}`,
+      ],
     };
   }
 
@@ -526,27 +514,18 @@ function getBuildCppStep(platform, options) {
   };
 
   if (os === "darwin") {
+    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
-      plugins: [
-        {
-          "cirruslabs/tart#v0.2.0": {
-            image: "ghcr.io/cirruslabs/macos-sequoia-base:latest",
-            ssh_username: "admin",
-            ssh_password: "admin",
-            headless: true,
-            always_pull: true,
-            softnet: false
-          }
-        }
-      ],
       command: [
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
+        `(tart run ${vmName} --no-graphics) &`,
+        'sleep 30',
         'echo "--- 🏗 Building C++"',
-        'tart list',
-        'tart list images',
-        `${command} --target bun`,
-        `${command} --target dependencies`
-      ]
+        `tart exec ${vmName} -- ${command} --target bun`,
+        `tart exec ${vmName} -- ${command} --target dependencies`,
+        `tart delete ${vmName}`,
+      ],
     };
   }
 
@@ -712,26 +691,17 @@ function getTestBunStep(platform, options, testOptions = {}) {
   };
 
   if (os === "darwin") {
+    const vmName = `bun-test-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
-      plugins: [
-        {
-          "cirruslabs/tart#v0.2.0": {
-            image: "ghcr.io/cirruslabs/macos-sequoia-base:latest",
-            ssh_username: "admin",
-            ssh_password: "admin",
-            headless: true,
-            always_pull: true,
-            softnet: false
-          }
-        }
-      ],
       command: [
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
+        `(tart run ${vmName} --no-graphics) &`,
+        'sleep 30',
         'echo "--- 🧪 Testing"',
-        'tart list',
-        'tart list images',
-        `./scripts/runner.node.mjs ${args.join(" ")}`
-      ]
+        `tart exec ${vmName} -- ./scripts/runner.node.mjs ${args.join(" ")}`,
+        `tart delete ${vmName}`,
+      ],
     };
   }
 
