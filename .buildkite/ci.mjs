@@ -522,8 +522,11 @@ function getBuildVendorStep(platform, options) {
         'echo "Setting up workspace in VM..."',
         'sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) "sudo umount \"/Volumes/My Shared Files\" || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"',
         'echo "Running build command..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) 'cd ~/workspace/workspace && ${getBuildCommand(platform, options)} --target dependencies 2>&1 | tee /tmp/build.log'`,
-        'buildkite-agent artifact upload vm.log || echo "No VM log to upload"'
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip ${vmName}) 'cd ~/workspace/workspace && echo "Current directory: $(pwd)" && echo "Directory contents:" && ls -la && echo "Environment:" && env && echo "Running build command..." && ${getBuildCommand(platform, options)} --target dependencies 2>&1 | tee /tmp/build.log'`,
+        'echo "Build completed. Uploading logs..."',
+        'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
+        'echo "VM console output:"',
+        'tart console ${vmName}'
       ]
     };
   }
