@@ -552,7 +552,7 @@ function getBuildVendorStep(platform, options) {
 
   return {
     ...baseStep,
-    command: `${getBuildCommand(platform, options)} --target dependencies`,
+    command: [`${getBuildCommand(platform, options)} --target dependencies`],
   };
 }
 
@@ -667,7 +667,7 @@ function getBuildZigStep(platform, options) {
 
   return {
     ...baseStep,
-    command: `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
+    command: [`${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`],
   };
 }
 
@@ -717,7 +717,7 @@ function getLinkBunStep(platform, options) {
 
   return {
     ...baseStep,
-    command: `${getBuildCommand(platform, options)} --target bun`,
+    command: [`${getBuildCommand(platform, options)} --target bun`],
   };
 }
 

@@ -2691,17 +2691,38 @@ export function toYaml(obj, indent = 0) {
       continue;
     }
     if (Array.isArray(value)) {
-      result += `${spaces}${key}:\n`;
-      value.forEach(item => {
-        if (typeof item === "object" && item !== null) {
-          result += `${spaces}- \n${toYaml(item, indent + 2)
-            .split("\n")
-            .map(line => `${spaces}  ${line}`)
-            .join("\n")}\n`;
+      if (key === "command") {
+        // Special handling for command arrays in pipeline steps
+        if (value.length === 1) {
+          result += `${spaces}${key}: ${value[0]}\n`;
         } else {
-          result += `${spaces}- ${item}\n`;
+          result += `${spaces}${key}:\n`;
+          value.forEach(item => {
+            // Properly indent multi-line commands
+            const lines = item.split('\n');
+            if (lines.length === 1) {
+              result += `${spaces}- ${item}\n`;
+            } else {
+              result += `${spaces}- |\n`;
+              lines.forEach(line => {
+                result += `${spaces}  ${line}\n`;
+              });
+            }
+          });
         }
-      });
+      } else {
+        result += `${spaces}${key}:\n`;
+        value.forEach(item => {
+          if (typeof item === "object" && item !== null) {
+            result += `${spaces}- \n${toYaml(item, indent + 2)
+              .split("\n")
+              .map(line => `${spaces}  ${line}`)
+              .join("\n")}\n`;
+          } else {
+            result += `${spaces}- ${item}\n`;
+          }
+        });
+      }
       continue;
     }
     if (typeof value === "object") {
@@ -2711,11 +2732,24 @@ export function toYaml(obj, indent = 0) {
     if (
       typeof value === "string" &&
       (value.includes(":") ||
+        value.includes("{") ||
+        value.includes("}") ||
+        value.includes("[") ||
+        value.includes("]") ||
+        value.includes(",") ||
+        value.includes("&") ||
+        value.includes("*") ||
         value.includes("#") ||
-        value.includes("'") ||
-        value.includes('"') ||
-        value.includes("\n") ||
-        value.includes("*"))
+        value.includes("?") ||
+        value.includes("|") ||
+        value.includes("-") ||
+        value.includes("<") ||
+        value.includes(">") ||
+        value.includes("=") ||
+        value.includes("!") ||
+        value.includes("%") ||
+        value.includes("@") ||
+        value.includes("`"))
     ) {
       result += `${spaces}${key}: "${value.replace(/"/g, '\\"')}"\n`;
       continue;
