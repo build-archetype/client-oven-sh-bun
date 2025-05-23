@@ -122,20 +122,24 @@ if [ "$goto_privileged_setup" = false ]; then
   if [ "$VPN_ENABLED" = true ]; then
     while true; do
       echo_color "$BLUE" "Select VPN type:"
+      echo "  0) None"
       echo "  1) Tailscale (default)"
       echo "  2) WireGuard"
       echo "  3) UniFi VPN"
       echo "  4) Cloudflare Tunnel"
       read -rp "Choice [1]: " vpn_choice
       case "${vpn_choice:-1}" in
+        0) VPN_TYPE="none"; break ;;
         1|"") VPN_TYPE="tailscale"; break ;;
         2) VPN_TYPE="wireguard"; break ;;
         3) VPN_TYPE="unifi"; break ;;
         4) VPN_TYPE="cloudflare"; break ;;
-        *) echo_color "$YELLOW" "Invalid choice. Please enter 1, 2, 3, or 4." ;;
+        *) echo_color "$YELLOW" "Invalid choice. Please enter 0, 1, 2, 3, or 4." ;;
       esac
     done
     case "$VPN_TYPE" in
+      none)
+        VPN_ENABLED=false ;;
       wireguard)
         prompt_secret WIREGUARD_PRIVATE_KEY "Enter WireGuard private key"
         prompt_secret WIREGUARD_PUBLIC_KEY "Enter WireGuard peer public key"
@@ -164,7 +168,6 @@ if [ "$goto_privileged_setup" = false ]; then
   echo_color "$YELLOW" "\nSummary of your choices:"
   echo "  Buildkite Agent Token:   [hidden]"
   echo "  Grafana Admin Password:   [hidden]"
-  echo "  VPN Setup:                $([[ "$VPN_ENABLED" = true ]] && echo "Enabled" || echo "Skipped")"
   if [ "$VPN_ENABLED" = true ]; then
     echo "  VPN Type:                 $VPN_TYPE"
     case "$VPN_TYPE" in
@@ -178,6 +181,8 @@ if [ "$goto_privileged_setup" = false ]; then
       cloudflare)
         echo "  Cloudflare Tunnel Token:  [hidden]" ;;
     esac
+  else
+    echo "  VPN Setup:                Skipped" ;;
   fi
   echo "  Build VLAN:               $BUILD_VLAN"
   echo "  Management VLAN:          $MGMT_VLAN"
@@ -474,6 +479,10 @@ echo "  - SSH configuration updated"
 if [ "$VPN_ENABLED" = true ]; then
   echo "  - VPN setup completed"
 fi
+
+# Define AGENT_BIN before using it in help text
+AGENT_BIN="$(brew --prefix buildkite-agent)/bin/buildkite-agent"
+
 echo_color "$YELLOW" "Next steps:"
 echo "  1. Configure Grafana at http://localhost:3400 (user: admin, pass: $GRAFANA_ADMIN_PASSWORD)"
 echo "  2. Open Prometheus at http://localhost:9090 (no login required by default)"
@@ -504,6 +513,7 @@ echo "      - bk-restart: Restart the agent"
 echo "      - bk-status: Check agent status"
 echo "      - bk-token: View the agent token"
 echo "      - bk-update-config: Edit agent config"
+echo "      - bk-update-setup: Update and restart setup script"
 echo_color "$GREEN" "\nAll done!"
 
 # --- Prompt to create all base VMs (single y/n) ---
@@ -531,7 +541,6 @@ EOF
 sudo chown $(whoami):staff "$BK_CFG"
 
 # --- Start Buildkite agent using Homebrew path ---
-AGENT_BIN="$(brew --prefix buildkite-agent)/bin/buildkite-agent"
 echo_color "$BLUE" "Starting Buildkite agent using $AGENT_BIN..."
 sudo mkdir -p /opt/buildkite-agent/builds
 sudo chown -R $(whoami):staff /opt/buildkite-agent
@@ -581,3 +590,20 @@ echo_color "$YELLOW" "If you want to secure Prometheus with a password, see: htt
 # --- Automatically open Prometheus and Grafana in browser ---
 open http://localhost:9090
 open http://localhost:3400
+
+# --- Create aliases ---
+echo_color "$BLUE" "Creating Buildkite aliases..."
+cat >> ~/.zshrc << EOF
+
+# Buildkite aliases
+alias bk-start="$AGENT_BIN start"
+alias bk-stop="$AGENT_BIN stop"
+alias bk-restart="$AGENT_BIN restart"
+alias bk-status="$AGENT_BIN status"
+alias bk-token="echo \$BUILDKITE_AGENT_TOKEN"
+alias bk-update-config="nano $BK_CFG"
+alias bk-update-setup="curl -fsSL https://raw.githubusercontent.com/oven-sh/bun/main/infrastructure/setup/setup-mac-server.sh > setup-mac-server.sh && chmod +x setup-mac-server.sh && ./setup-mac-server.sh"
+EOF
+
+# Source the updated .zshrc
+source ~/.zshrc
