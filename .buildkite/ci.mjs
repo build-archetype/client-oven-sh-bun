@@ -230,15 +230,15 @@ function getImageName(platform, options) {
 function getRetry(limit = 0) {
   return {
     manual: {
-      permit_on_passed: true,
+      permit_on_passed: true
     },
     automatic: [
       { exit_status: 1, limit },
       { exit_status: -1, limit: 1 },
       { exit_status: 255, limit: 1 },
       { signal_reason: "cancel", limit: 1 },
-      { signal_reason: "agent_stop", limit: 1 },
-    ],
+      { signal_reason: "agent_stop", limit: 1 }
+    ]
   };
 }
 
@@ -509,7 +509,7 @@ function getBuildVendorStep(platform, options) {
     agents: getCppAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
-    env: getBuildEnv(platform, options),
+    env: getBuildEnv(platform, options)
   };
 
   if (os === "darwin") {
@@ -536,8 +536,8 @@ function getBuildVendorStep(platform, options) {
         `for i in {1..5}; do if tart exec ${vmName} -- echo "VM is healthy" > /dev/null 2>&1; then echo "VM is healthy"; break; fi; if [ $i -eq 5 ]; then echo "VM failed to become healthy after 5 attempts"; exit 1; fi; echo "Attempt $i: VM not ready yet, waiting..."; sleep 10; done`,
         `tart exec ${vmName} -- sh -c '${buildCommand} --target dependencies 2>&1 | tee /tmp/build.log'`,
         `tart copy-from ${vmName}:/tmp/build.log ./build.log || echo "No build log found"`,
-        'buildkite-agent artifact upload build.log || echo "No build log to upload"',
-      ],
+        'buildkite-agent artifact upload build.log || echo "No build log to upload"'
+      ]
     };
   }
 
@@ -767,7 +767,7 @@ function getTestBunStep(platform, options, testOptions = {}) {
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
     parallelism: unifiedTests ? undefined : os === "darwin" ? 2 : 10,
-    timeout_in_minutes: profile === "asan" ? 90 : 30,
+    timeout_in_minutes: profile === "asan" ? 90 : 30
   };
 
   if (os === "darwin") {
@@ -791,8 +791,8 @@ function getTestBunStep(platform, options, testOptions = {}) {
         'echo "--- 🧪 Testing"',
         'echo "Waiting for VM to be healthy..."',
         `for i in {1..5}; do if tart exec ${vmName} -- echo "VM is healthy" > /dev/null 2>&1; then echo "VM is healthy"; break; fi; if [ $i -eq 5 ]; then echo "VM failed to become healthy after 5 attempts"; exit 1; fi; echo "Attempt $i: VM not ready yet, waiting..."; sleep 10; done`,
-        `tart exec ${vmName} -- ./scripts/runner.node.mjs ${args}`,
-      ],
+        `tart exec ${vmName} -- ./scripts/runner.node.mjs ${args}`
+      ]
     };
   }
 
