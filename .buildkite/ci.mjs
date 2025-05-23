@@ -473,6 +473,7 @@ function getBuildVendorStep(platform, options) {
     return {
       ...baseStep,
       command: [
+        `tart list | awk '/stopped/ {print $2}' | xargs -n1 tart delete`,
         `which tart`,
         `ls -l $(which tart)`,
         `tart --version`,
