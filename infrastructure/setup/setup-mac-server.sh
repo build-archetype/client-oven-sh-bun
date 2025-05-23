@@ -122,15 +122,17 @@ if [ "$goto_privileged_setup" = false ]; then
   if [ "$VPN_ENABLED" = true ]; then
     while true; do
       echo_color "$BLUE" "Select VPN type:"
-      echo "  1) WireGuard (default)"
-      echo "  2) Tailscale"
+      echo "  1) Tailscale (default)"
+      echo "  2) WireGuard"
       echo "  3) UniFi VPN"
+      echo "  4) Cloudflare Tunnel"
       read -rp "Choice [1]: " vpn_choice
       case "${vpn_choice:-1}" in
-        1|"") VPN_TYPE="wireguard"; break ;;
-        2) VPN_TYPE="tailscale"; break ;;
+        1|"") VPN_TYPE="tailscale"; break ;;
+        2) VPN_TYPE="wireguard"; break ;;
         3) VPN_TYPE="unifi"; break ;;
-        *) echo_color "$YELLOW" "Invalid choice. Please enter 1, 2, or 3." ;;
+        4) VPN_TYPE="cloudflare"; break ;;
+        *) echo_color "$YELLOW" "Invalid choice. Please enter 1, 2, 3, or 4." ;;
       esac
     done
     case "$VPN_TYPE" in
@@ -146,6 +148,9 @@ if [ "$goto_privileged_setup" = false ]; then
         prompt_text UNIFI_VPN_USER "Enter UniFi VPN username" ""
         prompt_secret UNIFI_VPN_PASSWORD "Enter UniFi VPN password"
         prompt_text UNIFI_VPN_SERVER "Enter UniFi VPN server" ""
+        ;;
+      cloudflare)
+        prompt_secret CLOUDFLARE_TUNNEL_TOKEN "Enter Cloudflare Tunnel token"
         ;;
     esac
   fi
@@ -170,6 +175,8 @@ if [ "$goto_privileged_setup" = false ]; then
       unifi)
         echo "  UniFi VPN User:           $UNIFI_VPN_USER"
         echo "  UniFi VPN Server:         $UNIFI_VPN_SERVER" ;;
+      cloudflare)
+        echo "  Cloudflare Tunnel Token:  [hidden]" ;;
     esac
   fi
   echo "  Build VLAN:               $BUILD_VLAN"
@@ -257,6 +264,8 @@ if [ "$goto_privileged_setup" = false ]; then
           export_vars+=" TAILSCALE_AUTH_KEY=\"$TAILSCALE_AUTH_KEY\"" ;;
         unifi)
           export_vars+=" UNIFI_VPN_USER=\"$UNIFI_VPN_USER\" UNIFI_VPN_PASSWORD=\"$UNIFI_VPN_PASSWORD\" UNIFI_VPN_SERVER=\"$UNIFI_VPN_SERVER\"" ;;
+        cloudflare)
+          export_vars+=" CLOUDFLARE_TUNNEL_TOKEN=\"$CLOUDFLARE_TUNNEL_TOKEN\"" ;;
       esac
     fi
     eval exec sudo $export_vars "$0" "$@"
@@ -378,36 +387,33 @@ EOF
         -o /etc/openvpn/unifi.ovpn
       echo "auth-user-pass /etc/openvpn/auth.txt" >> /etc/openvpn/unifi.ovpn
       ;;
+    cloudflare)
+      echo_color "$BLUE" "Setting up Cloudflare Tunnel..."
+      
+      # Install cloudflared if not present
+      if ! command -v cloudflared &> /dev/null; then
+        echo_color "$YELLOW" "Installing cloudflared..."
+        brew install cloudflared
+        if ! command -v cloudflared &> /dev/null; then
+          echo_color "$RED" "Failed to install cloudflared. Please install manually: brew install cloudflared"
+          exit 1
+        fi
+        echo_color "$GREEN" "✅ cloudflared installed successfully."
+      else
+        echo_color "$GREEN" "cloudflared is already installed."
+      fi
+
+      # Install the service with the token
+      echo_color "$BLUE" "Installing Cloudflare Tunnel service..."
+      sudo cloudflared service install "$CLOUDFLARE_TUNNEL_TOKEN"
+
+      echo_color "$GREEN" "✅ Cloudflare Tunnel setup complete."
+      echo_color "$BLUE" "You can check the status with:"
+      echo "  - Check service: launchctl list | grep cloudflare"
+      echo "  - Check tunnel status: cloudflared tunnel info"
+      ;;
   esac
 fi
-
-# --- Cloudflare Tunnel Setup ---
-echo_color "$BLUE" "Setting up Cloudflare Tunnel..."
-
-# Install cloudflared if not present
-if ! command -v cloudflared &> /dev/null; then
-  echo_color "$YELLOW" "Installing cloudflared..."
-  brew install cloudflared
-  if ! command -v cloudflared &> /dev/null; then
-    echo_color "$RED" "Failed to install cloudflared. Please install manually: brew install cloudflared"
-    exit 1
-  fi
-fi
-
-# Prompt for tunnel token
-if [ -z "${CLOUDFLARE_TUNNEL_TOKEN:-}" ]; then
-  echo_color "$YELLOW" "Please provide your Cloudflare Tunnel token:"
-  read -r CLOUDFLARE_TUNNEL_TOKEN
-fi
-
-# Install the service with the token
-echo_color "$BLUE" "Installing Cloudflare Tunnel service..."
-sudo cloudflared service install "$CLOUDFLARE_TUNNEL_TOKEN"
-
-echo_color "$GREEN" "✅ Cloudflare Tunnel setup complete."
-echo_color "$BLUE" "You can check the status with:"
-echo "  - Check service: launchctl list | grep cloudflare"
-echo "  - Check tunnel status: cloudflared tunnel info"
 
 # Get the logged-in username and hostname for agent naming
 AGENT_USER=$(whoami)
@@ -480,6 +486,8 @@ if [ "$VPN_ENABLED" = true ]; then
       echo "  4. Test Tailscale connection: tailscale status" ;;
     unifi)
       echo "  4. Test UniFi VPN connection: openvpn --status" ;;
+    cloudflare)
+      echo "  4. Test Cloudflare Tunnel connection: cloudflared tunnel info" ;;
   esac
 else
   echo "  4. VPN setup was skipped (local access only)" ;
