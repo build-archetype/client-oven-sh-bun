@@ -481,7 +481,7 @@ function getBuildVendorStep(platform, options) {
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         `VM_IP=$(tart ip ${vmName})`,
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP 'cd ~/workspace/workspace && ${getBuildCommand(platform, options)} --target dependencies'`,
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@${VM_IP} 'cd ~/workspace/workspace && ${getBuildCommand(platform, options)} --target dependencies'`,
         'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
         `tart console ${vmName}`
       ]
@@ -527,8 +527,8 @@ function getBuildCppStep(platform, options) {
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         `VM_IP=$(tart ip ${vmName})`,
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP 'cd ~/workspace/workspace && ${command} --target bun'`,
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP 'cd ~/workspace/workspace && ${command} --target dependencies'`
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@${VM_IP} 'cd ~/workspace/workspace && ${command} --target bun'`,
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@${VM_IP} 'cd ~/workspace/workspace && ${command} --target dependencies'`
       ]
     };
   }
