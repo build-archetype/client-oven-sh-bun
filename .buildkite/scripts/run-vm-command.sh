@@ -27,14 +27,18 @@ while [ "$attempt" -le "$max_attempts" ]; do
   attempt=$((attempt + 1))
 done
 
+# Check Bun before bootstrap
+echo "Checking Bun before bootstrap..."
+sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "which bun || echo 'Bun not found'"
+
 # Run bootstrap.sh to set up dependencies
 echo "Setting up build environment..."
 sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "cd '/Volumes/My Shared Files/workspace' && chmod +x scripts/bootstrap.sh && ./scripts/bootstrap.sh"
 
-# Source the profile to ensure PATH is set correctly
-echo "Setting up environment..."
-sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "source ~/.zprofile && source ~/.zshrc"
+# Check Bun after bootstrap
+echo "Checking Bun after bootstrap..."
+sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "which bun && bun --version || echo 'Bun not found'"
 
 # Run the command
 echo "Running command: $COMMAND"
-sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "cd '/Volumes/My Shared Files/workspace' && source ~/.zprofile && source ~/.zshrc && $COMMAND" 
+sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "cd '/Volumes/My Shared Files/workspace' && $COMMAND" 
