@@ -513,21 +513,21 @@ function getBuildCppStep(platform, options) {
   };
 
   if (os === "darwin") {
-    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
+      depends_on: ["ensure-bun-image"],
       command: [
-        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
-        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
-        'TART_LOG_PID=$!',
-        `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; if tart list | grep -q "${vmName}"; then tart delete ${vmName} || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
-        'sleep 30',
-        'chmod +x .buildkite/scripts/run-vm-command.sh',
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "${command} --target bun"`,
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "${command} --target dependencies"`
-      ]
+        'echo "Running C++ build in Bun VM..."',
+        'tart run bun-build-base --no-graphics --dir=workspace:$PWD << EOF',
+        'cd /Volumes/My\\ Shared\\ Files/workspace',
+        'export BUN_INSTALL="/Users/admin/.bun"',
+        'export PATH="/Users/admin/.bun/bin:$PATH"',
+        'which bun',
+        'bun --version',
+        `${command} --target bun`,
+        `${command} --target dependencies`,
+        'EOF'
+      ].join('\n')
     };
   }
 
@@ -572,51 +572,20 @@ function getBuildZigStep(platform, options) {
   };
 
   if (os === "darwin") {
-    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
+      depends_on: ["ensure-bun-image"],
       command: [
-        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
-        'echo "Waiting for VM to start up..."',
-        'sleep 60',
-        'echo "Checking VM status..."',
-        `tart list | grep "${vmName}" || echo "VM not found in list"`,
-        'echo "--- 🏗 Building Zig"',
-        'echo "Waiting for VM to be healthy..."',
-        'attempt=1',
-        'max_attempts=5',
-        'while [ "$attempt" -le "$max_attempts" ]; do',
-        '  echo "[$attempt/$max_attempts] Checking VM health..."',
-        '  echo "VM status before health check:"',
-        `  tart list | grep "${vmName}" || echo "VM not found in list"`,
-        '  echo "Attempting to connect to VM..."',
-        `  if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") echo "VM is healthy" > /dev/null 2>&1; then`,
-        '    echo "VM is healthy"',
-        '    break',
-        '  fi',
-        '  echo "Connection failed. Checking VM status..."',
-        `  tart list | grep "${vmName}" || echo "VM not found in list"`,
-        '  echo "VM log tail:"',
-        '  tail -n 20 vm.log || echo "No VM log found"',
-        '  if [ "$attempt" -eq "$max_attempts" ]; then',
-        '    echo "VM failed to become healthy after $max_attempts attempts"',
-        '    echo "Full VM log:"',
-        '    cat vm.log || echo "No VM log found"',
-        '    echo "System logs around VM:"',
-        '    log show --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' --last 5m || echo "No system logs found"',
-        '    exit 1',
-        '  fi',
-        '  echo "[$attempt/$max_attempts] VM not ready yet, waiting..."',
-        '  sleep 20',
-        '  attempt=$((attempt + 1))',
-        'done',
-        'echo "Setting up workspace in VM..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") "diskutil unmount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
-        'echo "Running build command..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") 'cd ~/workspace/workspace && ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}'`,
-        `tart delete ${vmName}`,
-      ],
+        'echo "Running Zig build in Bun VM..."',
+        'tart run bun-build-base --no-graphics --dir=workspace:$PWD << EOF',
+        'cd /Volumes/My\\ Shared\\ Files/workspace',
+        'export BUN_INSTALL="/Users/admin/.bun"',
+        'export PATH="/Users/admin/.bun/bin:$PATH"',
+        'which bun',
+        'bun --version',
+        `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
+        'EOF'
+      ].join('\n')
     };
   }
 
@@ -647,51 +616,20 @@ function getLinkBunStep(platform, options) {
   };
 
   if (os === "darwin") {
-    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
+      depends_on: [...baseStep.depends_on, "ensure-bun-image"],
       command: [
-        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
-        'echo "Waiting for VM to start up..."',
-        'sleep 60',
-        'echo "Checking VM status..."',
-        `tart list | grep "${vmName}" || echo "VM not found in list"`,
-        'echo "--- 🔗 Linking Bun"',
-        'echo "Waiting for VM to be healthy..."',
-        'attempt=1',
-        'max_attempts=5',
-        'while [ "$attempt" -le "$max_attempts" ]; do',
-        '  echo "[$attempt/$max_attempts] Checking VM health..."',
-        '  echo "VM status before health check:"',
-        `  tart list | grep "${vmName}" || echo "VM not found in list"`,
-        '  echo "Attempting to connect to VM..."',
-        `  if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") echo "VM is healthy" > /dev/null 2>&1; then`,
-        '    echo "VM is healthy"',
-        '    break',
-        '  fi',
-        '  echo "Connection failed. Checking VM status..."',
-        `  tart list | grep "${vmName}" || echo "VM not found in list"`,
-        '  echo "VM log tail:"',
-        '  tail -n 20 vm.log || echo "No VM log found"',
-        '  if [ "$attempt" -eq "$max_attempts" ]; then',
-        '    echo "VM failed to become healthy after $max_attempts attempts"',
-        '    echo "Full VM log:"',
-        '    cat vm.log || echo "No VM log found"',
-        '    echo "System logs around VM:"',
-        '    log show --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' --last 5m || echo "No system logs found"',
-        '    exit 1',
-        '  fi',
-        '  echo "[$attempt/$max_attempts] VM not ready yet, waiting..."',
-        '  sleep 20',
-        '  attempt=$((attempt + 1))',
-        'done',
-        'echo "Setting up workspace in VM..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") "diskutil unmount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
-        'echo "Running build command..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") 'cd ~/workspace/workspace && ${getBuildCommand(platform, options)} --target bun'`,
-        `tart delete ${vmName}`,
-      ],
+        'echo "Running Bun link in Bun VM..."',
+        'tart run bun-build-base --no-graphics --dir=workspace:$PWD << EOF',
+        'cd /Volumes/My\\ Shared\\ Files/workspace',
+        'export BUN_INSTALL="/Users/admin/.bun"',
+        'export PATH="/Users/admin/.bun/bin:$PATH"',
+        'which bun',
+        'bun --version',
+        `${getBuildCommand(platform, options)} --target bun`,
+        'EOF'
+      ].join('\n')
     };
   }
 
@@ -736,14 +674,7 @@ function getTestBunStep(platform, options, testOptions = {}) {
   const { os, profile } = platform;
   const { buildId, unifiedTests, testFiles } = testOptions;
 
-  const args = [`--step=${getTargetKey(platform)}-build-bun`];
-  if (buildId) {
-    args.push(`--build-id=${buildId}`);
-  }
-  if (testFiles) {
-    args.push(...testFiles.map(testFile => `--include=${testFile}`));
-  }
-
+  const args = getTestArgs(platform, options);
   const depends = [];
   if (!buildId) {
     depends.push(`${getTargetKey(platform)}-build-bun`);
@@ -761,51 +692,20 @@ function getTestBunStep(platform, options, testOptions = {}) {
   };
 
   if (os === "darwin") {
-    const vmName = `bun-test-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
+      depends_on: [...depends, "ensure-bun-image"],
       command: [
-        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
-        'echo "Waiting for VM to start up..."',
-        'sleep 60',
-        'echo "Checking VM status..."',
-        `tart list | grep "${vmName}" || echo "VM not found in list"`,
-        'echo "--- 🧪 Testing"',
-        'echo "Waiting for VM to be healthy..."',
-        'attempt=1',
-        'max_attempts=5',
-        'while [ "$attempt" -le "$max_attempts" ]; do',
-        '  echo "[$attempt/$max_attempts] Checking VM health..."',
-        '  echo "VM status before health check:"',
-        `  tart list | grep "${vmName}" || echo "VM not found in list"`,
-        '  echo "Attempting to connect to VM..."',
-        `  if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") echo "VM is healthy" > /dev/null 2>&1; then`,
-        '    echo "VM is healthy"',
-        '    break',
-        '  fi',
-        '  echo "Connection failed. Checking VM status..."',
-        `  tart list | grep "${vmName}" || echo "VM not found in list"`,
-        '  echo "VM log tail:"',
-        '  tail -n 20 vm.log || echo "No VM log found"',
-        '  if [ "$attempt" -eq "$max_attempts" ]; then',
-        '    echo "VM failed to become healthy after $max_attempts attempts"',
-        '    echo "Full VM log:"',
-        '    cat vm.log || echo "No VM log found"',
-        '    echo "System logs around VM:"',
-        '    log show --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' --last 5m || echo "No system logs found"',
-        '    exit 1',
-        '  fi',
-        '  echo "[$attempt/$max_attempts] VM not ready yet, waiting..."',
-        '  sleep 20',
-        '  attempt=$((attempt + 1))',
-        'done',
-        'echo "Setting up workspace in VM..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") "diskutil unmount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
-        'echo "Running tests..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") 'cd ~/workspace/workspace && ./scripts/runner.node.mjs ${args.join(" ")}'`,
-        `tart delete ${vmName}`,
-      ],
+        'echo "Running tests in Bun VM..."',
+        'tart run bun-build-base --no-graphics --dir=workspace:$PWD << EOF',
+        'cd /Volumes/My\\ Shared\\ Files/workspace',
+        'export BUN_INSTALL="/Users/admin/.bun"',
+        'export PATH="/Users/admin/.bun/bin:$PATH"',
+        'which bun',
+        'bun --version',
+        `./scripts/runner.node.mjs ${args.join(" ")}`,
+        'EOF'
+      ].join('\n')
     };
   }
 
