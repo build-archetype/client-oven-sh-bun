@@ -469,22 +469,20 @@ function getBuildVendorStep(platform, options) {
   };
 
   if (os === "darwin") {
-    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
+      depends_on: ["ensure-bun-image"],
       command: [
-        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
-        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
-        'TART_LOG_PID=$!',
-        `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
-        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
-        'sleep 30',
-        'chmod +x .buildkite/scripts/run-vm-command.sh',
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ls -la && ${getBuildCommand(platform, options)} --target dependencies"`,
-        'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
-        `tart delete ${vmName}`
-      ]
+        'echo "Running build in Bun VM..."',
+        'tart run bun-build-base --no-graphics --dir=workspace:$PWD << EOF',
+        'cd /Volumes/My\\ Shared\\ Files/workspace',
+        'export BUN_INSTALL="/Users/admin/.bun"',
+        'export PATH="/Users/admin/.bun/bin:$PATH"',
+        'which bun',
+        'bun --version',
+        `${getBuildCommand(platform, options)} --target dependencies`,
+        'EOF'
+      ].join('\n')
     };
   }
 
@@ -1303,6 +1301,22 @@ async function getPipeline(options = {}) {
 
   // Get filtered platforms based on options
   const { buildPlatforms: filteredBuildPlatforms = buildPlatforms, testPlatforms: filteredTestPlatforms = testPlatforms } = options;
+
+  // Add this at the start of the pipeline
+  const ensureBunImage = {
+    label: "Ensure Bun Image",
+    command: "chmod +x .buildkite/scripts/ensure-bun-image.sh && .buildkite/scripts/ensure-bun-image.sh",
+    soft_fail: true, // Don't fail the pipeline if this step fails
+    key: "ensure-bun-image", // Unique key for this step
+    depends_on: [], // No dependencies
+  };
+
+  // Modify the build steps to use the Bun image
+  const getBuildVendorStep = {
+    label: "Build Vendor Dependencies",
+    command: "tart run bun-build-base --no-graphics --dir=workspace:$PWD 'cd /Volumes/My\\ Shared\\ Files/workspace && bun run build:release --target dependencies'",
+    depends_on: ["ensure-bun-image"], // Depend on the image creation step
+  };
 
   // Add build steps for each platform
   for (const platform of filteredBuildPlatforms) {
