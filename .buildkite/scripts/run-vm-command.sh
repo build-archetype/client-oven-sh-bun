@@ -32,10 +32,12 @@ echo "Checking for Bun installation..."
 if ! sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "which bun" > /dev/null 2>&1; then
   echo "Bun not found, installing..."
   sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "curl -fsSL https://bun.sh/install | bash"
-  # Add Bun to PATH for this session
-  sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "export PATH=\"\$HOME/.bun/bin:\$PATH\""
 fi
 
-# Run the command
+# Set up environment and verify Bun is in PATH
+echo "Setting up environment..."
+sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "export BUN_INSTALL=\"\$HOME/.bun\" && export PATH=\"\$BUN_INSTALL/bin:\$PATH\" && which bun || echo 'Bun not found in PATH'"
+
+# Run the command with Bun in PATH
 echo "Running command: $COMMAND"
-sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "cd '/Volumes/My Shared Files/workspace' && $COMMAND" 
+sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "export BUN_INSTALL=\"\$HOME/.bun\" && export PATH=\"\$BUN_INSTALL/bin:\$PATH\" && cd '/Volumes/My Shared Files/workspace' && echo 'Current PATH:' && echo \$PATH && which bun && $COMMAND" 
