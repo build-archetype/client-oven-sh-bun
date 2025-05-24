@@ -27,6 +27,12 @@ while [ "$attempt" -le "$max_attempts" ]; do
   attempt=$((attempt + 1))
 done
 
+# Check and install build dependencies
+echo "Checking build dependencies..."
+sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "which cmake || brew install cmake"
+sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "which ninja || brew install ninja"
+sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "xcode-select -p || xcode-select --install"
+
 # Check if Bun is installed and install if needed
 echo "Checking for Bun installation..."
 if ! sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "which bun" > /dev/null 2>&1; then
