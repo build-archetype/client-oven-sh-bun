@@ -481,7 +481,7 @@ function getBuildVendorStep(platform, options) {
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd /Volumes/My\ Shared\ Files/workspace && ${getBuildCommand(platform, options)} --target dependencies"`,
+        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ${getBuildCommand(platform, options)} --target dependencies"`,
         'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
         `tart delete ${vmName}`
       ]
