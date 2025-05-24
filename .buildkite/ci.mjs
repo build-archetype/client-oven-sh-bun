@@ -476,15 +476,14 @@ function getBuildVendorStep(platform, options) {
         'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
-        `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; if tart list | grep -q "${vmName}"; then tart delete ${vmName} || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
+        `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
         `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "sudo umount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "${getBuildCommand(platform, options)} --target dependencies"`,
+        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd /Volumes/My\ Shared\ Files/workspace && ${getBuildCommand(platform, options)} --target dependencies"`,
         'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
-        `tart console ${vmName}`
+        `tart delete ${vmName}`
       ]
     };
   }
@@ -615,7 +614,7 @@ function getBuildZigStep(platform, options) {
         '  attempt=$((attempt + 1))',
         'done',
         'echo "Setting up workspace in VM..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") "sudo umount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") "diskutil unmount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
         'echo "Running build command..."',
         `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") 'cd ~/workspace/workspace && ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}'`,
         `tart delete ${vmName}`,
@@ -690,7 +689,7 @@ function getLinkBunStep(platform, options) {
         '  attempt=$((attempt + 1))',
         'done',
         'echo "Setting up workspace in VM..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") "sudo umount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") "diskutil unmount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
         'echo "Running build command..."',
         `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") 'cd ~/workspace/workspace && ${getBuildCommand(platform, options)} --target bun'`,
         `tart delete ${vmName}`,
@@ -804,7 +803,7 @@ function getTestBunStep(platform, options, testOptions = {}) {
         '  attempt=$((attempt + 1))',
         'done',
         'echo "Setting up workspace in VM..."',
-        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") "sudo umount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
+        `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") "diskutil unmount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
         'echo "Running tests..."',
         `sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$(tart ip "${vmName}") 'cd ~/workspace/workspace && ./scripts/runner.node.mjs ${args.join(" ")}'`,
         `tart delete ${vmName}`,
