@@ -1303,20 +1303,13 @@ async function getPipeline(options = {}) {
   const { buildPlatforms: filteredBuildPlatforms = buildPlatforms, testPlatforms: filteredTestPlatforms = testPlatforms } = options;
 
   // Add this at the start of the pipeline
-  const ensureBunImage = {
+  steps.push({
     label: "Ensure Bun Image",
     command: "chmod +x .buildkite/scripts/ensure-bun-image.sh && .buildkite/scripts/ensure-bun-image.sh",
     soft_fail: true, // Don't fail the pipeline if this step fails
     key: "ensure-bun-image", // Unique key for this step
     depends_on: [], // No dependencies
-  };
-
-  // Modify the build steps to use the Bun image
-  const getBuildVendorStep = {
-    label: "Build Vendor Dependencies",
-    command: "tart run bun-build-base --no-graphics --dir=workspace:$PWD 'cd /Volumes/My\\ Shared\\ Files/workspace && bun run build:release --target dependencies'",
-    depends_on: ["ensure-bun-image"], // Depend on the image creation step
-  };
+  });
 
   // Add build steps for each platform
   for (const platform of filteredBuildPlatforms) {
