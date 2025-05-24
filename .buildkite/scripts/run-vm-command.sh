@@ -14,10 +14,5 @@ if ! sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev
     exit 1
 fi
 
-# Setup workspace if needed
-if [[ "$COMMAND" == *"workspace"* ]]; then
-    sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "sudo umount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"
-fi
-
 # Run command in VM
-sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "cd ~/workspace/workspace && $COMMAND" 
+sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "cd /Volumes/My\ Shared\ Files/workspace && $COMMAND" 
