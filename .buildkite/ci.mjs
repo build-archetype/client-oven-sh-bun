@@ -480,6 +480,8 @@ function getBuildVendorStep(platform, options) {
         `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
+        'chmod +x .buildkite/scripts/run-vm-command.sh',
+        `.buildkite/scripts/run-vm-command.sh ${vmName} "sudo umount '/Volumes/My Shared Files' || true; mkdir -p ~/workspace; mount_virtiofs com.apple.virtio-fs.automount ~/workspace"`,
         `.buildkite/scripts/run-vm-command.sh ${vmName} "${getBuildCommand(platform, options)} --target dependencies"`,
         'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
         `tart console ${vmName}`
@@ -525,6 +527,7 @@ function getBuildCppStep(platform, options) {
         `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
+        'chmod +x .buildkite/scripts/run-vm-command.sh',
         `.buildkite/scripts/run-vm-command.sh ${vmName} "${command} --target bun"`,
         `.buildkite/scripts/run-vm-command.sh ${vmName} "${command} --target dependencies"`
       ]
