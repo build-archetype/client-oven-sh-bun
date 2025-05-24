@@ -31,6 +31,10 @@ done
 echo "Setting up build environment..."
 sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "cd '/Volumes/My Shared Files/workspace' && chmod +x scripts/bootstrap.sh && ./scripts/bootstrap.sh"
 
+# Source the profile to ensure PATH is set correctly
+echo "Setting up environment..."
+sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "source ~/.zprofile && source ~/.zshrc"
+
 # Run the command
 echo "Running command: $COMMAND"
-sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "cd '/Volumes/My Shared Files/workspace' && $COMMAND" 
+sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "cd '/Volumes/My Shared Files/workspace' && source ~/.zprofile && source ~/.zshrc && $COMMAND" 
