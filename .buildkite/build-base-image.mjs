@@ -14,12 +14,8 @@ const pipeline = {
         tart: true
       },
       command: [
-        "echo 'DEBUG: GITHUB_TOKEN is ${GITHUB_TOKEN}'",
         "echo 'printing github token'",
         "echo $GITHUB_TOKEN",
-        // Debug: Print if GITHUB_TOKEN is set
-        "if [ -z \"$GITHUB_TOKEN\" ]; then echo 'DEBUG: GITHUB_TOKEN is NOT set'; else echo 'DEBUG: GITHUB_TOKEN is set'; fi",
-        // Login to GitHub Container Registry
         "echo $GITHUB_TOKEN | tart login ghcr.io",
         "chmod +x .buildkite/scripts/ensure-bun-image.sh",
         ".buildkite/scripts/ensure-bun-image.sh",
