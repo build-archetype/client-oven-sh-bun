@@ -469,19 +469,21 @@ function getBuildVendorStep(platform, options) {
   };
 
   if (os === "darwin") {
+    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
-      depends_on: ["ensure-bun-image"],
       command: [
-        'echo "Running build in Bun VM..."',
-        'tart run bun-build-base --no-graphics --dir=workspace:$PWD << \'EOF\'',
-        'cd /Volumes/My\\ Shared\\ Files/workspace',
-        'export BUN_INSTALL="/Users/admin/.bun"',
-        'export PATH="/Users/admin/.bun/bin:$PATH"',
-        'which bun',
-        'bun --version',
-        `${getBuildCommand(platform, options)} --target dependencies`,
-        'EOF'
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
+        'TART_LOG_PID=$!',
+        `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
+        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
+        'sleep 30',
+        'chmod +x .buildkite/scripts/run-vm-command.sh',
+        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ls -la && ${getBuildCommand(platform, options)} --target dependencies"`,
+        'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
+        `tart delete ${vmName}`
       ].join('\n')
     };
   }
@@ -513,20 +515,22 @@ function getBuildCppStep(platform, options) {
   };
 
   if (os === "darwin") {
+    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
-      depends_on: ["ensure-bun-image"],
       command: [
-        'echo "Running C++ build in Bun VM..."',
-        'tart run bun-build-base --no-graphics --dir=workspace:$PWD << \'EOF\'',
-        'cd /Volumes/My\\ Shared\\ Files/workspace',
-        'export BUN_INSTALL="/Users/admin/.bun"',
-        'export PATH="/Users/admin/.bun/bin:$PATH"',
-        'which bun',
-        'bun --version',
-        `${command} --target bun`,
-        `${command} --target dependencies`,
-        'EOF'
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
+        'TART_LOG_PID=$!',
+        `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
+        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
+        'sleep 30',
+        'chmod +x .buildkite/scripts/run-vm-command.sh',
+        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ${command} --target bun"`,
+        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ${command} --target dependencies"`,
+        'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
+        `tart delete ${vmName}`
       ].join('\n')
     };
   }
@@ -572,19 +576,21 @@ function getBuildZigStep(platform, options) {
   };
 
   if (os === "darwin") {
+    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
-      depends_on: ["ensure-bun-image"],
       command: [
-        'echo "Running Zig build in Bun VM..."',
-        'tart run bun-build-base --no-graphics --dir=workspace:$PWD << EOF',
-        'cd /Volumes/My\\ Shared\\ Files/workspace',
-        'export BUN_INSTALL="/Users/admin/.bun"',
-        'export PATH="/Users/admin/.bun/bin:$PATH"',
-        'which bun',
-        'bun --version',
-        `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
-        'EOF'
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
+        'TART_LOG_PID=$!',
+        `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
+        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
+        'sleep 30',
+        'chmod +x .buildkite/scripts/run-vm-command.sh',
+        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}"`,
+        'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
+        `tart delete ${vmName}`
       ].join('\n')
     };
   }
@@ -616,19 +622,21 @@ function getLinkBunStep(platform, options) {
   };
 
   if (os === "darwin") {
+    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
-      depends_on: [...baseStep.depends_on, "ensure-bun-image"],
       command: [
-        'echo "Running Bun link in Bun VM..."',
-        'tart run bun-build-base --no-graphics --dir=workspace:$PWD << EOF',
-        'cd /Volumes/My\\ Shared\\ Files/workspace',
-        'export BUN_INSTALL="/Users/admin/.bun"',
-        'export PATH="/Users/admin/.bun/bin:$PATH"',
-        'which bun',
-        'bun --version',
-        `${getBuildCommand(platform, options)} --target bun`,
-        'EOF'
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
+        'TART_LOG_PID=$!',
+        `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
+        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
+        'sleep 30',
+        'chmod +x .buildkite/scripts/run-vm-command.sh',
+        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ${getBuildCommand(platform, options)} --target bun"`,
+        'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
+        `tart delete ${vmName}`
       ].join('\n')
     };
   }
@@ -692,19 +700,21 @@ function getTestBunStep(platform, options, testOptions = {}) {
   };
 
   if (os === "darwin") {
+    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
-      depends_on: [...depends, "ensure-bun-image"],
       command: [
-        'echo "Running tests in Bun VM..."',
-        'tart run bun-build-base --no-graphics --dir=workspace:$PWD << EOF',
-        'cd /Volumes/My\\ Shared\\ Files/workspace',
-        'export BUN_INSTALL="/Users/admin/.bun"',
-        'export PATH="/Users/admin/.bun/bin:$PATH"',
-        'which bun',
-        'bun --version',
-        `./scripts/runner.node.mjs ${args.join(" ")}`,
-        'EOF'
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
+        'TART_LOG_PID=$!',
+        `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
+        `tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest ${vmName}`,
+        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
+        'sleep 30',
+        'chmod +x .buildkite/scripts/run-vm-command.sh',
+        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ./scripts/runner.node.mjs ${args.join(" ")}"`,
+        'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
+        `tart delete ${vmName}`
       ].join('\n')
     };
   }
@@ -1202,7 +1212,7 @@ async function getPipeline(options = {}) {
   // Get filtered platforms based on options
   const { buildPlatforms: filteredBuildPlatforms = buildPlatforms, testPlatforms: filteredTestPlatforms = testPlatforms } = options;
 
-  // Add this at the start of the pipeline
+  // Add the Bun image check step at the start
   steps.push({
     label: "Ensure Bun Image",
     command: "chmod +x .buildkite/scripts/ensure-bun-image.sh && .buildkite/scripts/ensure-bun-image.sh",
@@ -1216,11 +1226,11 @@ async function getPipeline(options = {}) {
   for (const platform of filteredBuildPlatforms) {
     const { os } = platform;
     if (os === "darwin") {
-      // Only add the self-contained steps for macOS
-      steps.push(getBuildVendorStep(platform, options));
-      steps.push(getBuildCppStep(platform, options));
-      steps.push(getBuildZigStep(platform, options));
-      steps.push(getLinkBunStep(platform, options));
+      // Add the build steps with dependency on ensure-bun-image
+      steps.push(getStepWithDependsOn(getBuildVendorStep(platform, options), "ensure-bun-image"));
+      steps.push(getStepWithDependsOn(getBuildCppStep(platform, options), "ensure-bun-image"));
+      steps.push(getStepWithDependsOn(getBuildZigStep(platform, options), "ensure-bun-image"));
+      steps.push(getStepWithDependsOn(getLinkBunStep(platform, options), "ensure-bun-image"));
     } else {
       // Original steps for non-macOS platforms
       steps.push(getBuildVendorStep(platform, options));
@@ -1234,8 +1244,8 @@ async function getPipeline(options = {}) {
   for (const platform of filteredTestPlatforms) {
     const { os } = platform;
     if (os === "darwin") {
-      // Only add the self-contained test step for macOS
-      steps.push(getTestBunStep(platform, options));
+      // Add test step with dependency on ensure-bun-image
+      steps.push(getStepWithDependsOn(getTestBunStep(platform, options), "ensure-bun-image"));
     } else {
       // Original test steps for non-macOS platforms
       steps.push(getTestBunStep(platform, options));
