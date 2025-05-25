@@ -474,7 +474,7 @@ function getBuildVendorStep(platform, options) {
       depends_on: ["ensure-bun-image"],
       command: [
         'echo "Running build in Bun VM..."',
-        'tart run bun-build-base --no-graphics --dir=workspace:$PWD << EOF',
+        'tart run bun-build-base --no-graphics --dir=workspace:$PWD << \'EOF\'',
         'cd /Volumes/My\\ Shared\\ Files/workspace',
         'export BUN_INSTALL="/Users/admin/.bun"',
         'export PATH="/Users/admin/.bun/bin:$PATH"',
@@ -518,7 +518,7 @@ function getBuildCppStep(platform, options) {
       depends_on: ["ensure-bun-image"],
       command: [
         'echo "Running C++ build in Bun VM..."',
-        'tart run bun-build-base --no-graphics --dir=workspace:$PWD << EOF',
+        'tart run bun-build-base --no-graphics --dir=workspace:$PWD << \'EOF\'',
         'cd /Volumes/My\\ Shared\\ Files/workspace',
         'export BUN_INSTALL="/Users/admin/.bun"',
         'export PATH="/Users/admin/.bun/bin:$PATH"',

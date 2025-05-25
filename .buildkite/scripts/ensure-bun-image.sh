@@ -16,7 +16,7 @@ if ! tart list | grep -q "$IMAGE_NAME"; then
     
     # Run the VM and install dependencies
     echo "Running VM to install dependencies..."
-    tart run "$IMAGE_NAME" --no-graphics << EOF
+    tart run "$IMAGE_NAME" --no-graphics << 'EOF'
         # Mount the workspace
         mkdir -p /Volumes/My\ Shared\ Files/workspace
         
@@ -42,7 +42,7 @@ if ! tart list | grep -q "$IMAGE_NAME"; then
         which bun || { echo "Bun not in PATH"; exit 1; }
         
         echo "All dependencies verified successfully"
-    EOF
+EOF
     
     # Stop the VM
     echo "Stopping VM..."
