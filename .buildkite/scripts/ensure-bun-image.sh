@@ -5,7 +5,7 @@ set -x
 IMAGE_NAME="bun-build-base"
 BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
 MAX_RETRIES=3
-DELETE_EXISTING=true  
+DELETE_EXISTING=true
 
 # Make run-vm-command.sh executable
 echo "Making run-vm-command.sh executable..."
@@ -36,15 +36,15 @@ retry_command() {
     return $exitcode
 }
 
+# Check if we should delete existing image
+if [ "$DELETE_EXISTING" = "true" ]; then
+    echo "DELETE_EXISTING is true, removing existing image..."
+    tart delete "$IMAGE_NAME" || true
+fi
+
 # Check if our custom image exists
 if ! tart list | grep -q "$IMAGE_NAME"; then
     echo "Creating Bun build image..."
-    
-    # Delete existing image if DELETE_EXISTING is true
-    if [ "$DELETE_EXISTING" = "true" ]; then
-        echo "DELETE_EXISTING is true, removing existing image..."
-        tart delete "$IMAGE_NAME" || true
-    fi
     
     # Clone the base image with retry
     echo "Cloning base image..."
