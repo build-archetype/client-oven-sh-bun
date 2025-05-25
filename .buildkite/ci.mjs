@@ -1216,7 +1216,6 @@ async function getPipeline(options = {}) {
   steps.push({
     label: "Ensure Bun Image",
     command: "chmod +x .buildkite/scripts/ensure-bun-image.sh && .buildkite/scripts/ensure-bun-image.sh",
-    soft_fail: true, // Don't fail the pipeline if this step fails
     key: "ensure-bun-image", // Unique key for this step
     depends_on: [], // No dependencies
     agents: getCppAgent(filteredBuildPlatforms[0], options)
