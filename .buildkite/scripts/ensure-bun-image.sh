@@ -7,8 +7,14 @@ BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
 MAX_RETRIES=3
 DELETE_EXISTING=false
 
-# Get organization from config
-ORG=$(node -e "import('.buildkite/config.mjs').then(m => console.log(m.IMAGE_CONFIG.organization))")
+# Get organization from BUILDKITE_REPO or default to oven-sh
+if [[ -n "${BUILDKITE_REPO:-}" ]]; then
+    # Extract org from git URL (handles both https and git formats)
+    ORG=$(echo "$BUILDKITE_REPO" | sed -E 's|.*github\.com[:/]([^/]+).*|\1|')
+else
+    # Default to oven-sh if we can't determine
+    ORG="oven-sh"
+fi
 
 # Print configuration summary
 echo "=== Configuration Summary ==="
@@ -20,6 +26,7 @@ echo "Full Image Path: ghcr.io/$ORG/$IMAGE_NAME:latest"
 echo "Max Retries: $MAX_RETRIES"
 echo "Delete Existing: $DELETE_EXISTING"
 echo "GitHub Token: ${GITHUB_TOKEN:+set}${GITHUB_TOKEN:-not set}"
+echo "Buildkite Repo: ${BUILDKITE_REPO:-not set}"
 echo "==========================="
 echo
 
