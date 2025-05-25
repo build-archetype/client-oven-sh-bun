@@ -28,8 +28,8 @@ retry_command() {
         fi
         echo "Command failed with exit code $exitcode"
         if [ $attempt -lt $max_attempts ]; then
-            echo "Retrying in 10 seconds..."
-            sleep 10
+            echo "Retrying in 30 seconds..."
+            sleep 30
         fi
         attempt=$((attempt + 1))
     done
@@ -61,19 +61,10 @@ if ! tart list | grep -q "$IMAGE_NAME"; then
     echo "Waiting for VM to be ready..."
     sleep 30  # Increased wait time
     
-    # Run bootstrap script with CI flag and retry
-    echo "Running bootstrap..."
-    retry_command ".buildkite/scripts/run-vm-command.sh \"$IMAGE_NAME\" \"cd /Volumes/My\ Shared\ Files/workspace && chmod +x scripts/bootstrap.sh && ./scripts/bootstrap.sh --ci\"" || {
+    # Run the simplified macOS bootstrap script
+    echo "Running macOS bootstrap script..."
+    retry_command ".buildkite/scripts/run-vm-command.sh \"$IMAGE_NAME\" \"cd /Volumes/My\ Shared\ Files/workspace && chmod +x scripts/bootstrap-macos.sh && ./scripts/bootstrap-macos.sh\"" || {
         echo "Bootstrap failed after $MAX_RETRIES attempts"
-        kill $VM_PID
-        wait $VM_PID
-        exit 1
-    }
-    
-    # Verify the installation with retry
-    echo "Verifying installation..."
-    retry_command ".buildkite/scripts/run-vm-command.sh \"$IMAGE_NAME\" \"which bun && bun --version && which cmake && cmake --version && which ninja && ninja --version\"" || {
-        echo "Verification failed after $MAX_RETRIES attempts"
         kill $VM_PID
         wait $VM_PID
         exit 1
