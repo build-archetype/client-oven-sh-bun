@@ -5,7 +5,7 @@ set -x
 IMAGE_NAME="bun-build-base"
 BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
 MAX_RETRIES=3
-DELETE_EXISTING=true
+DELETE_EXISTING=false
 
 # Make run-vm-command.sh executable
 echo "Making run-vm-command.sh executable..."
@@ -71,10 +71,10 @@ if ! tart list | grep -q "$IMAGE_NAME"; then
         exit 1
     }
     
-    # Stop the VM
+    # Stop the VM gracefully
     echo "Stopping VM..."
     kill $VM_PID
-    wait $VM_PID
+    wait $VM_PID || true  # Ignore the exit status of wait since we expect SIGTERM
     
     # Final verification that image exists
     if ! tart list | grep -q "$IMAGE_NAME"; then
