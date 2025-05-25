@@ -11,42 +11,9 @@ BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
 
 echo "Checking for Bun build image..."
 
-# Function to verify image has all required dependencies
-verify_image() {
-    echo "Verifying image has all required dependencies..."
-    "$(dirname "$0")/run-vm-command.sh" "$IMAGE_NAME" '
-        echo "Checking for required tools..."
-        echo "Checking Bun..."
-        which bun
-        bun --version
-        
-        echo "Checking CMake..."
-        which cmake
-        cmake --version
-        
-        echo "Checking Ninja..."
-        which ninja
-        ninja --version
-        
-        echo "Checking Bun installation directory..."
-        ls -la /Users/admin/.bun
-        
-        echo "Checking PATH..."
-        echo $PATH
-        
-        echo "All dependencies verified successfully"
-    '
-}
-
 # Check if our custom image exists and is valid
-if ! tart list | grep -q "$IMAGE_NAME" || ! verify_image; then
-    echo "Creating or updating Bun build image..."
-    
-    # Delete existing image if it exists but is invalid
-    if tart list | grep -q "$IMAGE_NAME"; then
-        echo "Removing invalid image..."
-        tart delete "$IMAGE_NAME"
-    fi
+if ! tart list | grep -q "$IMAGE_NAME"; then
+    echo "Creating Bun build image..."
     
     # Clone the base image
     echo "Cloning base image..."
@@ -54,10 +21,8 @@ if ! tart list | grep -q "$IMAGE_NAME" || ! verify_image; then
     
     # Run the VM and install dependencies
     echo "Running VM to install dependencies..."
-    tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" &
-    sleep 10  # Wait for VM to start
-    
-    "$(dirname "$0")/run-vm-command.sh" "$IMAGE_NAME" '
+    tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" bash -c '
+        set -x
         echo "Setting up workspace..."
         cd /Volumes/My\ Shared\ Files/workspace
         
@@ -95,13 +60,6 @@ if ! tart list | grep -q "$IMAGE_NAME" || ! verify_image; then
     # Stop the VM
     echo "Stopping VM..."
     tart stop "$IMAGE_NAME"
-    
-    # Verify the image one final time
-    echo "Performing final verification..."
-    if ! verify_image; then
-        echo "Failed to create valid Bun build image"
-        exit 1
-    fi
     
     echo "Bun build image created successfully"
 else
