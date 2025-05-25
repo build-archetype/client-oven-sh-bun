@@ -18,8 +18,10 @@ const pipeline = {
         "echo 'printing github token'",
         "echo $GITHUB_TOKEN",
         "echo $GITHUB_TOKEN | tart login ghcr.io",
+        "LOGIN_EXIT_CODE=$?",
+        "if [ $LOGIN_EXIT_CODE -ne 0 ]; then echo 'tart login failed with exit code $LOGIN_EXIT_CODE'; exit $LOGIN_EXIT_CODE; fi",
         "chmod +x .buildkite/scripts/ensure-bun-image.sh",
-        ".buildkite/scripts/ensure-bun-image.sh",
+        ".buildkite/scripts/ensure-bun-image.sh 2>&1 | tee -a base-image-build.log",
         // After successful build, push to container registry
         `tart push ${IMAGE_CONFIG.baseImage.name} ${IMAGE_CONFIG.baseImage.fullName}`
       ],
@@ -29,7 +31,8 @@ const pipeline = {
           { exit_status: -1, limit: 1 },
           { exit_status: 255, limit: 1 }
         ]
-      }
+      },
+      artifact_paths: ["base-image-build.log"]
     }
   ]
 };
