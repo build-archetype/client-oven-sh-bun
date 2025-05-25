@@ -473,7 +473,7 @@ function getBuildVendorStep(platform, options) {
     return {
       ...baseStep,
       command: [
-        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
         `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
@@ -519,7 +519,7 @@ function getBuildCppStep(platform, options) {
     return {
       ...baseStep,
       command: [
-        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
         `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
@@ -580,7 +580,7 @@ function getBuildZigStep(platform, options) {
     return {
       ...baseStep,
       command: [
-        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
         `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
@@ -626,7 +626,7 @@ function getLinkBunStep(platform, options) {
     return {
       ...baseStep,
       command: [
-        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
         `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
@@ -704,7 +704,7 @@ function getTestBunStep(platform, options, testOptions = {}) {
     return {
       ...baseStep,
       command: [
-        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
         `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
