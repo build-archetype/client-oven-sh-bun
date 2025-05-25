@@ -6,18 +6,19 @@ const getOrgFromRepo = () => {
 };
 
 export const IMAGE_CONFIG = {
-  registry: "ghcr.io",
-  organization: "build-archetype",
   baseImage: {
+    registry: "ghcr.io",
+    organization: "build-archetype",
     name: "base-bun-build-macos-darwin",
     tag: "latest",
     get fullName() {
-      return `${this.registry}/${IMAGE_CONFIG.organization}/${this.name}:${this.tag}`;
+      return `${this.registry}/${this.organization}/${this.name}:${this.tag}`;
     }
   }
 };
 
 // Helper function to get the full image name
 export function getFullImageName(name, tag = "latest") {
-  return `${IMAGE_CONFIG.registry}/${IMAGE_CONFIG.organization}/${name}:${tag}`;
+  // Use baseImage's registry and organization for consistency
+  return `${IMAGE_CONFIG.baseImage.registry}/${IMAGE_CONFIG.baseImage.organization}/${name}:${tag}`;
 } 
