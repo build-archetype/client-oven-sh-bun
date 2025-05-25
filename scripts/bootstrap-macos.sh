@@ -83,12 +83,13 @@ install_dev_tools() {
     echo "Installing development tools..."
     retry_command 'brew install llvm@19'
     
-    # Link LLVM tools
-    ln -sf "$(brew --prefix llvm@19)/bin/clang" /usr/local/bin/clang
-    ln -sf "$(brew --prefix llvm@19)/bin/clang++" /usr/local/bin/clang++
-    ln -sf "$(brew --prefix llvm@19)/bin/llvm-ar" /usr/local/bin/llvm-ar
-    ln -sf "$(brew --prefix llvm@19)/bin/llvm-ranlib" /usr/local/bin/llvm-ranlib
-    ln -sf "$(brew --prefix llvm@19)/bin/lld" /usr/local/bin/lld
+    # Link LLVM tools with sudo
+    echo "Creating symbolic links for LLVM tools..."
+    retry_command 'sudo ln -sf "$(brew --prefix llvm@19)/bin/clang" /usr/local/bin/clang'
+    retry_command 'sudo ln -sf "$(brew --prefix llvm@19)/bin/clang++" /usr/local/bin/clang++'
+    retry_command 'sudo ln -sf "$(brew --prefix llvm@19)/bin/llvm-ar" /usr/local/bin/llvm-ar'
+    retry_command 'sudo ln -sf "$(brew --prefix llvm@19)/bin/llvm-ranlib" /usr/local/bin/llvm-ranlib'
+    retry_command 'sudo ln -sf "$(brew --prefix llvm@19)/bin/lld" /usr/local/bin/lld'
 }
 
 # Install Bun

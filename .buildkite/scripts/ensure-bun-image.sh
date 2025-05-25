@@ -5,8 +5,7 @@ set -x
 IMAGE_NAME="bun-build-base"
 BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
 MAX_RETRIES=3
-
-echo "Checking for Bun build image..."
+DELETE_EXISTING=true  
 
 # Make run-vm-command.sh executable
 echo "Making run-vm-command.sh executable..."
@@ -37,46 +36,53 @@ retry_command() {
     return $exitcode
 }
 
-# Always delete existing image for testing
-echo "Deleting existing Bun build image..."
-tart delete "$IMAGE_NAME" || true
-
-echo "Creating new Bun build image..."
+# Check if our custom image exists
+if ! tart list | grep -q "$IMAGE_NAME"; then
+    echo "Creating Bun build image..."
     
-# Clone the base image with retry
-echo "Cloning base image..."
-retry_command "tart clone \"$BASE_IMAGE\" \"$IMAGE_NAME\"" || {
-    echo "Failed to clone base image after $MAX_RETRIES attempts"
-    exit 1
-}
-
-# Start the VM and run bootstrap
-echo "Starting VM and running bootstrap..."
-tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" &
-VM_PID=$!
-
-# Wait for VM to be ready
-echo "Waiting for VM to be ready..."
-sleep 30  # Increased wait time
-
-# Run the simplified macOS bootstrap script
-echo "Running macOS bootstrap script..."
-retry_command ".buildkite/scripts/run-vm-command.sh \"$IMAGE_NAME\" \"cd /Volumes/My\ Shared\ Files/workspace && chmod +x scripts/bootstrap-macos.sh && ./scripts/bootstrap-macos.sh\"" || {
-    echo "Bootstrap failed after $MAX_RETRIES attempts"
+    # Delete existing image if DELETE_EXISTING is true
+    if [ "$DELETE_EXISTING" = "true" ]; then
+        echo "DELETE_EXISTING is true, removing existing image..."
+        tart delete "$IMAGE_NAME" || true
+    fi
+    
+    # Clone the base image with retry
+    echo "Cloning base image..."
+    retry_command "tart clone \"$BASE_IMAGE\" \"$IMAGE_NAME\"" || {
+        echo "Failed to clone base image after $MAX_RETRIES attempts"
+        exit 1
+    }
+    
+    # Start the VM and run bootstrap
+    echo "Starting VM and running bootstrap..."
+    tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" &
+    VM_PID=$!
+    
+    # Wait for VM to be ready
+    echo "Waiting for VM to be ready..."
+    sleep 30  # Increased wait time
+    
+    # Run the simplified macOS bootstrap script
+    echo "Running macOS bootstrap script..."
+    retry_command ".buildkite/scripts/run-vm-command.sh \"$IMAGE_NAME\" \"cd /Volumes/My\ Shared\ Files/workspace && chmod +x scripts/bootstrap-macos.sh && ./scripts/bootstrap-macos.sh\"" || {
+        echo "Bootstrap failed after $MAX_RETRIES attempts"
+        kill $VM_PID
+        wait $VM_PID
+        exit 1
+    }
+    
+    # Stop the VM
+    echo "Stopping VM..."
     kill $VM_PID
     wait $VM_PID
-    exit 1
-}
-
-# Stop the VM
-echo "Stopping VM..."
-kill $VM_PID
-wait $VM_PID
-
-# Final verification that image exists
-if ! tart list | grep -q "$IMAGE_NAME"; then
-    echo "Image was not created successfully"
-    exit 1
-fi
-
-echo "Bun build image created successfully" 
+    
+    # Final verification that image exists
+    if ! tart list | grep -q "$IMAGE_NAME"; then
+        echo "Image was not created successfully"
+        exit 1
+    fi
+    
+    echo "Bun build image created successfully"
+else
+    echo "Bun build image already exists"
+fi 
