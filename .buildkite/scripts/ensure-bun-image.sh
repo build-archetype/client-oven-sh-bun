@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+set -x  # Enable command echoing
 
 IMAGE_NAME="bun-build-base"
 BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
@@ -10,6 +11,7 @@ echo "Checking for Bun build image..."
 verify_image() {
     echo "Verifying image has all required dependencies..."
     tart run "$IMAGE_NAME" --no-graphics << 'EOF'
+        set -x  # Enable command echoing inside the VM
         echo "Checking for required tools..."
         echo "Checking Bun..."
         which bun
@@ -50,6 +52,7 @@ if ! tart list | grep -q "$IMAGE_NAME" || ! verify_image; then
     # Run the VM and install dependencies
     echo "Running VM to install dependencies..."
     tart run "$IMAGE_NAME" --no-graphics << 'EOF'
+        set -x  # Enable command echoing inside the VM
         echo "Setting up workspace..."
         mkdir -p /Volumes/My\ Shared\ Files/workspace
         
