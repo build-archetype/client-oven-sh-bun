@@ -618,36 +618,25 @@ plugins-path="/opt/buildkite-agent/plugins"
 EOF
 sudo chown $(whoami):staff "$BK_CFG"
 
-# --- Automatically open Prometheus in browser (commented out) ---
-# open http://localhost:9090
-
-# --- Create aliases ---
-echo_color "$BLUE" "Creating Buildkite aliases..."
-cat >> ~/.zshrc << EOF
-
-# Buildkite aliases
-alias bk-start="$AGENT_BIN start"
-alias bk-stop="$AGENT_BIN stop"
-alias bk-restart="$AGENT_BIN restart"
-alias bk-status="$AGENT_BIN status"
-alias bk-token="echo \$BUILDKITE_AGENT_TOKEN"
-alias bk-update-config="nano $BK_CFG"
-alias bk-update-setup="curl -fsSL https://raw.githubusercontent.com/oven-sh/bun/main/infrastructure/setup/setup-mac-server.sh > setup-mac-server.sh && chmod +x setup-mac-server.sh && ./setup-mac-server.sh"
-EOF
-
-# Source the updated .zshrc
-source ~/.zshrc
-
+# --- Robustly set GITHUB_TOKEN in Homebrew service plist ---
 PLIST_PATH="/opt/homebrew/opt/buildkite-agent/homebrew.mxcl.buildkite-agent.plist"
+echo_color "$BLUE" "Setting GITHUB_TOKEN in $PLIST_PATH..."
+echo_color "$BLUE" "Debug: GITHUB_TOKEN value is: '$GITHUB_TOKEN'"
 
-# Add or update the EnvironmentVariables section for GITHUB_TOKEN
-if ! grep -q "<key>EnvironmentVariables</key>" "$PLIST_PATH"; then
-  # Insert EnvironmentVariables section before the closing </dict>
+# Ensure EnvironmentVariables dict exists
+if ! /usr/libexec/PlistBuddy -c "Print :EnvironmentVariables" "$PLIST_PATH" &>/dev/null; then
   /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables dict" "$PLIST_PATH"
-  /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:GITHUB_TOKEN string $GITHUB_TOKEN" "$PLIST_PATH"
-else
-  /usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:GITHUB_TOKEN $GITHUB_TOKEN" "$PLIST_PATH"
 fi
 
-# Start or restart the Buildkite agent as a Homebrew service
+# Add or set GITHUB_TOKEN
+if /usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:GITHUB_TOKEN" "$PLIST_PATH" &>/dev/null; then
+  /usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:GITHUB_TOKEN $GITHUB_TOKEN" "$PLIST_PATH"
+else
+  /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:GITHUB_TOKEN string $GITHUB_TOKEN" "$PLIST_PATH"
+fi
+
+# Debug: show the EnvironmentVariables section after update
+/usr/libexec/PlistBuddy -c "Print :EnvironmentVariables" "$PLIST_PATH"
+
+echo_color "$BLUE" "Restarting Buildkite agent service..."
 brew services restart buildkite-agent
