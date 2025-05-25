@@ -42,4 +42,7 @@ console.log("Generated base image pipeline:");
 console.log(" - Path:", contentPath);
 console.log(" - Size:", (content.length / 1024).toFixed(), "KB");
 
+// Upload the pipeline YAML as an artifact
+spawnSync("buildkite-agent", ["artifact", "upload", contentPath], { stdio: "inherit" });
+
 spawnSync("buildkite-agent", ["pipeline", "upload", contentPath], { stdio: "inherit" }); 
