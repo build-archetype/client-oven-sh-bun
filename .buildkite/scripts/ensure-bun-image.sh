@@ -7,6 +7,10 @@ BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
 
 echo "Checking for Bun build image..."
 
+# Make run-vm-command.sh executable
+echo "Making run-vm-command.sh executable..."
+chmod +x .buildkite/scripts/run-vm-command.sh
+
 # Delete existing image if it exists
 echo "Deleting existing image if present..."
 tart delete "$IMAGE_NAME" || true
