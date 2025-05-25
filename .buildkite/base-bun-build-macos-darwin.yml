@@ -6,6 +6,8 @@
 
 steps:
   - command: |
+      echo "$GITHUB_TOKEN" > workspace/github_token.txt
+      chmod 600 workspace/github_token.txt
       chmod +x .buildkite/scripts/ensure-bun-image.sh
       .buildkite/scripts/ensure-bun-image.sh
     label: "Build and Publish Base Image"
