@@ -158,8 +158,23 @@ if [ "$goto_privileged_setup" = false ]; then
   prompt_text MGMT_VLAN "Management VLAN" "10.0.2.0/24"
   prompt_text STORAGE_VLAN "Storage VLAN" "10.0.3.0/24"
   
-  # 5. Machine location
-  prompt_text MACHINE_LOCATION "Enter machine location (e.g., office-1, datacenter-2)" "office-1"
+  # 5. Machine location (with default and validation)
+  MACHINE_LOCATION="office-1"  # Set default value
+  prompt_text MACHINE_LOCATION "Enter machine location (e.g., office-1, datacenter-2)" "$MACHINE_LOCATION"
+  
+  # Validate MACHINE_LOCATION is set
+  if [ -z "$MACHINE_LOCATION" ]; then
+    echo_color "$RED" "Error: Machine location cannot be empty"
+    exit 1
+  fi
+
+  # Get computer name
+  COMPUTER_NAME=$(scutil --get ComputerName 2>/dev/null || hostname)
+  prompt_text COMPUTER_NAME "Enter computer name" "$COMPUTER_NAME"
+
+  echo_color "$BLUE" "Debug: Machine info set:"
+  echo_color "$BLUE" "  Location: $MACHINE_LOCATION"
+  echo_color "$BLUE" "  Computer Name: $COMPUTER_NAME"
 
   # --- Show summary and confirm ---
   echo_color "$YELLOW" "\nSummary of your choices:"
@@ -257,7 +272,7 @@ if [ "$goto_privileged_setup" = false ]; then
     fi
 
     echo_color "$BLUE" "Switching to root for system configuration..."
-    export_vars="BUILDKITE_AGENT_TOKEN=\"$BUILDKITE_AGENT_TOKEN\" VPN_ENABLED=\"$VPN_ENABLED\" BUILD_VLAN=\"$BUILD_VLAN\" MGMT_VLAN=\"$MGMT_VLAN\" STORAGE_VLAN=\"$STORAGE_VLAN\" GITHUB_TOKEN=\"$GITHUB_TOKEN\" MACHINE_LOCATION=\"$MACHINE_LOCATION\""
+    export_vars="BUILDKITE_AGENT_TOKEN=\"$BUILDKITE_AGENT_TOKEN\" VPN_ENABLED=\"$VPN_ENABLED\" BUILD_VLAN=\"$BUILD_VLAN\" MGMT_VLAN=\"$MGMT_VLAN\" STORAGE_VLAN=\"$STORAGE_VLAN\" GITHUB_TOKEN=\"$GITHUB_TOKEN\" MACHINE_LOCATION=\"$MACHINE_LOCATION\" COMPUTER_NAME=\"$COMPUTER_NAME\""
     if [ "$VPN_ENABLED" = true ]; then
       export_vars+=" VPN_TYPE=\"$VPN_TYPE\""
       case "$VPN_TYPE" in
@@ -277,6 +292,21 @@ fi
 
 # --- Privileged setup (root) ---
 echo_color "$BLUE" "\n[2/3] Running privileged setup..."
+
+# Ensure variables are set with defaults if needed
+if [ -z "$MACHINE_LOCATION" ]; then
+  echo_color "$YELLOW" "Warning: MACHINE_LOCATION not set, using default 'office-1'"
+  MACHINE_LOCATION="office-1"
+fi
+
+if [ -z "$COMPUTER_NAME" ]; then
+  echo_color "$YELLOW" "Warning: COMPUTER_NAME not set, using hostname"
+  COMPUTER_NAME=$(hostname)
+fi
+
+echo_color "$BLUE" "Debug: Machine info in root context:"
+echo_color "$BLUE" "  Location: $MACHINE_LOCATION"
+echo_color "$BLUE" "  Computer Name: $COMPUTER_NAME"
 
 mkdir -p /opt/buildkite-agent /opt/tart/images /var/log/buildkite-agent
 # mkdir -p /opt/prometheus
@@ -419,7 +449,7 @@ EOF
   esac
 fi
 
-# Get a unique machine identifier and location info
+# Get a unique machine identifier
 get_machine_info() {
   # Get hardware UUID
   local uuid
@@ -433,12 +463,8 @@ get_machine_info() {
     uuid=$(hostname)
   fi
 
-  # Get computer name
-  local computer_name
-  computer_name=$(scutil --get ComputerName 2>/dev/null || hostname)
-
   # Return all info as a JSON-like string
-  echo "{\"uuid\":\"$uuid\",\"location\":\"$MACHINE_LOCATION\",\"computer_name\":\"$computer_name\"}"
+  echo "{\"uuid\":\"$uuid\",\"location\":\"$MACHINE_LOCATION\",\"computer_name\":\"$COMPUTER_NAME\"}"
 }
 
 # Parse machine info
@@ -450,11 +476,13 @@ AGENT_COMPUTER_NAME=$(echo "$MACHINE_INFO" | grep -o '"computer_name":"[^"]*"' |
 # Create a sanitized location name (remove spaces, special chars)
 AGENT_LOCATION_SANITIZED=$(echo "$AGENT_LOCATION" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd '[:alnum:]-')
 
-# Store the location in a persistent file
+# Store the machine info in persistent files
 echo "$MACHINE_LOCATION" > /opt/buildkite-agent/.machine-location
+echo "$COMPUTER_NAME" > /opt/buildkite-agent/.computer-name
 
 # Create the agent name
 AGENT_NAME="macos-${AGENT_LOCATION_SANITIZED}-${AGENT_COMPUTER_NAME}-${AGENT_UUID:0:8}"
+echo_color "$BLUE" "Debug: Final AGENT_NAME: $AGENT_NAME"
 
 # Buildkite Agent config
 cat > /opt/buildkite-agent/buildkite-agent.cfg << EOF
