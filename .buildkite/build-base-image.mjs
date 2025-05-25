@@ -14,8 +14,6 @@ const pipeline = {
         tart: true
       },
       command: [
-        "env | grep GITHUB_TOKEN",
-        "echo 'printing github token'",
         "echo $GITHUB_TOKEN",
         "echo $GITHUB_TOKEN | tart login ghcr.io",
         "LOGIN_EXIT_CODE=$?",
