@@ -2,6 +2,7 @@
 
 import { toYaml, writeFile } from "../scripts/utils.mjs";
 import { IMAGE_CONFIG } from "./config.mjs";
+import { spawnSync } from "node:child_process";
 
 const pipeline = {
   steps: [
@@ -43,4 +44,6 @@ writeFile(contentPath, content);
 
 console.log("Generated base image pipeline:");
 console.log(" - Path:", contentPath);
-console.log(" - Size:", (content.length / 1024).toFixed(), "KB"); 
+console.log(" - Size:", (content.length / 1024).toFixed(), "KB");
+
+spawnSync("buildkite-agent", ["pipeline", "upload", contentPath], { stdio: "inherit" }); 

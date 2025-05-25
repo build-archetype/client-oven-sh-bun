@@ -6,9 +6,8 @@
 # https://buildkite.com/bun/base-bun-build-macos-darwin/settings/steps
 
 steps:
-  - command: |
-      chmod +x .buildkite/scripts/trigger-base-image-build.sh
-      .buildkite/scripts/trigger-base-image-build.sh
-    label: "Generate and Upload Pipeline"
+  - label: "Generate and Upload Base Image Pipeline"
     agents:
-      queue: darwin 
+      queue: darwin
+    command:
+      - "node .buildkite/build-base-image.mjs" 
