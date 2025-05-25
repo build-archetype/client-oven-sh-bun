@@ -8,14 +8,13 @@ chmod +x "$(dirname "$0")/run-vm-command.sh"
 
 IMAGE_NAME="bun-build-base"
 BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
-WORKSPACE_DIR="$PWD"
 
 echo "Checking for Bun build image..."
 
 # Function to verify image has all required dependencies
 verify_image() {
     echo "Verifying image has all required dependencies..."
-    tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$WORKSPACE_DIR" << 'EOF'
+    "$(dirname "$0")/run-vm-command.sh" "$IMAGE_NAME" '
         echo "Checking for required tools..."
         echo "Checking Bun..."
         which bun
@@ -36,7 +35,7 @@ verify_image() {
         echo $PATH
         
         echo "All dependencies verified successfully"
-EOF
+    '
 }
 
 # Check if our custom image exists and is valid
@@ -55,7 +54,10 @@ if ! tart list | grep -q "$IMAGE_NAME" || ! verify_image; then
     
     # Run the VM and install dependencies
     echo "Running VM to install dependencies..."
-    tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$WORKSPACE_DIR" << 'EOF'
+    tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" &
+    sleep 10  # Wait for VM to start
+    
+    "$(dirname "$0")/run-vm-command.sh" "$IMAGE_NAME" '
         echo "Setting up workspace..."
         cd /Volumes/My\ Shared\ Files/workspace
         
@@ -88,7 +90,7 @@ if ! tart list | grep -q "$IMAGE_NAME" || ! verify_image; then
         ls -la /Users/admin/.bun
         
         echo "All dependencies verified successfully"
-EOF
+    '
     
     # Stop the VM
     echo "Stopping VM..."
