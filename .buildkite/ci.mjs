@@ -473,16 +473,16 @@ function getBuildVendorStep(platform, options) {
     return {
       ...baseStep,
       command: [
-        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true;',
-        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &;',
-        'TART_LOG_PID=$!;',
-        `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT;`,
-        `tart clone bun-build-base ${vmName};`,
-        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &;`,
-        'sleep 30;',
-        'chmod +x .buildkite/scripts/run-vm-command.sh;',
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ls -la && ${getBuildCommand(platform, options)} --target dependencies";`,
-        'buildkite-agent artifact upload vm.log || echo "No VM log to upload";',
+        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-/ {print $2}\' | xargs -n1 tart delete || true',
+        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
+        'TART_LOG_PID=$!',
+        `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
+        `tart clone bun-build-base ${vmName}`,
+        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
+        'sleep 30',
+        'chmod +x .buildkite/scripts/run-vm-command.sh',
+        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ls -la && ${getBuildCommand(platform, options)} --target dependencies"`,
+        'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
         `tart delete ${vmName}`
       ]
     };
@@ -537,7 +537,7 @@ function getBuildCppStep(platform, options) {
 
   return {
     ...baseStep,
-    command: [`${command} --target bun`, `${command} --target dependencies`],
+    command: [`${command} --target bun`, `${command} --target dependencies`]
   };
 }
 
@@ -591,13 +591,13 @@ function getBuildZigStep(platform, options) {
         `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}"`,
         'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
         `tart delete ${vmName}`
-      ].join('\n')
+      ]
     };
   }
 
   return {
     ...baseStep,
-    command: `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
+    command: `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`
   };
 }
 
@@ -637,13 +637,13 @@ function getLinkBunStep(platform, options) {
         `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ${getBuildCommand(platform, options)} --target bun"`,
         'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
         `tart delete ${vmName}`
-      ].join('\n')
+      ]
     };
   }
 
   return {
     ...baseStep,
-    command: `${getBuildCommand(platform, options)} --target bun`,
+    command: `${getBuildCommand(platform, options)} --target bun`
   };
 }
 
@@ -715,7 +715,7 @@ function getTestBunStep(platform, options, testOptions = {}) {
         `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ./scripts/runner.node.mjs ${args.join(" ")}"`,
         'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
         `tart delete ${vmName}`
-      ].join('\n')
+      ]
     };
   }
 
@@ -724,7 +724,7 @@ function getTestBunStep(platform, options, testOptions = {}) {
     command:
       os === "windows"
         ? `node .\\scripts\\runner.node.mjs ${args.join(" ")}`
-        : `./scripts/runner.node.mjs ${args.join(" ")}`,
+        : `./scripts/runner.node.mjs ${args.join(" ")}`
   };
 }
 
