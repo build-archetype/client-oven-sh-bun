@@ -165,7 +165,6 @@ if [ "$goto_privileged_setup" = false ]; then
   echo_color "$YELLOW" "\nSummary of your choices:"
   echo "  Buildkite Agent Token:   [hidden]"
   echo "  GitHub Token:            [hidden]"
-  # echo "  Prometheus Username:     $PROMETHEUS_USER"
   echo "  Machine Location:        $MACHINE_LOCATION"
   if [ "$VPN_ENABLED" = true ]; then
     echo "  VPN Type:                 $VPN_TYPE"
@@ -258,8 +257,7 @@ if [ "$goto_privileged_setup" = false ]; then
     fi
 
     echo_color "$BLUE" "Switching to root for system configuration..."
-    export_vars="BUILDKITE_AGENT_TOKEN=\"$BUILDKITE_AGENT_TOKEN\" VPN_ENABLED=\"$VPN_ENABLED\" BUILD_VLAN=\"$BUILD_VLAN\" MGMT_VLAN=\"$MGMT_VLAN\" STORAGE_VLAN=\"$STORAGE_VLAN\" GITHUB_TOKEN=\"$GITHUB_TOKEN\""
-    # export_vars+=" PROMETHEUS_USER=\"$PROMETHEUS_USER\" PROMETHEUS_PASSWORD=\"$PROMETHEUS_PASSWORD\""
+    export_vars="BUILDKITE_AGENT_TOKEN=\"$BUILDKITE_AGENT_TOKEN\" VPN_ENABLED=\"$VPN_ENABLED\" BUILD_VLAN=\"$BUILD_VLAN\" MGMT_VLAN=\"$MGMT_VLAN\" STORAGE_VLAN=\"$STORAGE_VLAN\" GITHUB_TOKEN=\"$GITHUB_TOKEN\" MACHINE_LOCATION=\"$MACHINE_LOCATION\""
     if [ "$VPN_ENABLED" = true ]; then
       export_vars+=" VPN_TYPE=\"$VPN_TYPE\""
       case "$VPN_TYPE" in
