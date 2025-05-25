@@ -29,6 +29,7 @@ import {
   writeFile,
 } from "../scripts/utils.mjs";
 import { randomUUID } from "node:crypto";
+import { IMAGE_CONFIG } from "./config.mjs";
 
 /**
  * @typedef {"linux" | "darwin" | "windows"} Os
@@ -477,7 +478,7 @@ function getBuildVendorStep(platform, options) {
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
         `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone bun-build-base ${vmName}`,
+        `tart clone ${IMAGE_CONFIG.baseImage.name} ${vmName}`,
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
@@ -523,7 +524,7 @@ function getBuildCppStep(platform, options) {
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
         `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone bun-build-base ${vmName}`,
+        `tart clone ${IMAGE_CONFIG.baseImage.name} ${vmName}`,
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
@@ -584,7 +585,7 @@ function getBuildZigStep(platform, options) {
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
         `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone bun-build-base ${vmName}`,
+        `tart clone ${IMAGE_CONFIG.baseImage.name} ${vmName}`,
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
@@ -630,7 +631,7 @@ function getLinkBunStep(platform, options) {
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
         `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone bun-build-base ${vmName}`,
+        `tart clone ${IMAGE_CONFIG.baseImage.name} ${vmName}`,
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
@@ -708,7 +709,7 @@ function getTestBunStep(platform, options, testOptions = {}) {
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
         `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone bun-build-base ${vmName}`,
+        `tart clone ${IMAGE_CONFIG.baseImage.name} ${vmName}`,
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
@@ -1215,9 +1216,12 @@ async function getPipeline(options = {}) {
   // Add the Bun image check step at the start
   steps.push({
     label: "Ensure Bun Image",
-    command: "chmod +x .buildkite/scripts/ensure-bun-image.sh && .buildkite/scripts/ensure-bun-image.sh",
-    key: "ensure-bun-image", // Unique key for this step
-    depends_on: [], // No dependencies
+    command: [
+      `tart list | grep -q ${IMAGE_CONFIG.baseImage.name} || tart pull ${IMAGE_CONFIG.baseImage.fullName}`,
+      `tart list | grep -q ${IMAGE_CONFIG.baseImage.name} || (echo 'Failed to pull base image' && exit 1)`
+    ],
+    key: "ensure-bun-image",
+    depends_on: [],
     agents: getCppAgent(filteredBuildPlatforms[0], options)
   });
 

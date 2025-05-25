@@ -41,15 +41,24 @@ done
 
 # Check Bun before bootstrap
 echo "Checking Bun before bootstrap..."
-sshpass -p admin ssh -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "which bun || echo 'Bun not found'"
-
-# Run bootstrap.sh to set up dependencies
-echo "Setting up build environment..."
-sshpass -p admin ssh -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "cd '/Volumes/My Shared Files/workspace' && chmod +x scripts/bootstrap.sh && ./scripts/bootstrap.sh"
-
-# Check Bun after bootstrap
-echo "Checking Bun after bootstrap..."
-sshpass -p admin ssh -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "which bun && bun --version || echo 'Bun not found'"
+sshpass -p admin ssh -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP '
+echo "Checking PATH..."
+which bun || echo "Not found in PATH"
+echo "Checking /usr/local/bin..."
+find /usr/local/bin -name bun 2>/dev/null || echo "Not found in /usr/local/bin"
+echo "Checking /opt/homebrew/bin..."
+find /opt/homebrew/bin -name bun 2>/dev/null || echo "Not found in /opt/homebrew/bin"
+' || {
+    echo "❌ ERROR: Bun was not found in the VM!"
+    echo "================================================"
+    echo "The base image build failed because Bun is not installed or not in PATH."
+    echo "Common locations checked:"
+    echo "- /usr/local/bin"
+    echo "- /opt/homebrew/bin"
+    echo "- PATH directories"
+    echo "================================================"
+    exit 1
+}
 
 # Run the command
 echo "Running command: $COMMAND"

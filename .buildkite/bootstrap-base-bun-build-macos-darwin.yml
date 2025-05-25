@@ -1,0 +1,14 @@
+# Uploads the base image build pipeline to Buildkite.
+# This pipeline is responsible for building and publishing the macOS base image used by the main CI pipeline.
+# https://buildkite.com/docs/pipelines/defining-steps
+#
+# Changes to this file must be manually edited here:
+# https://buildkite.com/bun/base-bun-build-macos-darwin/settings/steps
+
+steps:
+  - command: |
+      chmod +x .buildkite/scripts/trigger-base-image-build.sh
+      .buildkite/scripts/trigger-base-image-build.sh
+    label: "Generate and Upload Pipeline"
+    agents:
+      queue: darwin 

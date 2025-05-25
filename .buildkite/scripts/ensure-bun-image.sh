@@ -2,7 +2,7 @@
 set -e
 set -x
 
-IMAGE_NAME="bun-build-base"
+IMAGE_NAME="base-bun-build-macos-darwin"
 BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
 MAX_RETRIES=3
 DELETE_EXISTING=false
@@ -35,6 +35,14 @@ retry_command() {
 
     return $exitcode
 }
+
+# Authenticate with GitHub Container Registry
+echo "Authenticating with GitHub Container Registry..."
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+    echo "${GITHUB_TOKEN}" | tart login ghcr.io --password-stdin
+else
+    echo "Warning: GITHUB_TOKEN not set, authentication may fail"
+fi
 
 # Check if we should delete existing image
 if [ "$DELETE_EXISTING" = "true" ]; then
