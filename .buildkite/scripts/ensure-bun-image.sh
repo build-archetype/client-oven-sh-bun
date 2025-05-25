@@ -6,9 +6,42 @@ BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
 
 echo "Checking for Bun build image..."
 
-# Check if our custom image exists
-if ! tart list | grep -q "$IMAGE_NAME"; then
-    echo "Creating Bun build image..."
+# Function to verify image has all required dependencies
+verify_image() {
+    echo "Verifying image has all required dependencies..."
+    tart run "$IMAGE_NAME" --no-graphics << 'EOF'
+        echo "Checking for required tools..."
+        echo "Checking Bun..."
+        which bun
+        bun --version
+        
+        echo "Checking CMake..."
+        which cmake
+        cmake --version
+        
+        echo "Checking Ninja..."
+        which ninja
+        ninja --version
+        
+        echo "Checking Bun installation directory..."
+        ls -la /Users/admin/.bun
+        
+        echo "Checking PATH..."
+        echo $PATH
+        
+        echo "All dependencies verified successfully"
+EOF
+}
+
+# Check if our custom image exists and is valid
+if ! tart list | grep -q "$IMAGE_NAME" || ! verify_image; then
+    echo "Creating or updating Bun build image..."
+    
+    # Delete existing image if it exists but is invalid
+    if tart list | grep -q "$IMAGE_NAME"; then
+        echo "Removing invalid image..."
+        tart delete "$IMAGE_NAME"
+    fi
     
     # Clone the base image
     echo "Cloning base image..."
@@ -17,29 +50,37 @@ if ! tart list | grep -q "$IMAGE_NAME"; then
     # Run the VM and install dependencies
     echo "Running VM to install dependencies..."
     tart run "$IMAGE_NAME" --no-graphics << 'EOF'
-        # Mount the workspace
+        echo "Setting up workspace..."
         mkdir -p /Volumes/My\ Shared\ Files/workspace
         
-        # Run bootstrap.sh
+        echo "Running bootstrap.sh..."
         cd /Volumes/My\ Shared\ Files/workspace
         chmod +x scripts/bootstrap.sh
         ./scripts/bootstrap.sh
         
-        # Verify installation
         echo "Verifying installations..."
-        which bun || { echo "Bun not found"; exit 1; }
-        bun --version || { echo "Bun version check failed"; exit 1; }
-        which cmake || { echo "CMake not found"; exit 1; }
-        which ninja || { echo "Ninja not found"; exit 1; }
+        echo "Checking Bun..."
+        which bun
+        bun --version
         
-        # Set up environment
+        echo "Checking CMake..."
+        which cmake
+        cmake --version
+        
+        echo "Checking Ninja..."
+        which ninja
+        ninja --version
+        
         echo "Setting up environment..."
         export BUN_INSTALL="/Users/admin/.bun"
         export PATH="/Users/admin/.bun/bin:$PATH"
         
-        # Verify Bun is in PATH
         echo "Verifying Bun in PATH..."
-        which bun || { echo "Bun not in PATH"; exit 1; }
+        which bun
+        bun --version
+        
+        echo "Checking Bun installation directory..."
+        ls -la /Users/admin/.bun
         
         echo "All dependencies verified successfully"
 EOF
@@ -48,7 +89,14 @@ EOF
     echo "Stopping VM..."
     tart stop "$IMAGE_NAME"
     
+    # Verify the image one final time
+    echo "Performing final verification..."
+    if ! verify_image; then
+        echo "Failed to create valid Bun build image"
+        exit 1
+    fi
+    
     echo "Bun build image created successfully"
 else
-    echo "Bun build image already exists"
+    echo "Valid Bun build image already exists"
 fi 
