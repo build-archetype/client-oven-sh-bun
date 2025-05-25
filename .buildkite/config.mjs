@@ -1,10 +1,19 @@
+// Get the organization from the repository URL
+const getOrgFromRepo = () => {
+  const repo = process.env.BUILDKITE_REPO || '';
+  const match = repo.match(/github\.com[:/]([^/]+)/);
+  return match ? match[1] : 'oven-sh'; // fallback to oven-sh if we can't determine
+};
+
 export const IMAGE_CONFIG = {
   registry: "ghcr.io",
-  organization: "oven-sh",
+  organization: getOrgFromRepo(),
   baseImage: {
     name: "base-bun-build-macos-darwin",
     tag: "latest",
-    fullName: "ghcr.io/oven-sh/base-bun-build-macos-darwin:latest"
+    get fullName() {
+      return `${this.registry}/${IMAGE_CONFIG.organization}/${this.name}:${this.tag}`;
+    }
   }
 };
 
