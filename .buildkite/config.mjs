@@ -7,7 +7,7 @@ const getOrgFromRepo = () => {
 
 export const IMAGE_CONFIG = {
   registry: "ghcr.io",
-  organization: getOrgFromRepo(),
+  organization: "build-archetype",
   baseImage: {
     name: "base-bun-build-macos-darwin",
     tag: "latest",

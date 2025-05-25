@@ -30,36 +30,6 @@ echo "Buildkite Repo: ${BUILDKITE_REPO:-not set}"
 echo "==========================="
 echo
 
-# Validate GitHub token and permissions
-validate_github_token() {
-    if [ -z "${GITHUB_TOKEN:-}" ]; then
-        echo "Error: GITHUB_TOKEN is not set"
-        echo "Please ensure GITHUB_TOKEN is set in Buildkite's environment variables"
-        echo "The token needs:"
-        echo "  - write:packages permission"
-        echo "  - read:packages permission"
-        echo "  - access to the $ORG organization"
-        exit 1
-    fi
-
-    # Test token permissions
-    echo "Validating GitHub token permissions..."
-    if ! curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-        "https://api.github.com/user" > /dev/null; then
-        echo "Error: Invalid GitHub token"
-        exit 1
-    fi
-
-    # Check organization access
-    if ! curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-        "https://api.github.com/orgs/$ORG" > /dev/null; then
-        echo "Error: Token does not have access to organization $ORG"
-        exit 1
-    fi
-
-    echo "GitHub token validation successful"
-}
-
 # Make run-vm-command.sh executable
 echo "Making run-vm-command.sh executable..."
 chmod +x .buildkite/scripts/run-vm-command.sh
@@ -88,17 +58,6 @@ retry_command() {
 
     return $exitcode
 }
-
-# Validate GitHub token before proceeding
-validate_github_token
-
-# Authenticate with GitHub Container Registry
-echo "Authenticating with GitHub Container Registry..."
-if [ -n "${GITHUB_TOKEN:-}" ]; then
-    echo "${GITHUB_TOKEN}" | tart login ghcr.io --password-stdin
-else
-    echo "Warning: GITHUB_TOKEN not set, authentication may fail"
-fi
 
 # Check if we should delete existing image
 if [ "$DELETE_EXISTING" = "true" ]; then

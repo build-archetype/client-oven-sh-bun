@@ -6,16 +6,8 @@
 
 steps:
   - command: |
-      echo "$GITHUB_TOKEN" > github_token.txt
-      chmod 600 github_token.txt
       chmod +x .buildkite/scripts/ensure-bun-image.sh
       .buildkite/scripts/ensure-bun-image.sh
     label: "Build and Publish Base Image"
-    agents:
-      queue: darwin
-
-  - command: |
-      rm -f github_token.txt
-    label: "Cleanup GitHub Token"
     agents:
       queue: darwin 
