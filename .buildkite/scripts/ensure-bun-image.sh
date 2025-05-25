@@ -7,6 +7,10 @@ BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
 
 echo "Checking for Bun build image..."
 
+# Delete existing image if it exists
+echo "Deleting existing image if present..."
+tart delete "$IMAGE_NAME" || true
+
 # Check if our custom image exists
 if ! tart list | grep -q "$IMAGE_NAME"; then
     echo "Creating Bun build image..."
