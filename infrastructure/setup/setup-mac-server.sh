@@ -124,8 +124,12 @@ if [ "$goto_privileged_setup" = false ]; then
   # 1. Buildkite token
   prompt_secret BUILDKITE_AGENT_TOKEN "Enter your Buildkite Agent Token"
 
-  # 2. Grafana password
-  prompt_secret GRAFANA_ADMIN_PASSWORD "Enter Grafana admin password"
+  # 1b. GitHub token for ghcr.io pushes
+  prompt_secret GITHUB_TOKEN "Enter your GitHub Token (for ghcr.io pushes)"
+
+  # 2. Prometheus credentials (commented out for now)
+  # prompt_secret PROMETHEUS_USER "Enter Prometheus admin username" "admin"
+  # prompt_secret PROMETHEUS_PASSWORD "Enter Prometheus admin password"
 
   # 3. VPN details (if enabled)
   if [ "$VPN_ENABLED" = true ]; then
@@ -153,11 +157,16 @@ if [ "$goto_privileged_setup" = false ]; then
   prompt_text BUILD_VLAN "Build VLAN" "10.0.1.0/24"
   prompt_text MGMT_VLAN "Management VLAN" "10.0.2.0/24"
   prompt_text STORAGE_VLAN "Storage VLAN" "10.0.3.0/24"
+  
+  # 5. Machine location
+  prompt_text MACHINE_LOCATION "Enter machine location (e.g., office-1, datacenter-2)" "office-1"
 
   # --- Show summary and confirm ---
   echo_color "$YELLOW" "\nSummary of your choices:"
   echo "  Buildkite Agent Token:   [hidden]"
-  echo "  Grafana Admin Password:   [hidden]"
+  echo "  GitHub Token:            [hidden]"
+  # echo "  Prometheus Username:     $PROMETHEUS_USER"
+  echo "  Machine Location:        $MACHINE_LOCATION"
   if [ "$VPN_ENABLED" = true ]; then
     echo "  VPN Type:                 $VPN_TYPE"
     case "$VPN_TYPE" in
@@ -208,7 +217,7 @@ if [ "$goto_privileged_setup" = false ]; then
     if ! command -v tailscale &> /dev/null; then
       echo_color "$RED" "Tailscale is not in PATH after installation. Aborting."; exit 1;
     fi
-    brew install buildkite/buildkite/buildkite-agent prometheus grafana terraform jq yq wget git wireguard-tools openvpn node_exporter node
+    brew install buildkite/buildkite/buildkite-agent terraform jq yq wget git wireguard-tools openvpn node
     echo_color "$GREEN" "✅ Homebrew and dependencies installed."
 
     # Verify Node.js installation
@@ -249,7 +258,8 @@ if [ "$goto_privileged_setup" = false ]; then
     fi
 
     echo_color "$BLUE" "Switching to root for system configuration..."
-    export_vars="BUILDKITE_AGENT_TOKEN=\"$BUILDKITE_AGENT_TOKEN\" GRAFANA_ADMIN_PASSWORD=\"$GRAFANA_ADMIN_PASSWORD\" VPN_ENABLED=\"$VPN_ENABLED\" BUILD_VLAN=\"$BUILD_VLAN\" MGMT_VLAN=\"$MGMT_VLAN\" STORAGE_VLAN=\"$STORAGE_VLAN\""
+    export_vars="BUILDKITE_AGENT_TOKEN=\"$BUILDKITE_AGENT_TOKEN\" VPN_ENABLED=\"$VPN_ENABLED\" BUILD_VLAN=\"$BUILD_VLAN\" MGMT_VLAN=\"$MGMT_VLAN\" STORAGE_VLAN=\"$STORAGE_VLAN\" GITHUB_TOKEN=\"$GITHUB_TOKEN\""
+    # export_vars+=" PROMETHEUS_USER=\"$PROMETHEUS_USER\" PROMETHEUS_PASSWORD=\"$PROMETHEUS_PASSWORD\""
     if [ "$VPN_ENABLED" = true ]; then
       export_vars+=" VPN_TYPE=\"$VPN_TYPE\""
       case "$VPN_TYPE" in
@@ -270,7 +280,8 @@ fi
 # --- Privileged setup (root) ---
 echo_color "$BLUE" "\n[2/3] Running privileged setup..."
 
-mkdir -p /opt/buildkite-agent /opt/tart/images /opt/prometheus /opt/grafana /var/log/buildkite-agent
+mkdir -p /opt/buildkite-agent /opt/tart/images /var/log/buildkite-agent
+# mkdir -p /opt/prometheus
 
 # --- Prevent system sleep (server mode) ---
 echo_color "$BLUE" "Configuring system to never sleep (server mode)..."
@@ -410,10 +421,42 @@ EOF
   esac
 fi
 
-# Get the logged-in username and hostname for agent naming
-AGENT_USER=$(whoami)
-AGENT_HOST=$(hostname)
-AGENT_NAME="${AGENT_USER}-${AGENT_HOST}"
+# Get a unique machine identifier and location info
+get_machine_info() {
+  # Get hardware UUID
+  local uuid
+  uuid=$(ioreg -rd1 -c IOPlatformExpertDevice | awk -F'"' '/IOPlatformUUID/{print $4}')
+  if [ -z "$uuid" ]; then
+    # Fallback: use serial number
+    uuid=$(system_profiler SPHardwareDataType | awk '/Serial/ {print $4}')
+  fi
+  if [ -z "$uuid" ]; then
+    # Fallback: use hostname
+    uuid=$(hostname)
+  fi
+
+  # Get computer name
+  local computer_name
+  computer_name=$(scutil --get ComputerName 2>/dev/null || hostname)
+
+  # Return all info as a JSON-like string
+  echo "{\"uuid\":\"$uuid\",\"location\":\"$MACHINE_LOCATION\",\"computer_name\":\"$computer_name\"}"
+}
+
+# Parse machine info
+MACHINE_INFO=$(get_machine_info)
+AGENT_UUID=$(echo "$MACHINE_INFO" | grep -o '"uuid":"[^"]*"' | cut -d'"' -f4)
+AGENT_LOCATION=$(echo "$MACHINE_INFO" | grep -o '"location":"[^"]*"' | cut -d'"' -f4)
+AGENT_COMPUTER_NAME=$(echo "$MACHINE_INFO" | grep -o '"computer_name":"[^"]*"' | cut -d'"' -f4)
+
+# Create a sanitized location name (remove spaces, special chars)
+AGENT_LOCATION_SANITIZED=$(echo "$AGENT_LOCATION" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd '[:alnum:]-')
+
+# Store the location in a persistent file
+echo "$MACHINE_LOCATION" > /opt/buildkite-agent/.machine-location
+
+# Create the agent name
+AGENT_NAME="macos-${AGENT_LOCATION_SANITIZED}-${AGENT_COMPUTER_NAME}-${AGENT_UUID:0:8}"
 
 # Buildkite Agent config
 cat > /opt/buildkite-agent/buildkite-agent.cfg << EOF
@@ -425,29 +468,37 @@ hooks-path="/opt/buildkite-agent/hooks"
 plugins-path="/opt/buildkite-agent/plugins"
 EOF
 
-# Prometheus config
-cat > /opt/prometheus/prometheus.yml << EOF
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
-scrape_configs:
-  - job_name: 'node'
-    static_configs:
-      - targets: ['localhost:9100']
-  - job_name: 'buildkite'
-    static_configs:
-      - targets: ['localhost:9200']
-EOF
-
-# Grafana config
-cat > /opt/grafana/grafana.ini << EOF
-[server]
-http_port = 3400
-domain = localhost
-[security]
-admin_user = admin
-admin_password = ${GRAFANA_ADMIN_PASSWORD}
-EOF
+# Prometheus config (commented out for now)
+# cat > /opt/prometheus/prometheus.yml << EOF
+# global:
+#   scrape_interval: 15s
+#   evaluation_interval: 15s
+# 
+# # Basic auth configuration
+# basic_auth_users:
+#   ${PROMETHEUS_USER}: ${PROMETHEUS_PASSWORD}
+# 
+# scrape_configs:
+#   - job_name: 'node'
+#     static_configs:
+#       - targets: ['localhost:9100']
+#     basic_auth:
+#       username: ${PROMETHEUS_USER}
+#       password: ${PROMETHEUS_PASSWORD}
+# 
+#   - job_name: 'buildkite'
+#     static_configs:
+#       - targets: ['localhost:9200']
+#     basic_auth:
+#       username: ${PROMETHEUS_USER}
+#       password: ${PROMETHEUS_PASSWORD}
+# EOF
+# 
+# # Create Prometheus web config for basic auth
+# cat > /opt/prometheus/web.yml << EOF
+# basic_auth_users:
+#   ${PROMETHEUS_USER}: ${PROMETHEUS_PASSWORD}
+# EOF
 
 # SSH config
 cat > /etc/ssh/sshd_config.d/build-server.conf << EOF
@@ -464,7 +515,7 @@ echo_color "$YELLOW" "Summary of what was done:"
 echo "  - Homebrew and dependencies installed"
 echo "  - Tart installed via Cirrus Labs tap"
 echo "  - Buildkite agent configured"
-echo "  - Prometheus and Grafana configured"
+# echo "  - Prometheus configured with authentication"
 echo "  - SSH configuration updated"
 if [ "$VPN_ENABLED" = true ]; then
   echo "  - VPN setup completed"
@@ -474,29 +525,30 @@ fi
 AGENT_BIN="$(brew --prefix buildkite-agent)/bin/buildkite-agent"
 
 echo_color "$YELLOW" "Next steps:"
-echo "  1. Configure Grafana at http://localhost:3400 (user: admin, pass: $GRAFANA_ADMIN_PASSWORD)"
-echo "  2. Open Prometheus at http://localhost:9090 (no login required by default)"
-echo "  3. Add your SSH keys to ~/.ssh/authorized_keys"
+# echo "  1. Access Prometheus at http://localhost:9090"
+# echo "     Username: $PROMETHEUS_USER"
+# echo "     Password: $PROMETHEUS_PASSWORD"
+echo "  1. Add your SSH keys to ~/.ssh/authorized_keys"
 if [ "$VPN_ENABLED" = true ]; then
   case "$VPN_TYPE" in
     wireguard)
-      echo "  4. Test WireGuard connection: wg show" ;;
+      echo "  2. Test WireGuard connection: wg show" ;;
     tailscale)
-      echo "  4. Test Tailscale connection: tailscale status" ;;
+      echo "  2. Test Tailscale connection: tailscale status" ;;
     unifi)
-      echo "  4. Test UniFi VPN connection: openvpn --status" ;;
+      echo "  2. Test UniFi VPN connection: openvpn --status" ;;
     cloudflare)
-      echo "  4. Test Cloudflare Tunnel connection: cloudflared tunnel info" ;;
+      echo "  2. Test Cloudflare Tunnel connection: cloudflared tunnel info" ;;
   esac
 else
-  echo "  4. VPN setup was skipped (local access only)"
+  echo "  2. VPN setup was skipped (local access only)"
 fi
-echo "  5. Set up Tart images in /opt/tart/images"
-echo "  6. Review and customize Prometheus config"
-echo "  7. Buildkite is ready to run. Start the agent with: $AGENT_BIN start"
-echo "  8. Create base VMs with: tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest sequoia-base"
-echo "  9. Start Buildkite agent with: $AGENT_BIN start"
-echo "  10. Use these Buildkite aliases:"
+echo "  3. Set up Tart images in /opt/tart/images"
+# echo "  4. Review and customize Prometheus config"
+echo "  4. Buildkite is ready to run. Start the agent with: $AGENT_BIN start"
+echo "  5. Create base VMs with: tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest sequoia-base"
+echo "  6. Start Buildkite agent with: $AGENT_BIN start"
+echo "  7. Use these Buildkite aliases:"
 echo "      - bk-start: Start the agent"
 echo "      - bk-stop: Stop the agent"
 echo "      - bk-restart: Restart the agent"
@@ -530,56 +582,8 @@ plugins-path="/opt/buildkite-agent/plugins"
 EOF
 sudo chown $(whoami):staff "$BK_CFG"
 
-# --- Start Buildkite agent using Homebrew path ---
-echo_color "$BLUE" "Starting Buildkite agent using $AGENT_BIN..."
-sudo mkdir -p /opt/buildkite-agent/builds
-sudo chown -R $(whoami):staff /opt/buildkite-agent
-"$AGENT_BIN" start --config "$BK_CFG" &
-
-# --- Update Grafana config to use port 3400 ---
-sed -i '' 's/^http_port = .*/http_port = 3400/' /opt/grafana/grafana.ini 2>/dev/null || true
-
-# --- Start Prometheus server if not running ---
-if ! pgrep -f 'prometheus' > /dev/null; then
-  echo_color "$BLUE" "Starting Prometheus server on port 9090..."
-  (prometheus --config.file=/opt/prometheus/prometheus.yml --storage.tsdb.path=/opt/prometheus &)
-  sleep 2
-  if pgrep -f 'prometheus' > /dev/null; then
-    echo_color "$GREEN" "Prometheus started successfully on http://localhost:9090"
-  else
-    echo_color "$RED" "Failed to start Prometheus. Please check logs or try manually: prometheus --config.file=/opt/prometheus/prometheus.yml --storage.tsdb.path=/opt/prometheus"
-  fi
-else
-  echo_color "$GREEN" "Prometheus is already running."
-fi
-
-# --- Start Grafana server if not running (port 3400) ---
-sed -i '' 's/^http_port = .*/http_port = 3400/' /opt/grafana/grafana.ini 2>/dev/null || true
-if ! pgrep -f 'grafana server' > /dev/null; then
-  echo_color "$BLUE" "Starting Grafana server on port 3400..."
-  (grafana server --config=/opt/grafana/grafana.ini --homepath=$(brew --prefix grafana)/share/grafana &)
-  sleep 2
-  if pgrep -f 'grafana server' > /dev/null; then
-    echo_color "$GREEN" "Grafana started successfully on http://localhost:3400"
-  else
-    echo_color "$RED" "Failed to start Grafana. Please check logs or try manually: grafana server --config=/opt/grafana/grafana.ini --homepath=$(brew --prefix grafana)/share/grafana"
-  fi
-else
-  echo_color "$GREEN" "Grafana is already running."
-fi
-
-# --- After starting Prometheus and Grafana, print login info ---
-echo_color "$YELLOW" "\nAccess your monitoring dashboards:"
-echo "  - Prometheus: http://localhost:9090 (no login required by default)"
-echo "  - Grafana:    http://localhost:3400"
-echo "      Username: admin"
-echo "      Password: $GRAFANA_ADMIN_PASSWORD"
-echo ""
-echo_color "$YELLOW" "If you want to secure Prometheus with a password, see: https://prometheus.io/docs/prometheus/latest/configuration/https/ (not set by this script)"
-
-# --- Automatically open Prometheus and Grafana in browser ---
-open http://localhost:9090
-open http://localhost:3400
+# --- Automatically open Prometheus in browser (commented out) ---
+# open http://localhost:9090
 
 # --- Create aliases ---
 echo_color "$BLUE" "Creating Buildkite aliases..."
@@ -597,3 +601,17 @@ EOF
 
 # Source the updated .zshrc
 source ~/.zshrc
+
+PLIST_PATH="/opt/homebrew/opt/buildkite-agent/homebrew.mxcl.buildkite-agent.plist"
+
+# Add or update the EnvironmentVariables section for GITHUB_TOKEN
+if ! grep -q "<key>EnvironmentVariables</key>" "$PLIST_PATH"; then
+  # Insert EnvironmentVariables section before the closing </dict>
+  /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables dict" "$PLIST_PATH"
+  /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:GITHUB_TOKEN string $GITHUB_TOKEN" "$PLIST_PATH"
+else
+  /usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:GITHUB_TOKEN $GITHUB_TOKEN" "$PLIST_PATH"
+fi
+
+# Start or restart the Buildkite agent as a Homebrew service
+brew services restart buildkite-agent

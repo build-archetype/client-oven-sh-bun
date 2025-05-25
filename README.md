@@ -399,3 +399,40 @@ Refer to the [Project > Contributing](https://bun.sh/docs/project/contributing) 
 Refer to the [Project > License](https://bun.sh/docs/project/licensing) page for information about Bun's licensing.
 
 > **Note:** For public repositories, configure your Buildkite pipeline to use the HTTPS repository URL (e.g., `https://github.com/build-archetype/client-oven-sh-bun.git`) instead of the SSH URL. This avoids authentication issues during checkout, as HTTPS does not require an SSH key for public repos.
+
+## Setting up the GitHub Token for Buildkite Agent
+
+The Buildkite agent requires a `GITHUB_TOKEN` environment variable to push images to GitHub Container Registry (ghcr.io). This token is prompted for during the on-prem Mac server setup script and is exported to the agent's environment.
+
+### How it works
+- During setup, you will be prompted to enter your GitHub token.
+- The token is exported as `GITHUB_TOKEN` for the Buildkite agent, making it available to all jobs.
+
+### How to add or update the token manually
+If you need to add or update the token after setup:
+
+1. **Edit the agent's environment file or config:**
+   - For agents started via shell, add to your shell profile or before starting the agent:
+     ```bash
+     export GITHUB_TOKEN=your_actual_token
+     buildkite-agent start
+     ```
+   - For agents running as a service (systemd):
+     - Edit `/etc/default/buildkite-agent` or `/etc/environment` (or the relevant service file) and add:
+       ```bash
+       export GITHUB_TOKEN=your_actual_token
+       ```
+     - Restart the agent:
+       ```bash
+       sudo systemctl restart buildkite-agent
+       ```
+
+2. **Verify the token is available:**
+   - Run a Buildkite job with:
+     ```yaml
+     steps:
+       - command: "env | grep GITHUB_TOKEN"
+     ```
+   - You should see `GITHUB_TOKEN=your_actual_token` in the output.
+
+**Note:** The token must have `write:packages` and `read:packages` permissions for your GitHub organization.
