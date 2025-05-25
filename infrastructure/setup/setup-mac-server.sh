@@ -127,6 +127,10 @@ if [ "$goto_privileged_setup" = false ]; then
   # 1b. GitHub token for ghcr.io pushes
   prompt_secret GITHUB_TOKEN "Enter your GitHub Token (for ghcr.io pushes)"
 
+  # Store GITHUB_TOKEN in a temp file for root context
+  echo "$GITHUB_TOKEN" > /tmp/github-token.txt
+  chmod 600 /tmp/github-token.txt
+
   # 2. Prometheus credentials (commented out for now)
   # prompt_secret PROMETHEUS_USER "Enter Prometheus admin username" "admin"
   # prompt_secret PROMETHEUS_PASSWORD "Enter Prometheus admin password"
@@ -272,7 +276,7 @@ if [ "$goto_privileged_setup" = false ]; then
     fi
 
     echo_color "$BLUE" "Switching to root for system configuration..."
-    export_vars="BUILDKITE_AGENT_TOKEN=\"$BUILDKITE_AGENT_TOKEN\" VPN_ENABLED=\"$VPN_ENABLED\" BUILD_VLAN=\"$BUILD_VLAN\" MGMT_VLAN=\"$MGMT_VLAN\" STORAGE_VLAN=\"$STORAGE_VLAN\" GITHUB_TOKEN=\"$GITHUB_TOKEN\" MACHINE_LOCATION=\"$MACHINE_LOCATION\" COMPUTER_NAME=\"$COMPUTER_NAME\""
+    export_vars="BUILDKITE_AGENT_TOKEN=\"$BUILDKITE_AGENT_TOKEN\" VPN_ENABLED=\"$VPN_ENABLED\" BUILD_VLAN=\"$BUILD_VLAN\" MGMT_VLAN=\"$MGMT_VLAN\" STORAGE_VLAN=\"$STORAGE_VLAN\" MACHINE_LOCATION=\"$MACHINE_LOCATION\" COMPUTER_NAME=\"$COMPUTER_NAME\""
     if [ "$VPN_ENABLED" = true ]; then
       export_vars+=" VPN_TYPE=\"$VPN_TYPE\""
       case "$VPN_TYPE" in
@@ -292,6 +296,12 @@ fi
 
 # --- Privileged setup (root) ---
 echo_color "$BLUE" "\n[2/3] Running privileged setup..."
+
+# Restore GITHUB_TOKEN from temp file if present
+if [ -f /tmp/github-token.txt ]; then
+  GITHUB_TOKEN=$(cat /tmp/github-token.txt)
+  rm /tmp/github-token.txt
+fi
 
 # Ensure variables are set with defaults if needed
 if [ -z "$MACHINE_LOCATION" ]; then
