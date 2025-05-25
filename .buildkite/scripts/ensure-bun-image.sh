@@ -34,7 +34,8 @@ echo
 validate_github_token() {
     if [ -z "${GITHUB_TOKEN:-}" ]; then
         echo "Error: GITHUB_TOKEN is not set"
-        echo "Please set GITHUB_TOKEN with a token that has:"
+        echo "Please ensure GITHUB_TOKEN is set in Buildkite's environment variables"
+        echo "The token needs:"
         echo "  - write:packages permission"
         echo "  - read:packages permission"
         echo "  - access to the $ORG organization"
