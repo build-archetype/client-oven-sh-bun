@@ -4,33 +4,18 @@ set -x
 
 # Hardcoded image configuration
 IMAGE_NAME="base-bun-build-macos-darwin"
-BASE_IMAGE_NAME="macos-sequoia-vanilla"
-BASE_IMAGE_REMOTE="ghcr.io/cirruslabs/macos-sequoia-vanilla:latest"
+BASE_IMAGE_REMOTE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
 TARGET_IMAGE="ghcr.io/build-archetype/client-oven-sh-bun/base-bun-build-macos-darwin:latest"
 
 MAX_RETRIES=3
-DELETE_EXISTING=false
-
-# Get organization from BUILDKITE_REPO or default to oven-sh
-if [[ -n "${BUILDKITE_REPO:-}" ]]; then
-    # Extract org from git URL (handles both https and git formats)
-    ORG=$(echo "$BUILDKITE_REPO" | sed -E 's|.*github\.com[:/]([^/]+).*|\1|')
-else
-    # Default to oven-sh if we can't determine
-    ORG="oven-sh"
-fi
 
 # Print configuration summary
 echo "=== Configuration Summary ==="
 echo "Custom Image Name: $IMAGE_NAME"
-echo "Base Image Name: $BASE_IMAGE_NAME"
 echo "Base Image Remote: $BASE_IMAGE_REMOTE"
 echo "Target Image: $TARGET_IMAGE"
-echo "Organization: $ORG"
 echo "Max Retries: $MAX_RETRIES"
-echo "Delete Existing: $DELETE_EXISTING"
 echo "GitHub Token: ${GITHUB_TOKEN:+set}${GITHUB_TOKEN:-not set}"
-echo "Buildkite Repo: ${BUILDKITE_REPO:-not set}"
 echo "==========================="
 echo
 
@@ -63,24 +48,16 @@ retry_command() {
     return $exitcode
 }
 
-# 1. Delete your custom image if requested
-if [ "$DELETE_EXISTING" = "true" ]; then
-    echo "DELETE_EXISTING is true, removing existing custom image..."
-    tart delete "$IMAGE_NAME" || true
-fi
+# Always clone the base image from the remote reference to the custom image name
+# This will overwrite any existing VM with the same name
 
-# 2. Clone the base image from the remote reference to a local VM
-if ! tart list | grep -q "$IMAGE_NAME"; then
-    echo "Cloning base image from remote reference to create custom image..."
-    retry_command "tart clone $BASE_IMAGE_REMOTE $IMAGE_NAME" || {
-        echo "Failed to clone base image after $MAX_RETRIES attempts"
-        exit 1
-    }
-else
-    echo "Custom image already exists locally."
-fi
+echo "Cloning base image from remote reference to create custom image..."
+retry_command "tart clone $BASE_IMAGE_REMOTE $IMAGE_NAME" || {
+    echo "Failed to clone base image after $MAX_RETRIES attempts"
+    exit 1
+}
 
-# 3. Start the VM and run bootstrap
+# Start the VM and run bootstrap
 echo "Starting VM and running bootstrap..."
 tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" &
 VM_PID=$!
@@ -103,13 +80,7 @@ echo "Stopping VM..."
 kill $VM_PID
 wait $VM_PID || true  # Ignore the exit status of wait since we expect SIGTERM
 
-# Final verification that image exists
-if ! tart list | grep -q "$IMAGE_NAME"; then
-    echo "Custom image was not created successfully"
-    exit 1
-fi
-
-# 4. Push your custom image to your registry
+# Push your custom image to your registry
 echo "Pushing custom image to ghcr.io..."
 retry_command "tart push $IMAGE_NAME $TARGET_IMAGE" || {
     echo "Failed to push image after $MAX_RETRIES attempts"
