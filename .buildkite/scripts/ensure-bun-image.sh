@@ -2,10 +2,13 @@
 set -e
 set -x
 
-IMAGE_NAME="base-bun-build-macos-darwin"
-BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
+# Import config
+source .buildkite/config.mjs
+
+IMAGE_NAME="${IMAGE_CONFIG.baseImage.name}"
+BASE_IMAGE="${IMAGE_CONFIG.sourceImage.fullName}"
 MAX_RETRIES=3
-DELETE_EXISTING=false
+DELETE_EXISTING=true
 
 # Get organization from BUILDKITE_REPO or default to oven-sh
 if [[ -n "${BUILDKITE_REPO:-}" ]]; then

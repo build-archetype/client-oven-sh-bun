@@ -15,6 +15,15 @@ export const IMAGE_CONFIG = {
     get fullName() {
       return `${this.registry}/${this.organization}/${this.repository}/${this.name}:${this.tag}`;
     }
+  },
+  sourceImage: {
+    registry: "ghcr.io",
+    organization: "cirruslabs",
+    name: "macos-sequoia-base",
+    tag: "latest",
+    get fullName() {
+      return `${this.registry}/${this.organization}/${this.name}:${this.tag}`;
+    }
   }
 };
 
