@@ -57,6 +57,8 @@ retry_command "tart clone $BASE_IMAGE_REMOTE $IMAGE_NAME" || {
     exit 1
 }
 
+tart list
+
 # Start the VM and run bootstrap
 echo "Starting VM and running bootstrap..."
 tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" &
@@ -68,7 +70,7 @@ sleep 30  # Increased wait time
 
 # Run the simplified macOS bootstrap script
 echo "Running macOS bootstrap script..."
-retry_command ".buildkite/scripts/run-vm-command.sh \"$IMAGE_NAME\" \"cd /Volumes/My\ Shared\ Files/workspace && chmod +x scripts/bootstrap-macos.sh && ./scripts/bootstrap-macos.sh\"" || {
+retry_command ".buildkite/scripts/run-vm-command.sh "$IMAGE_NAME" \"cd /Volumes/My\ Shared\ Files/workspace && chmod +x scripts/bootstrap-macos.sh && ./scripts/bootstrap-macos.sh\"" || {
     echo "Bootstrap failed after $MAX_RETRIES attempts"
     kill $VM_PID
     wait $VM_PID
