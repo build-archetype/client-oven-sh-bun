@@ -16,7 +16,7 @@ const pipeline = {
       command: [
         'echo GITHUB_USERNAME:',
         'echo $GITHUB_USERNAME',
-        'echo GITHUB_TOKEN:',
+        'echo GITHUB_TOKEN',
         'echo $GITHUB_TOKEN',
         'bash -c "echo -e "$GITHUB_USERNAME\\n$GITHUB_TOKEN" | tart login ghcr.io 2>&1',
         "chmod +x .buildkite/scripts/ensure-bun-image.sh",
