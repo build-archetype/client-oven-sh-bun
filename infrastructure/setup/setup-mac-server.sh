@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# last updated 2025-05-25
+# last updated 2025-05-25 at 10:12 PM EDT
 
 set -euo pipefail
 
@@ -364,6 +364,16 @@ if [ -f /tmp/github-token.txt ]; then
   rm /tmp/github-token.txt
 fi
 
+# Ensure both are set in root context
+if [ -z "${GITHUB_USERNAME:-}" ]; then
+  echo_color "$RED" "ERROR: GITHUB_USERNAME is not set in the root context!"
+  exit 1
+fi
+if [ -z "${GITHUB_TOKEN:-}" ]; then
+  echo_color "$RED" "ERROR: GITHUB_TOKEN is not set in the root context!"
+  exit 1
+fi
+
 # Ensure variables are set with defaults if needed
 if [ -z "$MACHINE_LOCATION" ]; then
   echo_color "$YELLOW" "Warning: MACHINE_LOCATION not set, using default 'office-1'"
@@ -378,6 +388,8 @@ fi
 echo_color "$BLUE" "Debug: Machine info in root context:"
 echo_color "$BLUE" "  Location: $MACHINE_LOCATION"
 echo_color "$BLUE" "  Computer Name: $COMPUTER_NAME"
+echo_color "$BLUE" "  GitHub Username: $GITHUB_USERNAME"
+echo_color "$BLUE" "  GitHub Token: [hidden]"
 
 mkdir -p /opt/buildkite-agent /opt/tart/images /var/log/buildkite-agent
 # mkdir -p /opt/prometheus
@@ -682,7 +694,7 @@ sudo chown $(whoami):staff "$BK_CFG"
 # --- Robustly set GITHUB_TOKEN in Homebrew service plist ---
 PLIST_PATH="/opt/homebrew/opt/buildkite-agent/homebrew.mxcl.buildkite-agent.plist"
 echo_color "$BLUE" "Setting GITHUB_TOKEN and GITHUB_USERNAME in $PLIST_PATH..."
-echo_color "$BLUE" "Debug: GITHUB_TOKEN value is: '$GITHUB_TOKEN'"
+echo_color "$BLUE" "Debug: GITHUB_TOKEN value is: '[hidden]'"
 echo_color "$BLUE" "Debug: GITHUB_USERNAME value is: '$GITHUB_USERNAME'"
 
 # Ensure EnvironmentVariables dict exists
