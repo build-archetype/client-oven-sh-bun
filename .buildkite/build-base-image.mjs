@@ -14,13 +14,7 @@ const pipeline = {
         tart: true
       },
       command: [
-        "export TART_REGISTRY_USERNAME=\"$GITHUB_USERNAME\"",
-        "export TART_REGISTRY_PASSWORD=\"$GITHUB_TOKEN\"",
-        "echo TART_REGISTRY_USERNAME",
-        "echo $TART_REGISTRY_USERNAME",
-        "echo TART_REGISTRY_PASSWORD",
-        "echo $TART_REGISTRY_PASSWORD",
-        "tart login ghcr.io",
+        "TART_REGISTRY_USERNAME=\"$GITHUB_USERNAME\" TART_REGISTRY_PASSWORD=\"$GITHUB_TOKEN\" tart login ghcr.io",
         "chmod +x .buildkite/scripts/ensure-bun-image.sh",
         ".buildkite/scripts/ensure-bun-image.sh 2>&1 | tee -a base-image-build.log",
         // After successful build, push to container registry
