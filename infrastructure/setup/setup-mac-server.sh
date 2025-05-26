@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# last updated 2025-05-25 at 10:12 PM EDT
+# last updated 2025-05-25 at 10:12 PM
 
 set -euo pipefail
 
