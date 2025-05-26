@@ -2,11 +2,12 @@
 set -e
 set -x
 
-# Import config
-source .buildkite/config.mjs
+# Hardcoded image configuration
+IMAGE_NAME="base-bun-build-macos-darwin"
+BASE_IMAGE_NAME="macos-sequoia-base"
+BASE_IMAGE_REMOTE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
+TARGET_IMAGE="ghcr.io/build-archetype/client-oven-sh-bun/base-bun-build-macos-darwin:latest"
 
-IMAGE_NAME="${IMAGE_CONFIG.baseImage.name}"
-BASE_IMAGE="${IMAGE_CONFIG.sourceImage.fullName}"
 MAX_RETRIES=3
 DELETE_EXISTING=true
 
@@ -21,11 +22,11 @@ fi
 
 # Print configuration summary
 echo "=== Configuration Summary ==="
-echo "Image Name: $IMAGE_NAME"
-echo "Base Image: $BASE_IMAGE"
+echo "Custom Image Name: $IMAGE_NAME"
+echo "Base Image Name: $BASE_IMAGE_NAME"
+echo "Base Image Remote: $BASE_IMAGE_REMOTE"
+echo "Target Image: $TARGET_IMAGE"
 echo "Organization: $ORG"
-echo "Target Registry: ghcr.io"
-echo "Full Image Path: ghcr.io/$ORG/$IMAGE_NAME:latest"
 echo "Max Retries: $MAX_RETRIES"
 echo "Delete Existing: $DELETE_EXISTING"
 echo "GitHub Token: ${GITHUB_TOKEN:+set}${GITHUB_TOKEN:-not set}"
@@ -62,69 +63,68 @@ retry_command() {
     return $exitcode
 }
 
-# Check if we should delete existing image
+# 1. Ensure Cirrus base image is present locally
+if ! tart list | grep -q "$BASE_IMAGE_NAME"; then
+    echo "Base image not found locally. Pulling from registry..."
+    retry_command "tart pull $BASE_IMAGE_REMOTE" || {
+        echo "Failed to pull base image after $MAX_RETRIES attempts"
+        exit 1
+    }
+else
+    echo "Base image already present locally."
+fi
+
+# 2. Delete your custom image if requested
 if [ "$DELETE_EXISTING" = "true" ]; then
-    echo "DELETE_EXISTING is true, removing existing image..."
+    echo "DELETE_EXISTING is true, removing existing custom image..."
     tart delete "$IMAGE_NAME" || true
 fi
 
-# Check if our custom image exists
+# 3. Clone the base image to your custom image if not already present
 if ! tart list | grep -q "$IMAGE_NAME"; then
-    echo "Creating Bun build image..."
-    
-    # Clone the base image with retry
-    echo "Cloning base image..."
-    retry_command "tart clone \"$BASE_IMAGE\" \"$IMAGE_NAME\"" || {
+    echo "Cloning base image to create custom image..."
+    retry_command "tart clone $BASE_IMAGE_NAME $IMAGE_NAME" || {
         echo "Failed to clone base image after $MAX_RETRIES attempts"
         exit 1
     }
-    
-    # Start the VM and run bootstrap
-    echo "Starting VM and running bootstrap..."
-    tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" &
-    VM_PID=$!
-    
-    # Wait for VM to be ready
-    echo "Waiting for VM to be ready..."
-    sleep 30  # Increased wait time
-    
-    # Run the simplified macOS bootstrap script
-    echo "Running macOS bootstrap script..."
-    retry_command ".buildkite/scripts/run-vm-command.sh \"$IMAGE_NAME\" \"cd /Volumes/My\ Shared\ Files/workspace && chmod +x scripts/bootstrap-macos.sh && ./scripts/bootstrap-macos.sh\"" || {
-        echo "Bootstrap failed after $MAX_RETRIES attempts"
-        kill $VM_PID
-        wait $VM_PID
-        exit 1
-    }
-    
-    # Stop the VM gracefully
-    echo "Stopping VM..."
-    kill $VM_PID
-    wait $VM_PID || true  # Ignore the exit status of wait since we expect SIGTERM
-    
-    # Final verification that image exists
-    if ! tart list | grep -q "$IMAGE_NAME"; then
-        echo "Image was not created successfully"
-        exit 1
-    fi
-    
-    # Push the image to ghcr.io
-    echo "Pushing image to ghcr.io..."
-    retry_command "tart push \"$IMAGE_NAME\" \"ghcr.io/$ORG/$IMAGE_NAME:latest\"" || {
-        echo "Failed to push image after $MAX_RETRIES attempts"
-        exit 1
-    }
-    
-    echo "Bun build image created and pushed successfully"
 else
-    echo "Bun build image already exists"
-    
-    # Push the existing image to ghcr.io
-    echo "Pushing existing image to ghcr.io..."
-    retry_command "tart push \"$IMAGE_NAME\" \"ghcr.io/$ORG/$IMAGE_NAME:latest\"" || {
-        echo "Failed to push image after $MAX_RETRIES attempts"
-        exit 1
-    }
-    
-    echo "Bun build image pushed successfully"
-fi 
+    echo "Custom image already exists locally."
+fi
+
+# 4. Start the VM and run bootstrap
+echo "Starting VM and running bootstrap..."
+tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" &
+VM_PID=$!
+
+# Wait for VM to be ready
+echo "Waiting for VM to be ready..."
+sleep 30  # Increased wait time
+
+# Run the simplified macOS bootstrap script
+echo "Running macOS bootstrap script..."
+retry_command ".buildkite/scripts/run-vm-command.sh \"$IMAGE_NAME\" \"cd /Volumes/My\ Shared\ Files/workspace && chmod +x scripts/bootstrap-macos.sh && ./scripts/bootstrap-macos.sh\"" || {
+    echo "Bootstrap failed after $MAX_RETRIES attempts"
+    kill $VM_PID
+    wait $VM_PID
+    exit 1
+}
+
+# Stop the VM gracefully
+echo "Stopping VM..."
+kill $VM_PID
+wait $VM_PID || true  # Ignore the exit status of wait since we expect SIGTERM
+
+# Final verification that image exists
+if ! tart list | grep -q "$IMAGE_NAME"; then
+    echo "Custom image was not created successfully"
+    exit 1
+fi
+
+# 5. Push your custom image to your registry
+echo "Pushing custom image to ghcr.io..."
+retry_command "tart push $IMAGE_NAME $TARGET_IMAGE" || {
+    echo "Failed to push image after $MAX_RETRIES attempts"
+    exit 1
+}
+
+echo "Bun build image created, updated, and pushed successfully" 
