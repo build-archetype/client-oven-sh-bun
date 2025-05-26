@@ -9,7 +9,7 @@ BASE_IMAGE_REMOTE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
 TARGET_IMAGE="ghcr.io/build-archetype/client-oven-sh-bun/base-bun-build-macos-darwin:latest"
 
 MAX_RETRIES=3
-DELETE_EXISTING=true
+DELETE_EXISTING=false
 
 # Get organization from BUILDKITE_REPO or default to oven-sh
 if [[ -n "${BUILDKITE_REPO:-}" ]]; then
@@ -64,17 +64,13 @@ retry_command() {
 }
 
 # Always pull the base image to ensure it is present and up-to-date
-echo "Ensuring base image is present locally (pulling from registry if needed)..."
+echo "Ensuring a fresh local VM for the base image..."
 retry_command "tart pull $BASE_IMAGE_REMOTE" || {
     echo "Failed to pull base image after $MAX_RETRIES attempts"
     exit 1
 }
-
-# After pulling, ensure a local VM exists for the base image
-if ! tart list | grep -q "$BASE_IMAGE_NAME"; then
-    echo "Creating local VM from pulled base image..."
-    tart create "$BASE_IMAGE_NAME" "$BASE_IMAGE_REMOTE"
-fi
+tart delete "$BASE_IMAGE_NAME" || true
+tart create "$BASE_IMAGE_NAME" "$BASE_IMAGE_REMOTE"
 
 # 2. Delete your custom image if requested
 if [ "$DELETE_EXISTING" = "true" ]; then
