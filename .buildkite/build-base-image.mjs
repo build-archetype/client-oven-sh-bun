@@ -13,11 +13,9 @@ const pipeline = {
         queue: "darwin",
         tart: true
       },
-      env: {
-        TART_REGISTRY_USERNAME: "${GITHUB_USERNAME}",
-        TART_REGISTRY_PASSWORD: "${GITHUB_TOKEN}"
-      },
       command: [
+        "export TART_REGISTRY_USERNAME=\"$GITHUB_USERNAME\"",
+        "export TART_REGISTRY_PASSWORD=\"$GITHUB_TOKEN\"",
         "echo TART_REGISTRY_USERNAME: $TART_REGISTRY_USERNAME",
         "echo TART_REGISTRY_PASSWORD: $TART_REGISTRY_PASSWORD",
         "tart login ghcr.io",
