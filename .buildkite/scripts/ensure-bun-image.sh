@@ -63,16 +63,12 @@ retry_command() {
     return $exitcode
 }
 
-# 1. Ensure Cirrus base image is present locally
-if ! tart list | grep -q "$BASE_IMAGE_NAME"; then
-    echo "Base image not found locally. Pulling from registry..."
-    retry_command "tart pull $BASE_IMAGE_REMOTE" || {
-        echo "Failed to pull base image after $MAX_RETRIES attempts"
-        exit 1
-    }
-else
-    echo "Base image already present locally."
-fi
+# Always pull the base image to ensure it is present and up-to-date
+echo "Ensuring base image is present locally (pulling from registry if needed)..."
+retry_command "tart pull $BASE_IMAGE_REMOTE" || {
+    echo "Failed to pull base image after $MAX_RETRIES attempts"
+    exit 1
+}
 
 # 2. Delete your custom image if requested
 if [ "$DELETE_EXISTING" = "true" ]; then
