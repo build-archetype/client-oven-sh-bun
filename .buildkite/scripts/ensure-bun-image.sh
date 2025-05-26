@@ -70,6 +70,12 @@ retry_command "tart pull $BASE_IMAGE_REMOTE" || {
     exit 1
 }
 
+# After pulling, ensure a local VM exists for the base image
+if ! tart list | grep -q "$BASE_IMAGE_NAME"; then
+    echo "Creating local VM from pulled base image..."
+    tart create "$BASE_IMAGE_NAME" "$BASE_IMAGE_REMOTE"
+fi
+
 # 2. Delete your custom image if requested
 if [ "$DELETE_EXISTING" = "true" ]; then
     echo "DELETE_EXISTING is true, removing existing custom image..."
