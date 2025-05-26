@@ -9,10 +9,11 @@ export const IMAGE_CONFIG = {
   baseImage: {
     registry: "ghcr.io",
     organization: "build-archetype",
+    repository: "client-oven-sh-bun",
     name: "base-bun-build-macos-darwin",
     tag: "latest",
     get fullName() {
-      return `${this.registry}/${this.organization}/${this.name}:${this.tag}`;
+      return `${this.registry}/${this.organization}/${this.repository}/${this.name}:${this.tag}`;
     }
   }
 };
@@ -20,5 +21,5 @@ export const IMAGE_CONFIG = {
 // Helper function to get the full image name
 export function getFullImageName(name, tag = "latest") {
   // Use baseImage's registry and organization for consistency
-  return `${IMAGE_CONFIG.baseImage.registry}/${IMAGE_CONFIG.baseImage.organization}/${name}:${tag}`;
+  return `${IMAGE_CONFIG.baseImage.registry}/${IMAGE_CONFIG.baseImage.organization}/${IMAGE_CONFIG.baseImage.repository}/${name}:${tag}`;
 } 
