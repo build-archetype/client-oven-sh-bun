@@ -14,10 +14,9 @@ const pipeline = {
         tart: true
       },
       command: [
-        "echo $GITHUB_TOKEN",
-        "echo $GITHUB_TOKEN | tart login ghcr.io",
-        "LOGIN_EXIT_CODE=$?",
-        "if [ $LOGIN_EXIT_CODE -ne 0 ]; then echo 'tart login failed with exit code $LOGIN_EXIT_CODE'; exit $LOGIN_EXIT_CODE; fi",
+        'echo "GITHUB_USERNAME: $GITHUB_USERNAME" | tee -a base-image-build.log',
+        'echo "GITHUB_TOKEN: ${GITHUB_TOKEN:0:4}...[redacted]" | tee -a base-image-build.log',
+        'bash -c "echo -e "$GITHUB_USERNAME\\n$GITHUB_TOKEN" | tart login ghcr.io 2>&1 | tee -a base-image-build.log; LOGIN_EXIT_CODE=${PIPESTATUS[1]:-${PIPESTATUS[0]}}; if [ $LOGIN_EXIT_CODE -ne 0 ]; then echo "$tart login failed with exit code $LOGIN_EXIT_CODE" | tee -a base-image-build.log; exit $LOGIN_EXIT_CODE; fi"',
         "chmod +x .buildkite/scripts/ensure-bun-image.sh",
         ".buildkite/scripts/ensure-bun-image.sh 2>&1 | tee -a base-image-build.log",
         // After successful build, push to container registry
