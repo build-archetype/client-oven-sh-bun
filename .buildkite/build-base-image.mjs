@@ -14,11 +14,11 @@ const pipeline = {
         tart: true
       },
       command: [
-        'echo GITHUB_USERNAME:',
-        'echo $GITHUB_USERNAME',
-        'echo GITHUB_TOKEN',
-        'echo $GITHUB_TOKEN',
-        'bash -c "echo -e "$GITHUB_USERNAME\\n$GITHUB_TOKEN" | tart login ghcr.io 2>&1',
+        "echo 'GITHUB_USERNAME:'",
+        "echo \"$GITHUB_USERNAME\"",
+        "echo 'GITHUB_TOKEN:'",
+        "echo \"$GITHUB_TOKEN\"",
+        "bash -c \"echo -e \\\"$GITHUB_USERNAME\\n$GITHUB_TOKEN\\\" | tart login ghcr.io 2>&1\"",
         "chmod +x .buildkite/scripts/ensure-bun-image.sh",
         ".buildkite/scripts/ensure-bun-image.sh 2>&1 | tee -a base-image-build.log",
         // After successful build, push to container registry
