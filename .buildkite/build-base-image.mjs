@@ -13,12 +13,14 @@ const pipeline = {
         queue: "darwin",
         tart: true
       },
+      env: {
+        TART_REGISTRY_USERNAME: "${GITHUB_USERNAME}",
+        TART_REGISTRY_PASSWORD: "${GITHUB_TOKEN}"
+      },
       command: [
-        "echo 'GITHUB_USERNAME:'",
-        "echo \"$GITHUB_USERNAME\"",
-        "echo 'GITHUB_TOKEN:'",
-        "echo \"$GITHUB_TOKEN\"",
-        "printf '%s\\n%s' \"$GITHUB_USERNAME\" \"$GITHUB_TOKEN\" | tart login ghcr.io",
+        "echo TART_REGISTRY_USERNAME: $TART_REGISTRY_USERNAME",
+        "echo TART_REGISTRY_PASSWORD: $TART_REGISTRY_PASSWORD",
+        "tart login ghcr.io",
         "chmod +x .buildkite/scripts/ensure-bun-image.sh",
         ".buildkite/scripts/ensure-bun-image.sh 2>&1 | tee -a base-image-build.log",
         // After successful build, push to container registry
