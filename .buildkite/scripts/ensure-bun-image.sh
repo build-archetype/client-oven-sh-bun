@@ -63,25 +63,16 @@ retry_command() {
     return $exitcode
 }
 
-# Always pull the base image to ensure it is present and up-to-date
-echo "Ensuring a fresh local VM for the base image..."
-retry_command "tart pull $BASE_IMAGE_REMOTE" || {
-    echo "Failed to pull base image after $MAX_RETRIES attempts"
-    exit 1
-}
-tart delete "$BASE_IMAGE_NAME" || true
-tart create "$BASE_IMAGE_NAME" "$BASE_IMAGE_REMOTE"
-
-# 2. Delete your custom image if requested
+# 1. Delete your custom image if requested
 if [ "$DELETE_EXISTING" = "true" ]; then
     echo "DELETE_EXISTING is true, removing existing custom image..."
     tart delete "$IMAGE_NAME" || true
 fi
 
-# 3. Clone the base image to your custom image if not already present
+# 2. Clone the base image from the remote reference to a local VM
 if ! tart list | grep -q "$IMAGE_NAME"; then
-    echo "Cloning base image to create custom image..."
-    retry_command "tart clone $BASE_IMAGE_NAME $IMAGE_NAME" || {
+    echo "Cloning base image from remote reference to create custom image..."
+    retry_command "tart clone $BASE_IMAGE_REMOTE $IMAGE_NAME" || {
         echo "Failed to clone base image after $MAX_RETRIES attempts"
         exit 1
     }
@@ -89,7 +80,7 @@ else
     echo "Custom image already exists locally."
 fi
 
-# 4. Start the VM and run bootstrap
+# 3. Start the VM and run bootstrap
 echo "Starting VM and running bootstrap..."
 tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" &
 VM_PID=$!
@@ -118,7 +109,7 @@ if ! tart list | grep -q "$IMAGE_NAME"; then
     exit 1
 fi
 
-# 5. Push your custom image to your registry
+# 4. Push your custom image to your registry
 echo "Pushing custom image to ghcr.io..."
 retry_command "tart push $IMAGE_NAME $TARGET_IMAGE" || {
     echo "Failed to push image after $MAX_RETRIES attempts"
