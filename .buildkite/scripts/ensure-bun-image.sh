@@ -4,8 +4,8 @@ set -x
 
 # Hardcoded image configuration
 IMAGE_NAME="base-bun-build-macos-darwin"
-BASE_IMAGE_NAME="macos-sequoia-base"
-BASE_IMAGE_REMOTE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
+BASE_IMAGE_NAME="macos-sequoia-vanilla"
+BASE_IMAGE_REMOTE="ghcr.io/cirruslabs/macos-sequoia-vanilla:latest"
 TARGET_IMAGE="ghcr.io/build-archetype/client-oven-sh-bun/base-bun-build-macos-darwin:latest"
 
 MAX_RETRIES=3
