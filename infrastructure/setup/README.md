@@ -35,6 +35,48 @@ This CI system is designed for Bun.sh builds, with a focus on macOS (Apple Silic
      ```
    - All macOS build and test jobs will use the `darwin` queue. Make sure your agent is running and registered with this queue.
 
+## Non-Interactive and Interactive Setup
+
+The `setup-mac-server.sh` script can be run in two ways:
+
+### 1. Non-Interactive (CI/Automation/Fast Setup)
+
+You can provide all required variables as environment variables. If a variable is set in the environment, the script will use it and skip the prompt. This is ideal for automation or scripting:
+
+```bash
+BUILDKITE_AGENT_TOKEN=your-bk-token \
+GITHUB_USERNAME=your-bot-username \
+GITHUB_TOKEN=your-ghcr-token \
+MACHINE_LOCATION=office-1 \
+COMPUTER_NAME=ci-mac-mini \
+BUILD_VLAN=10.0.1.0/24 \
+MGMT_VLAN=10.0.2.0/24 \
+STORAGE_VLAN=10.0.3.0/24 \
+./setup-mac-server.sh
+```
+
+You can set as many or as few as you want; any not set will be prompted for interactively.
+
+### 2. Interactive (Default)
+
+If you simply run:
+
+```bash
+./setup-mac-server.sh
+```
+
+The script will prompt you for any required values that are not already set in the environment.
+
+### Key Variables
+- `BUILDKITE_AGENT_TOKEN` (required)
+- `GITHUB_USERNAME` (required for ghcr.io login)
+- `GITHUB_TOKEN` (required for ghcr.io login)
+- `MACHINE_LOCATION` (optional, defaults to `office-1`)
+- `COMPUTER_NAME` (optional, defaults to current hostname)
+- `BUILD_VLAN`, `MGMT_VLAN`, `STORAGE_VLAN` (optional, have defaults)
+
+This makes the script flexible for both manual and automated setups.
+
 ## Build Pipeline Overview
 
 - **Supported Platforms:**

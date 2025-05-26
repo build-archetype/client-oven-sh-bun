@@ -24,7 +24,12 @@ You will be prompted for secrets and configuration details.
 WELCOME
   echo -e "\033[1;33mWARNING: This script will make system-level changes and should be run on a dedicated CI/server Mac.\033[0m"
 
-  read -rp $'\033[1;32mContinue with setup? (y/n): \033[0m' confirm_start
+  if [ "${AUTO_CONFIRM:-false}" = true ]; then
+    confirm_start="y"
+    echo -e "\033[1;32mAUTO_CONFIRM enabled: Continuing with setup...\033[0m"
+  else
+    read -rp $'\033[1;32mContinue with setup? (y/n): \033[0m' confirm_start
+  fi
   if [[ "$confirm_start" != "y" ]]; then
     echo -e "\033[0;31mAborted by user.\033[0m"
     exit 1
@@ -122,12 +127,21 @@ if [ "$goto_privileged_setup" = false ]; then
   done
 
   # 1. Buildkite token
-  prompt_secret BUILDKITE_AGENT_TOKEN "Enter your Buildkite Agent Token"
+  if [ -z "${BUILDKITE_AGENT_TOKEN:-}" ]; then
+    prompt_secret BUILDKITE_AGENT_TOKEN "Enter your Buildkite Agent Token"
+  fi
 
-  # 1b. GitHub token for ghcr.io pushes
-  prompt_secret GITHUB_TOKEN "Enter your GitHub Token (for ghcr.io pushes)"
+  # 1b. GitHub username and token for ghcr.io pushes
+  if [ -z "${GITHUB_USERNAME:-}" ]; then
+    prompt_text GITHUB_USERNAME "Enter your GitHub Username (for ghcr.io pushes)"
+  fi
+  if [ -z "${GITHUB_TOKEN:-}" ]; then
+    prompt_secret GITHUB_TOKEN "Enter your GitHub Token (for ghcr.io pushes)"
+  fi
 
-  # Store GITHUB_TOKEN in a temp file for root context
+  # Store GITHUB_USERNAME and GITHUB_TOKEN in temp files for root context
+  echo "$GITHUB_USERNAME" > /tmp/github-username.txt
+  chmod 600 /tmp/github-username.txt
   echo "$GITHUB_TOKEN" > /tmp/github-token.txt
   chmod 600 /tmp/github-token.txt
 
@@ -158,13 +172,21 @@ if [ "$goto_privileged_setup" = false ]; then
   fi
 
   # 4. Optional network config
-  prompt_text BUILD_VLAN "Build VLAN" "10.0.1.0/24"
-  prompt_text MGMT_VLAN "Management VLAN" "10.0.2.0/24"
-  prompt_text STORAGE_VLAN "Storage VLAN" "10.0.3.0/24"
+  if [ -z "${BUILD_VLAN:-}" ]; then
+    prompt_text BUILD_VLAN "Build VLAN" "10.0.1.0/24"
+  fi
+  if [ -z "${MGMT_VLAN:-}" ]; then
+    prompt_text MGMT_VLAN "Management VLAN" "10.0.2.0/24"
+  fi
+  if [ -z "${STORAGE_VLAN:-}" ]; then
+    prompt_text STORAGE_VLAN "Storage VLAN" "10.0.3.0/24"
+  fi
   
   # 5. Machine location (with default and validation)
-  MACHINE_LOCATION="office-1"  # Set default value
-  prompt_text MACHINE_LOCATION "Enter machine location (e.g., office-1, datacenter-2)" "$MACHINE_LOCATION"
+  MACHINE_LOCATION="${MACHINE_LOCATION:-office-1}"  # Set default value if not set
+  if [ -z "$MACHINE_LOCATION" ]; then
+    prompt_text MACHINE_LOCATION "Enter machine location (e.g., office-1, datacenter-2)" "office-1"
+  fi
   
   # Validate MACHINE_LOCATION is set
   if [ -z "$MACHINE_LOCATION" ]; then
@@ -173,8 +195,10 @@ if [ "$goto_privileged_setup" = false ]; then
   fi
 
   # Get computer name
-  COMPUTER_NAME=$(scutil --get ComputerName 2>/dev/null || hostname)
-  prompt_text COMPUTER_NAME "Enter computer name" "$COMPUTER_NAME"
+  if [ -z "${COMPUTER_NAME:-}" ]; then
+    COMPUTER_NAME=$(scutil --get ComputerName 2>/dev/null || hostname)
+    prompt_text COMPUTER_NAME "Enter computer name" "$COMPUTER_NAME"
+  fi
 
   echo_color "$BLUE" "Debug: Machine info set:"
   echo_color "$BLUE" "  Location: $MACHINE_LOCATION"
@@ -183,6 +207,7 @@ if [ "$goto_privileged_setup" = false ]; then
   # --- Show summary and confirm ---
   echo_color "$YELLOW" "\nSummary of your choices:"
   echo "  Buildkite Agent Token:   [hidden]"
+  echo "  GitHub Username:         $GITHUB_USERNAME"
   echo "  GitHub Token:            [hidden]"
   echo "  Machine Location:        $MACHINE_LOCATION"
   if [ "$VPN_ENABLED" = true ]; then
@@ -205,10 +230,42 @@ if [ "$goto_privileged_setup" = false ]; then
   echo "  Management VLAN:          $MGMT_VLAN"
   echo "  Storage VLAN:             $STORAGE_VLAN"
 
-  read -rp "Proceed with installation? (y/n): " confirm
+  if [ "${AUTO_CONFIRM:-false}" = true ]; then
+    confirm="y"
+    echo_color "$GREEN" "AUTO_CONFIRM enabled: Proceeding with installation..."
+  else
+    read -rp "Proceed with installation? (y/n): " confirm
+  fi
   if [[ "$confirm" != "y" ]]; then
     echo_color "$RED" "Aborted by user."
     exit 1
+  fi
+
+  # --- After all variables are set, but before proceeding with setup ---
+
+  # List of required variables
+  REQUIRED_VARS=(BUILDKITE_AGENT_TOKEN GITHUB_USERNAME GITHUB_TOKEN MACHINE_LOCATION COMPUTER_NAME)
+  MISSING_VARS=()
+
+  for var in "${REQUIRED_VARS[@]}"; do
+    if [ -z "${!var:-}" ]; then
+      MISSING_VARS+=("$var")
+    fi
+  done
+
+  if [ ${#MISSING_VARS[@]} -ne 0 ]; then
+    echo_color "$RED" "\nERROR: The following required variables are missing: ${MISSING_VARS[*]}"
+    echo_color "$YELLOW" "Please set them as environment variables or provide them interactively."
+    exit 1
+  else
+    echo_color "$GREEN" "\nAll required variables are set:"
+    for var in "${REQUIRED_VARS[@]}"; do
+      if [[ "$var" == *TOKEN* ]]; then
+        echo_color "$GREEN" "  $var: [hidden]"
+      else
+        echo_color "$GREEN" "  $var: ${!var}"
+      fi
+    done
   fi
 
   # --- Homebrew install section (user) ---
@@ -297,7 +354,11 @@ fi
 # --- Privileged setup (root) ---
 echo_color "$BLUE" "\n[2/3] Running privileged setup..."
 
-# Restore GITHUB_TOKEN from temp file if present
+# Restore GITHUB_USERNAME and GITHUB_TOKEN from temp files if present
+if [ -f /tmp/github-username.txt ]; then
+  GITHUB_USERNAME=$(cat /tmp/github-username.txt)
+  rm /tmp/github-username.txt
+fi
 if [ -f /tmp/github-token.txt ]; then
   GITHUB_TOKEN=$(cat /tmp/github-token.txt)
   rm /tmp/github-token.txt
@@ -620,8 +681,9 @@ sudo chown $(whoami):staff "$BK_CFG"
 
 # --- Robustly set GITHUB_TOKEN in Homebrew service plist ---
 PLIST_PATH="/opt/homebrew/opt/buildkite-agent/homebrew.mxcl.buildkite-agent.plist"
-echo_color "$BLUE" "Setting GITHUB_TOKEN in $PLIST_PATH..."
+echo_color "$BLUE" "Setting GITHUB_TOKEN and GITHUB_USERNAME in $PLIST_PATH..."
 echo_color "$BLUE" "Debug: GITHUB_TOKEN value is: '$GITHUB_TOKEN'"
+echo_color "$BLUE" "Debug: GITHUB_USERNAME value is: '$GITHUB_USERNAME'"
 
 # Ensure EnvironmentVariables dict exists
 if ! /usr/libexec/PlistBuddy -c "Print :EnvironmentVariables" "$PLIST_PATH" &>/dev/null; then
@@ -633,6 +695,13 @@ if /usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:GITHUB_TOKEN" "$PLIST
   /usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:GITHUB_TOKEN $GITHUB_TOKEN" "$PLIST_PATH"
 else
   /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:GITHUB_TOKEN string $GITHUB_TOKEN" "$PLIST_PATH"
+fi
+
+# Add or set GITHUB_USERNAME
+if /usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:GITHUB_USERNAME" "$PLIST_PATH" &>/dev/null; then
+  /usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:GITHUB_USERNAME $GITHUB_USERNAME" "$PLIST_PATH"
+else
+  /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:GITHUB_USERNAME string $GITHUB_USERNAME" "$PLIST_PATH"
 fi
 
 # Debug: show the EnvironmentVariables section after update
