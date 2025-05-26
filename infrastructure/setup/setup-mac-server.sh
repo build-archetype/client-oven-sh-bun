@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# trigger-buildkite-pipeline
+# last updated 2025-05-25
 
 set -euo pipefail
 
