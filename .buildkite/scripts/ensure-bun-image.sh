@@ -87,8 +87,7 @@ check_image_exists() {
 # Function to pull Cirrus base image
 pull_cirrus_base() {
     log "Attempting to pull Cirrus base image $CIRRUS_BASE_IMAGE..."
-    log "Running tart pull with verbose output..."
-    if tart pull "$CIRRUS_BASE_IMAGE" --verbose; then
+    if tart pull "$CIRRUS_BASE_IMAGE"; then
         log "Successfully pulled Cirrus base image"
         log "Verifying image after pull:"
         tart list
