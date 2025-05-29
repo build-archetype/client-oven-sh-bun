@@ -7,6 +7,19 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
+# Function to check system resources
+check_system_resources() {
+    log "Checking system resources..."
+    log "CPU Info:"
+    sysctl -n machdep.cpu.brand_string || true
+    log "Memory Info:"
+    vm_stat || true
+    log "Disk Space:"
+    df -h || true
+    log "Running VMs:"
+    tart list || true
+}
+
 # Function to check VM status
 check_vm_status() {
     local vm_name="$1"
@@ -18,9 +31,20 @@ check_vm_status() {
     return 0
 }
 
+# Function to clean up existing VMs
+cleanup_vms() {
+    log "Cleaning up any existing VMs..."
+    tart list | grep "$IMAGE_NAME" | while read -r line; do
+        if echo "$line" | grep -q "running"; then
+            log "Found running VM, attempting to stop it..."
+            tart stop "$IMAGE_NAME" || true
+        fi
+    done
+}
+
 # Hardcoded image configuration -- update this when we switch to a new base image
 IMAGE_NAME="base-bun-build-macos-darwin"
-BASE_IMAGE_REMOTE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
+CIRRUS_BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
 TARGET_IMAGE="ghcr.io/build-archetype/client-oven-sh-bun/base-bun-build-macos-darwin:latest"
 
 # set the number of retries for the commands
@@ -29,7 +53,7 @@ MAX_RETRIES=3
 # Print configuration summary
 log "=== Configuration Summary ==="
 log "Custom Image Name: $IMAGE_NAME"
-log "Base Image Remote: $BASE_IMAGE_REMOTE"
+log "Cirrus Base Image: $CIRRUS_BASE_IMAGE"
 log "Target Image: $TARGET_IMAGE"
 log "Max Retries: $MAX_RETRIES"
 log "GitHub Token: ${GITHUB_TOKEN:+set}${GITHUB_TOKEN:-not set}"
@@ -39,58 +63,52 @@ log "Directory contents:"
 ls -la
 log "==========================="
 
+# Check system resources before starting
+check_system_resources
+
+# Clean up any existing VMs
+cleanup_vms
+
 # Function to check if image exists
 check_image_exists() {
-    log "Checking if image $IMAGE_NAME exists..."
+    local image_name="$1"
+    log "Checking if image $image_name exists..."
     log "Current tart images:"
     tart list
-    if tart list | grep -q "$IMAGE_NAME"; then
-        log "Image $IMAGE_NAME found locally"
+    if tart list | grep -q "$image_name"; then
+        log "Image $image_name found locally"
         return 0
     else
-        log "Image $IMAGE_NAME not found locally"
+        log "Image $image_name not found locally"
         return 1
     fi
 }
 
-# Function to pull image
-pull_image() {
-    log "Attempting to pull image $TARGET_IMAGE..."
+# Function to pull Cirrus base image
+pull_cirrus_base() {
+    log "Attempting to pull Cirrus base image $CIRRUS_BASE_IMAGE..."
     log "Running tart pull with verbose output..."
-    if tart pull "$TARGET_IMAGE" --verbose; then
-        log "Successfully pulled image $TARGET_IMAGE"
+    if tart pull "$CIRRUS_BASE_IMAGE" --verbose; then
+        log "Successfully pulled Cirrus base image"
         log "Verifying image after pull:"
         tart list
         return 0
     else
-        log "Failed to pull image $TARGET_IMAGE"
+        log "Failed to pull Cirrus base image"
         return 1
     fi
 }
 
-# Function to check and pull base image
-check_and_pull_base_image() {
-    log "Starting base image check and pull process..."
-    
-    # First check if image exists
-    if check_image_exists; then
-        log "Base image already exists, no need to pull"
+# Function to clone base image
+clone_base_image() {
+    log "Cloning Cirrus base image to create our base..."
+    if tart clone "$CIRRUS_BASE_IMAGE" "$IMAGE_NAME"; then
+        log "Successfully cloned base image"
+        log "Verifying cloned image:"
+        tart list
         return 0
-    fi
-    
-    # If image doesn't exist, try to pull it
-    log "Base image not found, attempting to pull..."
-    if pull_image; then
-        # Verify the pull was successful by checking if image exists
-        if check_image_exists; then
-            log "Successfully pulled and verified base image"
-            return 0
-        else
-            log "Image pull appeared successful but image not found in local list"
-            return 1
-        fi
     else
-        log "Failed to pull base image"
+        log "Failed to clone base image"
         return 1
     fi
 }
@@ -129,23 +147,19 @@ retry_command() {
     return $exitcode
 }
 
-# Check and pull base image with retries
-log "Starting base image check and pull with retries..."
-if ! retry_command "check_and_pull_base_image"; then
-    log "Failed to check/pull base image after $MAX_RETRIES attempts"
+# Pull Cirrus base image with retries
+log "Starting Cirrus base image pull with retries..."
+if ! retry_command "pull_cirrus_base"; then
+    log "Failed to pull Cirrus base image after $MAX_RETRIES attempts"
     exit 1
 fi
 
-# Always clone the base image from the remote reference to the custom image name
-log "Cloning base image from remote reference to create custom image..."
-log "Current tart images before clone:"
-tart list
-retry_command "tart clone $BASE_IMAGE_REMOTE $IMAGE_NAME" || {
+# Clone the base image
+log "Cloning Cirrus base image to create our base..."
+if ! retry_command "clone_base_image"; then
     log "Failed to clone base image after $MAX_RETRIES attempts"
     exit 1
-}
-log "Current tart images after clone:"
-tart list
+fi
 
 # Start the VM and run bootstrap
 log "Starting VM and running bootstrap..."
@@ -165,6 +179,8 @@ if ! ps -p $VM_PID > /dev/null; then
     check_vm_status "$IMAGE_NAME"
     log "VM process details:"
     ps aux | grep tart || true
+    log "System resources at time of failure:"
+    check_system_resources
     exit 1
 fi
 
