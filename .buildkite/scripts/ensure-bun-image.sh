@@ -12,6 +12,7 @@ IMAGE_NAME="base-bun-build-macos-darwin"
 BASE_IMAGE_REMOTE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
 TARGET_IMAGE="ghcr.io/build-archetype/client-oven-sh-bun/base-bun-build-macos-darwin:latest"
 
+# set the number of retries for the commands
 MAX_RETRIES=3
 
 # Print configuration summary
