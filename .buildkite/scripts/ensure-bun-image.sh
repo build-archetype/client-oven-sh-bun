@@ -19,6 +19,22 @@ echo "GitHub Token: ${GITHUB_TOKEN:+set}${GITHUB_TOKEN:-not set}"
 echo "==========================="
 echo
 
+# Function to check and pull base image
+check_and_pull_base_image() {
+    echo "Checking if base image exists locally..."
+    if ! tart list | grep -q "$IMAGE_NAME"; then
+        echo "Base image not found locally, attempting to pull..."
+        if ! tart pull "$TARGET_IMAGE"; then
+            echo "Failed to pull base image from $TARGET_IMAGE"
+            return 1
+        fi
+        echo "Successfully pulled base image"
+    else
+        echo "Base image found locally"
+    fi
+    return 0
+}
+
 # Make run-vm-command.sh executable
 echo "Making run-vm-command.sh executable..."
 chmod +x .buildkite/scripts/run-vm-command.sh
@@ -46,6 +62,13 @@ retry_command() {
     done
 
     return $exitcode
+}
+
+# Check and pull base image with retries
+echo "Checking and pulling base image..."
+retry_command "check_and_pull_base_image" || {
+    echo "Failed to check/pull base image after $MAX_RETRIES attempts"
+    exit 1
 }
 
 # Always clone the base image from the remote reference to the custom image name
