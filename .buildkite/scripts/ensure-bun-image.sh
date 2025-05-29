@@ -2,7 +2,7 @@
 set -e
 set -x
 
-# Hardcoded image configuration
+# Hardcoded image configuration -- update this when we switch to a new base image
 IMAGE_NAME="base-bun-build-macos-darwin"
 BASE_IMAGE_REMOTE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
 TARGET_IMAGE="ghcr.io/build-archetype/client-oven-sh-bun/base-bun-build-macos-darwin:latest"
