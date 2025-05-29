@@ -28,23 +28,55 @@ log "Directory contents:"
 ls -la
 log "==========================="
 
+# Function to check if image exists
+check_image_exists() {
+    log "Checking if image $IMAGE_NAME exists..."
+    if tart list | grep -q "$IMAGE_NAME"; then
+        log "Image $IMAGE_NAME found locally"
+        return 0
+    else
+        log "Image $IMAGE_NAME not found locally"
+        return 1
+    fi
+}
+
+# Function to pull image
+pull_image() {
+    log "Attempting to pull image $TARGET_IMAGE..."
+    if tart pull "$TARGET_IMAGE"; then
+        log "Successfully pulled image $TARGET_IMAGE"
+        return 0
+    else
+        log "Failed to pull image $TARGET_IMAGE"
+        return 1
+    fi
+}
+
 # Function to check and pull base image
 check_and_pull_base_image() {
-    log "Checking if base image exists locally..."
-    log "Running tart list:"
-    tart list
-    if ! tart list | grep -q "$IMAGE_NAME"; then
-        log "Base image not found locally, attempting to pull..."
-        log "Running tart pull $TARGET_IMAGE"
-        if ! tart pull "$TARGET_IMAGE"; then
-            log "Failed to pull base image from $TARGET_IMAGE"
+    log "Starting base image check and pull process..."
+    
+    # First check if image exists
+    if check_image_exists; then
+        log "Base image already exists, no need to pull"
+        return 0
+    fi
+    
+    # If image doesn't exist, try to pull it
+    log "Base image not found, attempting to pull..."
+    if pull_image; then
+        # Verify the pull was successful by checking if image exists
+        if check_image_exists; then
+            log "Successfully pulled and verified base image"
+            return 0
+        else
+            log "Image pull appeared successful but image not found in local list"
             return 1
         fi
-        log "Successfully pulled base image"
     else
-        log "Base image found locally"
+        log "Failed to pull base image"
+        return 1
     fi
-    return 0
 }
 
 # Make run-vm-command.sh executable
@@ -74,15 +106,19 @@ retry_command() {
         attempt=$((attempt + 1))
     done
 
+    if [ $exitcode -ne 0 ]; then
+        log "Command failed after $max_attempts attempts"
+    fi
+
     return $exitcode
 }
 
 # Check and pull base image with retries
-log "Checking and pulling base image..."
-retry_command "check_and_pull_base_image" || {
+log "Starting base image check and pull with retries..."
+if ! retry_command "check_and_pull_base_image"; then
     log "Failed to check/pull base image after $MAX_RETRIES attempts"
     exit 1
-}
+fi
 
 # Always clone the base image from the remote reference to the custom image name
 log "Cloning base image from remote reference to create custom image..."
