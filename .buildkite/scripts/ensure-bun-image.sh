@@ -163,8 +163,8 @@ fi
 # Start the VM and run bootstrap
 log "Starting VM and running bootstrap..."
 VM_PID=""
-log "Starting VM with command: tart run $IMAGE_NAME --no-graphics --dir=workspace:$PWD --memory 8 --cpu 4"
-tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" --memory 8 --cpu 4 &
+log "Starting VM with command: tart run $IMAGE_NAME --no-graphics --dir=workspace:$PWD"
+tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" &
 VM_PID=$!
 
 # Wait for VM to be ready and check its status
