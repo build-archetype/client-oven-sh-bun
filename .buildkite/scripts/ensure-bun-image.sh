@@ -163,8 +163,8 @@ fi
 # Start the VM and run bootstrap
 log "Starting VM and running bootstrap..."
 VM_PID=""
-log "Starting VM with command: tart run $IMAGE_NAME --no-graphics --dir=workspace:$PWD"
-tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" &
+log "Starting VM with command: tart run $IMAGE_NAME --no-graphics --dir=workspace:$PWD --memory 8 --cpu 4"
+tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" --memory 8 --cpu 4 &
 VM_PID=$!
 
 # Wait for VM to be ready and check its status
@@ -205,7 +205,7 @@ fi
 # Push your custom image to your registry
 log "Pushing custom image to ghcr.io..."
 if [ -n "$GITHUB_TOKEN" ]; then
-    echo "$GITHUB_TOKEN" | tart push "$IMAGE_NAME" "$TARGET_IMAGE" --password-stdin || {
+    tart push "$IMAGE_NAME" "$TARGET_IMAGE" || {
         log "Failed to push image"
         exit 1
     }
