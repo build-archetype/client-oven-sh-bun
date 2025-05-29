@@ -14,7 +14,7 @@ const pipeline = {
         tart: true
       },
       command: [
-        "echo \"$GITHUB_TOKEN\" | tart login ghcr.io --password-stdin",
+        "echo \"$GITHUB_TOKEN\" | tart login ghcr.io --username \"$GITHUB_USERNAME\" --password-stdin",
         "chmod +x .buildkite/scripts/ensure-bun-image.sh",
         // Ensure we capture all output and preserve timestamps
         "set -x",
