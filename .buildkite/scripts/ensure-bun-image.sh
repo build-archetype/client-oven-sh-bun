@@ -50,7 +50,7 @@ cleanup_vms() {
 
 # Hardcoded image configuration -- update this when we switch to a new base image
 IMAGE_NAME="base-bun-build-macos-darwin"
-CIRRUS_BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
+CIRRUS_BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-vanilla:latest"
 TARGET_IMAGE="ghcr.io/build-archetype/client-oven-sh-bun/base-bun-build-macos-darwin:latest"
 
 # set the number of retries for the commands
@@ -100,6 +100,8 @@ check_image_exists() {
 # Function to pull Cirrus base image
 pull_cirrus_base() {
     log "Attempting to pull Cirrus base image $CIRRUS_BASE_IMAGE..."
+    log "Removing any cached versions of the base image..."
+    tart delete "$CIRRUS_BASE_IMAGE" || true
     if tart pull "$CIRRUS_BASE_IMAGE"; then
         log "Successfully pulled Cirrus base image"
         log "Verifying image after pull:"
@@ -176,12 +178,8 @@ fi
 # Start the VM and run bootstrap
 log "Starting VM and running bootstrap..."
 VM_PID=""
-log "================================================"
-log "TESTING VM STARTUP WITHOUT WORKSPACE MOUNT"
-log "This is a diagnostic test to isolate workspace mount issues"
-log "================================================"
-log "Starting VM without workspace mount to test basic functionality..."
-tart run "$IMAGE_NAME" --no-graphics &
+log "Starting VM with command: tart run $IMAGE_NAME --no-graphics --dir=workspace:$PWD"
+tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" &
 VM_PID=$!
 
 # Wait for VM to be ready and check its status
@@ -202,7 +200,7 @@ fi
 
 # Run the simplified macOS bootstrap script
 log "Running macOS bootstrap script..."
-if ! retry_command ".buildkite/scripts/run-vm-command.sh \"$IMAGE_NAME\" \"cd /Volumes/My\\ Shared\\ Files/workspace && chmod +x scripts/bootstrap-macos.sh && ./scripts/bootstrap-macos.sh\""; then
+if ! retry_command ".buildkite/scripts/run-vm-command.sh \"$IMAGE_NAME\" \"cd /Volumes/My\\ Shared\\ Files/workspace/client-oven-sh-bun && chmod +x scripts/bootstrap-macos.sh && ./scripts/bootstrap-macos.sh\""; then
     log "Bootstrap failed after $MAX_RETRIES attempts"
     if [ -n "$VM_PID" ] && ps -p $VM_PID > /dev/null; then
         log "Stopping VM process..."
