@@ -100,6 +100,8 @@ check_image_exists() {
 # Function to pull Cirrus base image
 pull_cirrus_base() {
     log "Attempting to pull Cirrus base image $CIRRUS_BASE_IMAGE..."
+    log "Checking available disk space before pull..."
+    df -h
     if tart pull "$CIRRUS_BASE_IMAGE"; then
         log "Successfully pulled Cirrus base image"
         log "Verifying image after pull:"
@@ -114,8 +116,6 @@ pull_cirrus_base() {
 # Function to clone base image
 clone_base_image() {
     log "Cloning Cirrus base image to create our base..."
-    log "Checking available disk space before clone..."
-    df -h
     log "Starting clone operation (this may take several minutes)..."
     log "Current tart images:"
     tart list
