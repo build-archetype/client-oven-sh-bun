@@ -114,15 +114,25 @@ pull_cirrus_base() {
 # Function to clone base image
 clone_base_image() {
     log "Cloning Cirrus base image to create our base..."
-    if tart clone "$CIRRUS_BASE_IMAGE" "$IMAGE_NAME"; then
-        log "Successfully cloned base image"
-        log "Verifying cloned image:"
-        tart list
-        return 0
-    else
-        log "Failed to clone base image"
+    log "Checking available disk space before clone..."
+    df -h
+    log "Starting clone operation (this may take several minutes)..."
+    log "Current tart images:"
+    tart list
+    log "Starting clone with timeout of 30 minutes..."
+    timeout 1800 tart clone "$CIRRUS_BASE_IMAGE" "$IMAGE_NAME" || {
+        local exit_code=$?
+        if [ $exit_code -eq 124 ]; then
+            log "Clone operation timed out after 30 minutes"
+        else
+            log "Clone failed with exit code $exit_code"
+        fi
         return 1
-    fi
+    }
+    log "Successfully cloned base image"
+    log "Verifying cloned image:"
+    tart list
+    return 0
 }
 
 # Make run-vm-command.sh executable
