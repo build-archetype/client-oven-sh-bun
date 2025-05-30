@@ -379,6 +379,11 @@ else
     echo_color "$GREEN" "✅ CI user $CI_USER already exists"
 fi
 
+# Add sudoers configuration for tart commands
+echo_color "$BLUE" "Configuring sudo access for $CI_USER..."
+echo "$CI_USER ALL=(ALL) NOPASSWD: /opt/homebrew/bin/tart" | sudo tee /etc/sudoers.d/ci-mac-tart
+sudo chmod 440 /etc/sudoers.d/ci-mac-tart
+
 # Ensure proper ownership of home directory
 echo_color "$BLUE" "Ensuring proper home directory ownership..."
 chown -R "$CI_USER:staff" "$CI_HOME"
