@@ -12,12 +12,18 @@ check_system_resources() {
     log "Checking system resources..."
     log "CPU Info:"
     sysctl -n machdep.cpu.brand_string || true
+    log "CPU Architecture:"
+    uname -m || true
+    log "macOS Version:"
+    sw_vers || true
     log "Memory Info:"
     vm_stat || true
     log "Disk Space:"
     df -h || true
     log "Running VMs:"
     tart list || true
+    log "Tart Version:"
+    tart version || true
 }
 
 # Function to check VM status
@@ -170,8 +176,12 @@ fi
 # Start the VM and run bootstrap
 log "Starting VM and running bootstrap..."
 VM_PID=""
-log "Starting VM with command: tart run $IMAGE_NAME --no-graphics --dir=workspace:$PWD"
-tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" &
+log "================================================"
+log "TESTING VM STARTUP WITHOUT WORKSPACE MOUNT"
+log "This is a diagnostic test to isolate workspace mount issues"
+log "================================================"
+log "Starting VM without workspace mount to test basic functionality..."
+tart run "$IMAGE_NAME" --no-graphics &
 VM_PID=$!
 
 # Wait for VM to be ready and check its status
