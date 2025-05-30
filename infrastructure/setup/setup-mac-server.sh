@@ -697,8 +697,17 @@ echo_color "$BLUE" "Configuring Buildkite agent service to run as $CI_USER..."
 brew services stop buildkite-agent
 
 # Update the plist to run as CI user
-/usr/libexec/PlistBuddy -c "Set :UserName $CI_USER" "$PLIST_PATH"
-/usr/libexec/PlistBuddy -c "Set :WorkingDirectory $CI_HOME" "$PLIST_PATH"
+if ! /usr/libexec/PlistBuddy -c "Print :UserName" "$PLIST_PATH" &>/dev/null; then
+  /usr/libexec/PlistBuddy -c "Add :UserName string $CI_USER" "$PLIST_PATH"
+else
+  /usr/libexec/PlistBuddy -c "Set :UserName $CI_USER" "$PLIST_PATH"
+fi
+
+if ! /usr/libexec/PlistBuddy -c "Print :WorkingDirectory" "$PLIST_PATH" &>/dev/null; then
+  /usr/libexec/PlistBuddy -c "Add :WorkingDirectory string $CI_HOME" "$PLIST_PATH"
+else
+  /usr/libexec/PlistBuddy -c "Set :WorkingDirectory $CI_HOME" "$PLIST_PATH"
+fi
 
 # Set environment variables
 if ! /usr/libexec/PlistBuddy -c "Print :EnvironmentVariables" "$PLIST_PATH" &>/dev/null; then
