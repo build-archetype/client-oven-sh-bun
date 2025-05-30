@@ -61,6 +61,13 @@ log "==========================="
 log "Current working directory: $(pwd)"
 log "Directory contents:"
 ls -la
+log "Directory tree structure:"
+log "=== .buildkite/scripts/ ==="
+ls -la .buildkite/scripts/
+log "=== scripts/ ==="
+ls -la scripts/
+log "=== .buildkite/ ==="
+ls -la .buildkite/
 log "==========================="
 
 # Check system resources before starting
@@ -114,7 +121,7 @@ clone_base_image() {
 
 # Make run-vm-command.sh executable
 log "Making run-vm-command.sh executable..."
-chmod +x client-oven-sh-bun/.buildkite/scripts/run-vm-command.sh
+chmod +x .buildkite/scripts/run-vm-command.sh
 
 # Function to retry commands
 retry_command() {
@@ -185,7 +192,7 @@ fi
 
 # Run the simplified macOS bootstrap script
 log "Running macOS bootstrap script..."
-if ! retry_command "client-oven-sh-bun/.buildkite/scripts/run-vm-command.sh \"$IMAGE_NAME\" \"cd /Volumes/My\\ Shared\\ Files/workspace/client-oven-sh-bun && chmod +x scripts/bootstrap-macos.sh && ./scripts/bootstrap-macos.sh\""; then
+if ! retry_command ".buildkite/scripts/run-vm-command.sh \"$IMAGE_NAME\" \"cd /Volumes/My\\ Shared\\ Files/workspace && chmod +x scripts/bootstrap-macos.sh && ./scripts/bootstrap-macos.sh\""; then
     log "Bootstrap failed after $MAX_RETRIES attempts"
     if [ -n "$VM_PID" ] && ps -p $VM_PID > /dev/null; then
         log "Stopping VM process..."
