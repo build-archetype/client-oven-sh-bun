@@ -1208,9 +1208,14 @@ function getBuildBaseImageStep() {
       tart: true
     },
     command: [
-      "echo \"$GITHUB_TOKEN\" | tart login ghcr.io --username \"$GITHUB_USERNAME\" --password-stdin",
+      // Set up Docker config for authentication
+      "mkdir -p $HOME/.docker",
+      "cat > $HOME/.docker/config.json << EOF",
+      "{\n  \"auths\": {\n    \"ghcr.io\": {\n      \"auth\": \"$(echo -n \"$GITHUB_USERNAME:$GITHUB_TOKEN\" | base64)\"\n    }\n  }\n}",
+      "EOF",
+      "chmod 600 $HOME/.docker/config.json",
+      // Run the build script
       "chmod +x .buildkite/scripts/ensure-bun-image.sh",
-      // Ensure we capture all output and preserve timestamps
       "set -x",
       ".buildkite/scripts/ensure-bun-image.sh 2>&1 | tee -a base-image-build.log",
       // After successful build, push to container registry

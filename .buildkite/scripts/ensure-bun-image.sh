@@ -356,22 +356,7 @@ log "All operations completed successfully"
 log "Pushing image..."
 
 if [ -n "$GITHUB_TOKEN" ]; then
-    # Set up GitHub credentials using environment variables
-    log "Setting up GitHub credentials..."
-    export DOCKER_CONFIG="$HOME/.docker"
-    mkdir -p "$DOCKER_CONFIG"
-    cat > "$DOCKER_CONFIG/config.json" << EOF
-{
-  "auths": {
-    "ghcr.io": {
-      "auth": "$(echo -n "$GITHUB_USERNAME:$GITHUB_TOKEN" | base64)"
-    }
-  }
-}
-EOF
-    chmod 600 "$DOCKER_CONFIG/config.json"
-    
-    # Push the image
+    # Push the image (authentication is handled by the pipeline)
     log "Pushing image to $TARGET_IMAGE..."
     tart push "$IMAGE_NAME" "$TARGET_IMAGE" || {
         log "Failed to push image"
