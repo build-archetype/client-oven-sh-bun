@@ -119,19 +119,17 @@ clone_base_image() {
     log "Starting clone operation (this may take several minutes)..."
     log "Current tart images:"
     tart list
-    log "Starting clone with timeout of 60 minutes..."
-    timeout 3600 tart clone "$CIRRUS_BASE_IMAGE" "$IMAGE_NAME" || {
-        local exit_code=$?
-        if [ $exit_code -eq 124 ]; then
-            log "Clone operation timed out after 60 minutes"
-        else
-            log "Clone failed with exit code $exit_code"
-        fi
+
+    log "Starting clone operation..."
+    tart clone "$CIRRUS_BASE_IMAGE" "$IMAGE_NAME"
+    local exit_code=$?
+    
+    if [ $exit_code -ne 0 ]; then
+        log "Clone failed with exit code $exit_code"
         return 1
-    }
-    log "Successfully cloned base image"
-    log "Verifying cloned image:"
-    tart list
+    fi
+    
+    log "Clone completed successfully"
     return 0
 }
 
@@ -169,6 +167,9 @@ retry_command() {
     return $exitcode
 }
 
+# Initialize success flag
+BUILD_SUCCESS=false
+
 # Pull Cirrus base image with retries
 log "Starting Cirrus base image pull with retries..."
 if ! retry_command "pull_cirrus_base"; then
@@ -176,10 +177,10 @@ if ! retry_command "pull_cirrus_base"; then
     exit 1
 fi
 
-# Clone the base image
+# Clone the base image - no retries, exit on failure
 log "Cloning Cirrus base image to create our base..."
-if ! retry_command "clone_base_image"; then
-    log "Failed to clone base image after $MAX_RETRIES attempts"
+if ! clone_base_image; then
+    log "Failed to clone base image - exiting"
     exit 1
 fi
 
@@ -206,10 +207,10 @@ if ! ps -p $VM_PID > /dev/null; then
     exit 1
 fi
 
-# Run the simplified macOS bootstrap script
+# Run the bootstrap script - no retries, exit on failure
 log "Running macOS bootstrap script..."
-if ! retry_command ".buildkite/scripts/run-vm-command.sh \"$IMAGE_NAME\" \"cd /Volumes/My\\ Shared\\ Files/workspace/client-oven-sh-bun && chmod +x scripts/bootstrap-macos.sh && ./scripts/bootstrap-macos.sh\""; then
-    log "Bootstrap failed after $MAX_RETRIES attempts"
+if ! .buildkite/scripts/run-vm-command.sh "$IMAGE_NAME" "cd /Volumes/My\\ Shared\\ Files/workspace/client-oven-sh-bun && chmod +x scripts/bootstrap-macos.sh && ./scripts/bootstrap-macos.sh"; then
+    log "Bootstrap failed - exiting"
     if [ -n "$VM_PID" ] && ps -p $VM_PID > /dev/null; then
         log "Stopping VM process..."
         kill $VM_PID || true
@@ -225,16 +226,15 @@ if [ -n "$VM_PID" ] && ps -p $VM_PID > /dev/null; then
     wait $VM_PID || true
 fi
 
-# Push your custom image to your registry
-log "Pushing custom image to ghcr.io..."
+# Only push if everything succeeded
+log "All operations completed successfully, pushing image..."
 if [ -n "$GITHUB_TOKEN" ]; then
     tart push "$IMAGE_NAME" "$TARGET_IMAGE" || {
         log "Failed to push image"
         exit 1
     }
+    log "Bun build image created, updated, and pushed successfully"
 else
     log "No GitHub token available for pushing image"
     exit 1
-fi
-
-log "Bun build image created, updated, and pushed successfully" 
+fi 
