@@ -1197,6 +1197,41 @@ async function getPipelineOptions() {
 }
 
 /**
+ * @returns {Step}
+ */
+function getBuildBaseImageStep() {
+  return {
+    label: "Build Base Image",
+    key: "build-base-image",
+    agents: {
+      queue: "darwin",
+      tart: true
+    },
+    command: [
+      "echo \"$GITHUB_TOKEN\" | tart login ghcr.io --username \"$GITHUB_USERNAME\" --password-stdin",
+      "chmod +x .buildkite/scripts/ensure-bun-image.sh",
+      // Ensure we capture all output and preserve timestamps
+      "set -x",
+      ".buildkite/scripts/ensure-bun-image.sh 2>&1 | tee -a base-image-build.log",
+      // After successful build, push to container registry
+      `echo \"$GITHUB_TOKEN\" | tart push ${IMAGE_CONFIG.baseImage.name} ${IMAGE_CONFIG.baseImage.fullName} --password-stdin`
+    ],
+    retry: {
+      automatic: [
+        { exit_status: 1, limit: 2 },
+        { exit_status: -1, limit: 1 },
+        { exit_status: 255, limit: 1 }
+      ]
+    },
+    artifact_paths: [
+      "base-image-build.log"
+    ],
+    soft_fail: false,
+    timeout_in_minutes: 30
+  };
+}
+
+/**
  * @param {PipelineOptions} [options]
  * @returns {Promise<Pipeline | undefined>}
  */
@@ -1213,27 +1248,21 @@ async function getPipeline(options = {}) {
   // Get filtered platforms based on options
   const { buildPlatforms: filteredBuildPlatforms = buildPlatforms, testPlatforms: filteredTestPlatforms = testPlatforms } = options;
 
-  // Add the Bun image check step at the start
-  steps.push({
-    label: "Ensure Bun Image",
-    command: [
-      `tart list | grep -q ${IMAGE_CONFIG.baseImage.name} || tart pull ${IMAGE_CONFIG.baseImage.fullName}`,
-      `tart list | grep -q ${IMAGE_CONFIG.baseImage.name} || (echo 'Failed to pull base image' && exit 1)`
-    ],
-    key: "ensure-bun-image",
-    depends_on: [],
-    agents: getCppAgent(filteredBuildPlatforms[0], options)
-  });
+  // Add the base image build step for macOS platforms
+  const hasMacOSBuilds = filteredBuildPlatforms.some(platform => platform.os === "darwin");
+  if (hasMacOSBuilds) {
+    steps.push(getBuildBaseImageStep());
+  }
 
   // Add build steps for each platform
   for (const platform of filteredBuildPlatforms) {
     const { os } = platform;
     if (os === "darwin") {
-      // Add the build steps with dependency on ensure-bun-image
-      steps.push(getStepWithDependsOn(getBuildVendorStep(platform, options), "ensure-bun-image"));
-      steps.push(getStepWithDependsOn(getBuildCppStep(platform, options), "ensure-bun-image"));
-      steps.push(getStepWithDependsOn(getBuildZigStep(platform, options), "ensure-bun-image"));
-      steps.push(getStepWithDependsOn(getLinkBunStep(platform, options), "ensure-bun-image"));
+      // Add the build steps with dependency on build-base-image
+      steps.push(getStepWithDependsOn(getBuildVendorStep(platform, options), "build-base-image"));
+      steps.push(getStepWithDependsOn(getBuildCppStep(platform, options), "build-base-image"));
+      steps.push(getStepWithDependsOn(getBuildZigStep(platform, options), "build-base-image"));
+      steps.push(getStepWithDependsOn(getLinkBunStep(platform, options), "build-base-image"));
     } else {
       // Original steps for non-macOS platforms
       steps.push(getBuildVendorStep(platform, options));
@@ -1247,8 +1276,8 @@ async function getPipeline(options = {}) {
   for (const platform of filteredTestPlatforms) {
     const { os } = platform;
     if (os === "darwin") {
-      // Add test step with dependency on ensure-bun-image
-      steps.push(getStepWithDependsOn(getTestBunStep(platform, options), "ensure-bun-image"));
+      // Add test step with dependency on build-base-image
+      steps.push(getStepWithDependsOn(getTestBunStep(platform, options), "build-base-image"));
     } else {
       // Original test steps for non-macOS platforms
       steps.push(getTestBunStep(platform, options));

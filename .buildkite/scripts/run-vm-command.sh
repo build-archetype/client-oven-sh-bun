@@ -1,65 +1,60 @@
 #!/bin/bash
-set -e
 
-VM_NAME=$1
-COMMAND=$2
-
-# Get VM IP
-VM_IP=$(tart ip "$VM_NAME")
-echo "VM IP: $VM_IP"
-
-# Check if VM is healthy
-echo "Checking VM health..."
-attempt=1
-max_attempts=5
-while [ "$attempt" -le "$max_attempts" ]; do
-  echo "[$attempt/$max_attempts] Checking VM health..."
-  
-  # First check if SSH is running
-  if ! nc -z $VM_IP 22 > /dev/null 2>&1; then
-    echo "SSH port not yet available, waiting..."
-    sleep 20
-    attempt=$((attempt + 1))
-    continue
-  fi
-  
-  # Try SSH with verbose output for debugging
-  if sshpass -p admin ssh -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP echo "VM is healthy" > /dev/null 2>&1; then
-    echo "VM is healthy"
-    break
-  fi
-  
-  if [ "$attempt" -eq "$max_attempts" ]; then
-    echo "VM failed to become healthy after $max_attempts attempts"
+# Check if VM name is provided
+if [ -z "$1" ]; then
+    echo "Usage: $0 <vm-name> [command]"
     exit 1
-  fi
-  
-  echo "[$attempt/$max_attempts] VM not ready yet, waiting..."
-  sleep 20
-  attempt=$((attempt + 1))
-done
+fi
 
-# Check Bun before bootstrap
-echo "Checking Bun before bootstrap..."
-sshpass -p admin ssh -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP '
-echo "Checking PATH..."
-which bun || echo "Not found in PATH"
-echo "Checking /usr/local/bin..."
-find /usr/local/bin -name bun 2>/dev/null || echo "Not found in /usr/local/bin"
-echo "Checking /opt/homebrew/bin..."
-find /opt/homebrew/bin -name bun 2>/dev/null || echo "Not found in /opt/homebrew/bin"
-' || {
-    echo "❌ ERROR: Bun was not found in the VM!"
-    echo "================================================"
-    echo "The base image build failed because Bun is not installed or not in PATH."
-    echo "Common locations checked:"
-    echo "- /usr/local/bin"
-    echo "- /opt/homebrew/bin"
-    echo "- PATH directories"
-    echo "================================================"
+VM_NAME="$1"
+VM_IP=$(tart ip "$VM_NAME")
+WORKSPACE_DIR="/Volumes/My Shared Files/workspace/client-oven-sh-bun"
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+
+# Function to check VM health
+check_vm_health() {
+    echo "Checking VM health..."
+    if ! tart list | grep -q "$VM_NAME.*running"; then
+        echo "Error: VM '$VM_NAME' is not running"
+        exit 1
+    fi
+    
+    # Wait for SSH to be available
+    echo "Waiting for SSH to be available..."
+    for i in {1..30}; do
+        if sshpass -p admin ssh $SSH_OPTS -o ConnectTimeout=2 admin@$VM_IP echo "SSH is ready" >/dev/null 2>&1; then
+            echo "SSH is ready"
+            return 0
+        fi
+        echo "Attempt $i: SSH not ready yet..."
+        sleep 2
+    done
+    
+    echo "Error: SSH did not become available after 60 seconds"
     exit 1
 }
 
-# Run the command
-echo "Running command: $COMMAND"
-sshpass -p admin ssh -v -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP "cd '/Volumes/My Shared Files/workspace' && $COMMAND" 
+# Function to check if Bun is installed
+check_bun() {
+    echo "Checking Bun before bootstrap..."
+    if ! sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "which bun" >/dev/null 2>&1; then
+        echo "Error: Bun is not installed in the VM"
+        exit 1
+    fi
+}
+
+# Check VM health
+check_vm_health
+
+# If no command is provided, just check VM health and exit
+if [ -z "$2" ]; then
+    echo "No command provided. VM is healthy."
+    exit 0
+fi
+
+# Check Bun installation if command is provided
+check_bun
+
+# Run the command in the VM
+echo "Running command: $2"
+sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd '$WORKSPACE_DIR' && $2" 
