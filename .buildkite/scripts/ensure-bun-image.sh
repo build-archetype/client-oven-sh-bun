@@ -2,6 +2,18 @@
 set -e
 set -x
 
+# Add trap to ensure cleanup on exit
+cleanup() {
+    local exit_code=$?
+    if [ -n "$VM_PID" ] && ps -p $VM_PID > /dev/null; then
+        log "Cleaning up VM process..."
+        kill $VM_PID || true
+        wait $VM_PID || true
+    fi
+    exit $exit_code
+}
+trap cleanup EXIT
+
 # Function to log with timestamp
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
@@ -40,12 +52,16 @@ check_vm_status() {
 # Function to clean up existing VMs
 cleanup_vms() {
     log "Cleaning up any existing VMs..."
-    tart list | grep "$IMAGE_NAME" | while read -r line; do
-        if echo "$line" | grep -q "running"; then
-            log "Found running VM, attempting to stop it..."
-            tart stop "$IMAGE_NAME" || true
-        fi
-    done
+    if tart list | grep -q "$IMAGE_NAME"; then
+        log "Found existing VM $IMAGE_NAME, deleting it..."
+        tart delete "$IMAGE_NAME" || {
+            log "Failed to delete existing VM $IMAGE_NAME"
+            return 1
+        }
+        log "Successfully deleted existing VM $IMAGE_NAME"
+    else
+        log "No existing VM $IMAGE_NAME found"
+    fi
 }
 
 # Hardcoded image configuration -- update this when we switch to a new base image
@@ -79,8 +95,12 @@ log "==========================="
 # Check system resources before starting
 check_system_resources
 
-# Clean up any existing VMs
-cleanup_vms
+# Clean up any existing VMs before starting
+log "Cleaning up any existing VMs before starting..."
+if ! cleanup_vms; then
+    log "Failed to clean up existing VMs - exiting"
+    exit 1
+fi
 
 # Function to check if image exists
 check_image_exists() {
@@ -120,6 +140,12 @@ clone_base_image() {
     log "Current tart images:"
     tart list
 
+    log "Verifying source image exists..."
+    if ! tart list | grep -q "$CIRRUS_BASE_IMAGE"; then
+        log "ERROR: Source image $CIRRUS_BASE_IMAGE not found"
+        return 1
+    fi
+
     log "Starting clone operation..."
     tart clone "$CIRRUS_BASE_IMAGE" "$IMAGE_NAME"
     local exit_code=$?
@@ -130,6 +156,11 @@ clone_base_image() {
     fi
     
     log "Clone completed successfully"
+    log "Verifying cloned image:"
+    tart list | grep "$IMAGE_NAME" || {
+        log "ERROR: Cloned image $IMAGE_NAME not found after clone"
+        return 1
+    }
     return 0
 }
 
@@ -184,11 +215,44 @@ if ! clone_base_image; then
     exit 1
 fi
 
+# Test basic VM functionality
+log "Testing basic VM functionality..."
+log "Starting test VM run..."
+if ! tart run "$IMAGE_NAME" --no-graphics; then
+    log "Basic VM test failed - VM may be corrupted"
+    exit 1
+fi
+log "Basic VM test successful, stopping VM..."
+tart stop "$IMAGE_NAME" || true
+
 # Start the VM and run bootstrap
 log "Starting VM and running bootstrap..."
 VM_PID=""
+
+# Validate VM before starting
+log "Validating VM before start..."
+if ! tart list | grep -q "$IMAGE_NAME.*stopped"; then
+    log "ERROR: VM $IMAGE_NAME not found or not in stopped state"
+    tart list
+    exit 1
+fi
+
+# Check VM details
+log "VM details:"
+tart info "$IMAGE_NAME" || {
+    log "ERROR: Failed to get VM info"
+    exit 1
+}
+
+# Check virtualization status
+log "Checking virtualization status..."
+if ! sysctl kern.hv_support >/dev/null 2>&1; then
+    log "ERROR: Virtualization not supported or not enabled"
+    exit 1
+fi
+
 log "Starting VM with command: tart run $IMAGE_NAME --no-graphics --dir=workspace:$PWD"
-tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" &
+tart run "$IMAGE_NAME" --no-graphics --dir=workspace:"$PWD" 2>vm_error.log &
 VM_PID=$!
 
 # Wait for VM to be ready and check its status
@@ -198,6 +262,8 @@ sleep 30  # Initial wait time
 # Check if VM is running
 if ! ps -p $VM_PID > /dev/null; then
     log "VM process failed to start"
+    log "VM error log:"
+    cat vm_error.log || true
     log "Checking VM status:"
     check_vm_status "$IMAGE_NAME"
     log "VM process details:"
@@ -211,11 +277,6 @@ fi
 log "Running macOS bootstrap script..."
 if ! .buildkite/scripts/run-vm-command.sh "$IMAGE_NAME" "cd /Volumes/My\\ Shared\\ Files/workspace/client-oven-sh-bun && chmod +x scripts/bootstrap-macos.sh && ./scripts/bootstrap-macos.sh"; then
     log "Bootstrap failed - exiting"
-    if [ -n "$VM_PID" ] && ps -p $VM_PID > /dev/null; then
-        log "Stopping VM process..."
-        kill $VM_PID || true
-        wait $VM_PID || true
-    fi
     exit 1
 fi
 
