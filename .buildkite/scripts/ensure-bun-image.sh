@@ -19,6 +19,10 @@ cleanup() {
         system_profiler SPVirtualizationDataType > virtualization_info.log 2>&1 || true
         log show --predicate 'process == "tart"' --last 5m > tart_system_log.log 2>&1 || true
     fi
+    # Clean up credentials file
+    if [ -f "$CREDS_FILE" ]; then
+        rm -f "$CREDS_FILE"
+    fi
     exit $exit_code
 }
 trap cleanup EXIT
@@ -35,21 +39,13 @@ log "Current directory: $(pwd)"
 log "Directory contents:"
 ls -la
 
-# Set up keychain access for CI user
-log "Setting up keychain access..."
-if [ "$(whoami)" = "ci-mac" ]; then
-    log "Running as CI user, setting up keychain..."
-    # Create a new keychain for the CI user
-    security create-keychain -p "ci-keychain" ci.keychain
-    security default-keychain -s ci.keychain
-    security unlock-keychain -p "ci-keychain" ci.keychain
-    security set-keychain-settings -t 3600 -u ci.keychain
-    # Allow the CI user to access the keychain
-    security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "ci-keychain" ci.keychain
-    # Add the GitHub token to the keychain
-    if [ -n "$GITHUB_TOKEN" ]; then
-        security add-generic-password -a "$(whoami)" -s "GitHub Token" -w "$GITHUB_TOKEN" ci.keychain
-    fi
+# Set up temporary credentials file
+log "Setting up temporary credentials..."
+CREDS_FILE="/tmp/ghcr_creds_$$"
+if [ -n "$GITHUB_TOKEN" ]; then
+    echo "machine ghcr.io login $GITHUB_USERNAME password $GITHUB_TOKEN" > "$CREDS_FILE"
+    chmod 600 "$CREDS_FILE"
+    export NETRC="$CREDS_FILE"
 fi
 
 log "=== Tart Environment ==="
@@ -368,9 +364,10 @@ fi
 log "All operations completed successfully"
 log "Pushing image..."
 if [ -n "$GITHUB_TOKEN" ]; then
-    # Ensure keychain is unlocked before pushing
-    if [ "$(whoami)" = "ci-mac" ]; then
-        security unlock-keychain -p "ci-keychain" ci.keychain
+    # Ensure credentials are available
+    if [ ! -f "$CREDS_FILE" ]; then
+        log "Error: Credentials file not found"
+        exit 1
     fi
     tart push "$IMAGE_NAME" "$TARGET_IMAGE" || {
         log "Failed to push image"
@@ -380,12 +377,6 @@ if [ -n "$GITHUB_TOKEN" ]; then
 else
     log "No GitHub token available for pushing image"
     exit 1
-fi
-
-# Clean up keychain if we created one
-if [ "$(whoami)" = "ci-mac" ]; then
-    log "Cleaning up keychain..."
-    security delete-keychain ci.keychain || true
 fi
 
 log "Build completed successfully" 
