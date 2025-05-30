@@ -356,12 +356,20 @@ log "All operations completed successfully"
 log "Pushing image..."
 
 if [ -n "$GITHUB_TOKEN" ]; then
-    # Set up GitHub credentials for tart
+    # Set up GitHub credentials using environment variables
     log "Setting up GitHub credentials..."
-    echo "$GITHUB_TOKEN" | tart login ghcr.io --username "$GITHUB_USERNAME" --password-stdin || {
-        log "Failed to login to ghcr.io"
-        exit 1
+    export DOCKER_CONFIG="$HOME/.docker"
+    mkdir -p "$DOCKER_CONFIG"
+    cat > "$DOCKER_CONFIG/config.json" << EOF
+{
+  "auths": {
+    "ghcr.io": {
+      "auth": "$(echo -n "$GITHUB_USERNAME:$GITHUB_TOKEN" | base64)"
     }
+  }
+}
+EOF
+    chmod 600 "$DOCKER_CONFIG/config.json"
     
     # Push the image
     log "Pushing image to $TARGET_IMAGE..."
