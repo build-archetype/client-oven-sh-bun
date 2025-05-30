@@ -648,14 +648,6 @@ echo "  3. Set up Tart images in $CI_HOME/.tart/vms"
 echo "  4. Buildkite is ready to run. Start the agent with: sudo -u $CI_USER $AGENT_BIN start"
 echo "  5. Create base VMs with: sudo -u $CI_USER tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest sequoia-base"
 echo "  6. Start Buildkite agent with: sudo -u $CI_USER $AGENT_BIN start"
-echo "  7. Use these Buildkite aliases:"
-echo "      - bk-start: Start the agent"
-echo "      - bk-stop: Stop the agent"
-echo "      - bk-restart: Restart the agent"
-echo "      - bk-status: Check agent status"
-echo "      - bk-token: View the agent token"
-echo "      - bk-update-config: Edit agent config"
-echo "      - bk-update-setup: Update and restart setup script"
 echo_color "$GREEN" "\nAll done!"
 
 # --- Prompt to create all base VMs (single y/n) ---
@@ -677,7 +669,13 @@ echo_color "$BLUE" "Creating Buildkite agent directories..."
 sudo mkdir -p /opt/homebrew/etc/buildkite-agent
 sudo mkdir -p /opt/homebrew/etc/buildkite-agent/hooks
 sudo mkdir -p /opt/homebrew/etc/buildkite-agent/plugins
+sudo mkdir -p /opt/homebrew/var/log
+sudo mkdir -p "$CI_HOME/builds"
+sudo mkdir -p "$CI_HOME/hooks"
+sudo mkdir -p "$CI_HOME/plugins"
 sudo chown -R "$CI_USER:staff" /opt/homebrew/etc/buildkite-agent
+sudo chown -R "$CI_USER:staff" /opt/homebrew/var/log
+sudo chown -R "$CI_USER:staff" "$CI_HOME/builds" "$CI_HOME/hooks" "$CI_HOME/plugins"
 
 sudo tee "$BK_CFG" > /dev/null << EOF
 token="$BUILDKITE_AGENT_TOKEN"
@@ -686,6 +684,7 @@ tags="os=darwin,arch=aarch64,queue=darwin,tart=true"
 build-path="$CI_HOME/builds"
 hooks-path="$CI_HOME/hooks"
 plugins-path="$CI_HOME/plugins"
+log-file="/opt/homebrew/var/log/buildkite-agent.log"
 EOF
 sudo chown "$CI_USER:staff" "$BK_CFG"
 
@@ -693,43 +692,54 @@ sudo chown "$CI_USER:staff" "$BK_CFG"
 PLIST_PATH="/opt/homebrew/opt/buildkite-agent/homebrew.mxcl.buildkite-agent.plist"
 echo_color "$BLUE" "Configuring Buildkite agent service to run as $CI_USER..."
 
-# Stop the service if it's running
-brew services stop buildkite-agent
+# Fix permissions on the plist file
+sudo chown root:wheel "$PLIST_PATH"
+sudo chmod 644 "$PLIST_PATH"
 
-# Update the plist to run as CI user
-if ! /usr/libexec/PlistBuddy -c "Print :UserName" "$PLIST_PATH" &>/dev/null; then
-  /usr/libexec/PlistBuddy -c "Add :UserName string $CI_USER" "$PLIST_PATH"
+# Ensure the CI user has access to Homebrew
+echo_color "$BLUE" "Setting up Homebrew permissions for CI user..."
+sudo chown -R "$CI_USER:staff" /opt/homebrew
+sudo chmod -R 755 /opt/homebrew
+
+# Set up Homebrew environment for CI user
+echo_color "$BLUE" "Setting up Homebrew environment for CI user..."
+sudo mkdir -p "$CI_HOME/Library/Caches/Homebrew"
+sudo mkdir -p "$CI_HOME/Library/Logs/Homebrew"
+sudo mkdir -p "$CI_HOME/Library/Application Support/Homebrew"
+sudo chown -R "$CI_USER:staff" "$CI_HOME/Library"
+sudo chmod -R 755 "$CI_HOME/Library"
+
+# Set up Homebrew environment variables for CI user
+echo_color "$BLUE" "Setting up Homebrew environment variables..."
+sudo tee "$CI_HOME/.zprofile" > /dev/null << EOF
+eval "\$(/opt/homebrew/bin/brew shellenv)"
+export HOMEBREW_CACHE="\$HOME/Library/Caches/Homebrew"
+export HOMEBREW_LOGS="\$HOME/Library/Logs/Homebrew"
+export HOMEBREW_NO_ANALYTICS=1
+EOF
+sudo chown "$CI_USER:staff" "$CI_HOME/.zprofile"
+sudo chmod 644 "$CI_HOME/.zprofile"
+
+# Get the buildkite-agent binary path
+AGENT_BIN="/opt/homebrew/opt/buildkite-agent/bin/buildkite-agent"
+
+# Stop any existing service
+echo_color "$BLUE" "Stopping any existing Buildkite agent service..."
+cd "$CI_HOME" && sudo -u "$CI_USER" env HOME="$CI_HOME" brew services stop buildkite-agent || true
+
+# Start the service as the CI user
+echo_color "$BLUE" "Starting Buildkite agent service as $CI_USER..."
+cd "$CI_HOME" && sudo -u "$CI_USER" env HOME="$CI_HOME" brew services start buildkite-agent
+
+# Verify the service is running
+sleep 5
+if cd "$CI_HOME" && sudo -u "$CI_USER" env HOME="$CI_HOME" brew services list | grep -q "buildkite-agent.*started"; then
+  echo_color "$GREEN" "✅ Buildkite agent service started successfully"
 else
-  /usr/libexec/PlistBuddy -c "Set :UserName $CI_USER" "$PLIST_PATH"
+  echo_color "$RED" "❌ Failed to start Buildkite agent service"
+  echo_color "$YELLOW" "Trying alternative start method..."
+  sudo -u "$CI_USER" "$AGENT_BIN" start
 fi
-
-if ! /usr/libexec/PlistBuddy -c "Print :WorkingDirectory" "$PLIST_PATH" &>/dev/null; then
-  /usr/libexec/PlistBuddy -c "Add :WorkingDirectory string $CI_HOME" "$PLIST_PATH"
-else
-  /usr/libexec/PlistBuddy -c "Set :WorkingDirectory $CI_HOME" "$PLIST_PATH"
-fi
-
-# Set environment variables
-if ! /usr/libexec/PlistBuddy -c "Print :EnvironmentVariables" "$PLIST_PATH" &>/dev/null; then
-  /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables dict" "$PLIST_PATH"
-fi
-
-# Add or set GITHUB_TOKEN
-if /usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:GITHUB_TOKEN" "$PLIST_PATH" &>/dev/null; then
-  /usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:GITHUB_TOKEN $GITHUB_TOKEN" "$PLIST_PATH"
-else
-  /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:GITHUB_TOKEN string $GITHUB_TOKEN" "$PLIST_PATH"
-fi
-
-# Add or set GITHUB_USERNAME
-if /usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:GITHUB_USERNAME" "$PLIST_PATH" &>/dev/null; then
-  /usr/libexec/PlistBuddy -c "Set :EnvironmentVariables:GITHUB_USERNAME $GITHUB_USERNAME" "$PLIST_PATH"
-else
-  /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:GITHUB_USERNAME string $GITHUB_USERNAME" "$PLIST_PATH"
-fi
-
-# Start the service as CI user
-brew services start buildkite-agent
 
 echo_color "$GREEN" "✅ Buildkite agent configured to run as $CI_USER"
 
