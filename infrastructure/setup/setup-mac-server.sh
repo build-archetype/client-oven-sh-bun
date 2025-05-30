@@ -671,7 +671,14 @@ fi
 # --- Write Buildkite agent config to Homebrew location ---
 BK_CFG="/opt/homebrew/etc/buildkite-agent/buildkite-agent.cfg"
 echo_color "$BLUE" "Writing Buildkite agent config to $BK_CFG..."
+
+# Create Buildkite agent directories with correct permissions
+echo_color "$BLUE" "Creating Buildkite agent directories..."
 sudo mkdir -p /opt/homebrew/etc/buildkite-agent
+sudo mkdir -p /opt/homebrew/etc/buildkite-agent/hooks
+sudo mkdir -p /opt/homebrew/etc/buildkite-agent/plugins
+sudo chown -R "$CI_USER:staff" /opt/homebrew/etc/buildkite-agent
+
 sudo tee "$BK_CFG" > /dev/null << EOF
 token="$BUILDKITE_AGENT_TOKEN"
 name="${AGENT_NAME}"
