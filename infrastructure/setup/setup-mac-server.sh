@@ -403,6 +403,10 @@ sudo -u "$CI_USER" env HOME="$CI_HOME" security list-keychains | grep -q "login.
 echo_color "$BLUE" "Unlocking login keychain..."
 sudo -u "$CI_USER" env HOME="$CI_HOME" security unlock-keychain -p "ci-keychain" "$CI_HOME/Library/Keychains/login.keychain"
 
+# Set keychain to not require user interaction
+echo_color "$BLUE" "Configuring keychain for non-interactive use..."
+sudo -u "$CI_USER" env HOME="$CI_HOME" security set-keychain-settings -t 3600 -u -l "$CI_HOME/Library/Keychains/login.keychain"
+
 # Add or update the GitHub token in the keychain if available
 if [ -n "$GITHUB_TOKEN" ]; then
     echo_color "$BLUE" "Adding GitHub token to keychain..."
@@ -411,6 +415,10 @@ if [ -n "$GITHUB_TOKEN" ]; then
     # Add new token
     sudo -u "$CI_USER" env HOME="$CI_HOME" security add-generic-password -a "$CI_USER" -s "GitHub Token" -w "$GITHUB_TOKEN" "$CI_HOME/Library/Keychains/login.keychain"
 fi
+
+# Ensure the keychain is in the search list
+echo_color "$BLUE" "Adding keychain to search list..."
+sudo -u "$CI_USER" env HOME="$CI_HOME" security list-keychains -s "$CI_HOME/Library/Keychains/login.keychain"
 
 # Verify keychain access
 echo_color "$BLUE" "Verifying keychain access..."
