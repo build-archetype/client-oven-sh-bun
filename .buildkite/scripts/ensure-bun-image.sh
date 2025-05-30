@@ -355,26 +355,17 @@ fi
 log "All operations completed successfully"
 log "Pushing image..."
 
-# Get GitHub token from keychain as CI user
-log "Getting GitHub token from keychain..."
-CI_USER="ci-mac"
-CI_HOME="/Users/$CI_USER"
-GITHUB_TOKEN=$(sudo -u "$CI_USER" env HOME="$CI_HOME" security find-generic-password -a "$CI_USER" -s "GitHub Token" -w 2>/dev/null) || {
-    log "Failed to get GitHub token from keychain"
-    exit 1
-}
-
 if [ -n "$GITHUB_TOKEN" ]; then
     # Set up GitHub credentials for tart
     log "Setting up GitHub credentials..."
-    echo "$GITHUB_TOKEN" | sudo -u "$CI_USER" env HOME="$CI_HOME" tart login ghcr.io --username "$GITHUB_USERNAME" --password-stdin || {
+    echo "$GITHUB_TOKEN" | tart login ghcr.io --username "$GITHUB_USERNAME" --password-stdin || {
         log "Failed to login to ghcr.io"
         exit 1
     }
     
     # Push the image
     log "Pushing image to $TARGET_IMAGE..."
-    sudo -u "$CI_USER" env HOME="$CI_HOME" tart push "$IMAGE_NAME" "$TARGET_IMAGE" || {
+    tart push "$IMAGE_NAME" "$TARGET_IMAGE" || {
         log "Failed to push image"
         exit 1
     }
