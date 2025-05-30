@@ -733,52 +733,5 @@ brew services start buildkite-agent
 
 echo_color "$GREEN" "✅ Buildkite agent configured to run as $CI_USER"
 
-# --- Create Buildkite agent aliases ---
-echo_color "$BLUE" "Creating Buildkite agent aliases..."
-cat > /usr/local/bin/bk-update-config << 'EOF'
-#!/bin/bash
-# Update Buildkite agent configuration
-CI_USER="ci-mac"
-CI_HOME="/Users/$CI_USER"
-BK_CFG="/opt/homebrew/etc/buildkite-agent/buildkite-agent.cfg"
-
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then
-  echo "This script must be run as root"
-  exit 1
-fi
-
-# Edit the config file
-vi "$BK_CFG"
-
-# Restart the service
-brew services restart buildkite-agent
-
-echo "Buildkite agent configuration updated and service restarted"
-EOF
-
-chmod +x /usr/local/bin/bk-update-config
-
-cat > /usr/local/bin/bk-update-setup << 'EOF'
-#!/bin/bash
-# Update and restart the setup script
-SETUP_SCRIPT_URL="https://raw.githubusercontent.com/oven-sh/client-oven-sh-bun/feat/sam/on-prem-mac-ci/infrastructure/setup/setup-mac-server.sh"
-SETUP_SCRIPT="/usr/local/bin/setup-mac-server.sh"
-
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then
-  echo "This script must be run as root"
-  exit 1
-fi
-
-# Download the latest setup script
-curl -fsSL "$SETUP_SCRIPT_URL" -o "$SETUP_SCRIPT"
-chmod +x "$SETUP_SCRIPT"
-
-echo "Setup script updated. Run it with: sudo $SETUP_SCRIPT"
-EOF
-
-chmod +x /usr/local/bin/bk-update-setup
-
 # --- Final summary and next steps ---
 echo_color "$GREEN" "\n[3/3] Setup complete!"
