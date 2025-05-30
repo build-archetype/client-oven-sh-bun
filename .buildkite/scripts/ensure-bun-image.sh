@@ -39,15 +39,6 @@ log "Current directory: $(pwd)"
 log "Directory contents:"
 ls -la
 
-# Set up temporary credentials file
-log "Setting up temporary credentials..."
-CREDS_FILE="/tmp/ghcr_creds_$$"
-if [ -n "$GITHUB_TOKEN" ]; then
-    echo "machine ghcr.io login $GITHUB_USERNAME password $GITHUB_TOKEN" > "$CREDS_FILE"
-    chmod 600 "$CREDS_FILE"
-    export NETRC="$CREDS_FILE"
-fi
-
 log "=== Tart Environment ==="
 log "Tart version:"
 tart version || true
@@ -363,13 +354,27 @@ fi
 # Only push if everything succeeded
 log "All operations completed successfully"
 log "Pushing image..."
+
+# Get GitHub token from keychain as CI user
+log "Getting GitHub token from keychain..."
+CI_USER="ci-mac"
+CI_HOME="/Users/$CI_USER"
+GITHUB_TOKEN=$(sudo -u "$CI_USER" env HOME="$CI_HOME" security find-generic-password -a "$CI_USER" -s "GitHub Token" -w 2>/dev/null) || {
+    log "Failed to get GitHub token from keychain"
+    exit 1
+}
+
 if [ -n "$GITHUB_TOKEN" ]; then
-    # Ensure credentials are available
-    if [ ! -f "$CREDS_FILE" ]; then
-        log "Error: Credentials file not found"
+    # Set up GitHub credentials for tart
+    log "Setting up GitHub credentials..."
+    echo "$GITHUB_TOKEN" | sudo -u "$CI_USER" env HOME="$CI_HOME" tart login ghcr.io --username "$GITHUB_USERNAME" --password-stdin || {
+        log "Failed to login to ghcr.io"
         exit 1
-    fi
-    tart push "$IMAGE_NAME" "$TARGET_IMAGE" || {
+    }
+    
+    # Push the image
+    log "Pushing image to $TARGET_IMAGE..."
+    sudo -u "$CI_USER" env HOME="$CI_HOME" tart push "$IMAGE_NAME" "$TARGET_IMAGE" || {
         log "Failed to push image"
         exit 1
     }
