@@ -372,48 +372,54 @@ if ! id "$CI_USER" &>/dev/null; then
     # Create home directory
     mkdir -p "$CI_HOME"
     chown "$CI_USER:staff" "$CI_HOME"
+    chmod 755 "$CI_HOME"
     
     echo_color "$GREEN" "✅ Created CI user $CI_USER"
 else
     echo_color "$GREEN" "✅ CI user $CI_USER already exists"
 fi
 
-# Restore GITHUB_USERNAME and GITHUB_TOKEN from temp files if present
-if [ -f /tmp/github-username.txt ]; then
-  GITHUB_USERNAME=$(cat /tmp/github-username.txt)
-  rm /tmp/github-username.txt
-fi
-if [ -f /tmp/github-token.txt ]; then
-  GITHUB_TOKEN=$(cat /tmp/github-token.txt)
-  rm /tmp/github-token.txt
+# Ensure proper ownership of home directory
+echo_color "$BLUE" "Ensuring proper home directory ownership..."
+chown -R "$CI_USER:staff" "$CI_HOME"
+chmod -R 755 "$CI_HOME"
+
+# Create necessary directories with proper permissions
+mkdir -p "$CI_HOME/Library/Keychains"
+chown -R "$CI_USER:staff" "$CI_HOME/Library"
+chmod -R 755 "$CI_HOME/Library"
+
+# Set up keychain for CI user
+echo_color "$BLUE" "Setting up keychain for CI user..."
+
+# Ensure the CI user has a login keychain
+echo_color "$BLUE" "Setting up login keychain..."
+sudo -u "$CI_USER" env HOME="$CI_HOME" security list-keychains | grep -q "login.keychain" || {
+    echo_color "$BLUE" "Creating login keychain..."
+    sudo -u "$CI_USER" env HOME="$CI_HOME" security create-keychain -p "ci-keychain" "$CI_HOME/Library/Keychains/login.keychain"
+}
+
+# Unlock the login keychain
+echo_color "$BLUE" "Unlocking login keychain..."
+sudo -u "$CI_USER" env HOME="$CI_HOME" security unlock-keychain -p "ci-keychain" "$CI_HOME/Library/Keychains/login.keychain"
+
+# Add or update the GitHub token in the keychain if available
+if [ -n "$GITHUB_TOKEN" ]; then
+    echo_color "$BLUE" "Adding GitHub token to keychain..."
+    # Remove existing token if it exists
+    sudo -u "$CI_USER" env HOME="$CI_HOME" security delete-generic-password -a "$CI_USER" -s "GitHub Token" "$CI_HOME/Library/Keychains/login.keychain" 2>/dev/null || true
+    # Add new token
+    sudo -u "$CI_USER" env HOME="$CI_HOME" security add-generic-password -a "$CI_USER" -s "GitHub Token" -w "$GITHUB_TOKEN" "$CI_HOME/Library/Keychains/login.keychain"
 fi
 
-# Ensure both are set in root context
-if [ -z "${GITHUB_USERNAME:-}" ]; then
-  echo_color "$RED" "ERROR: GITHUB_USERNAME is not set in the root context!"
-  exit 1
+# Verify keychain access
+echo_color "$BLUE" "Verifying keychain access..."
+if sudo -u "$CI_USER" env HOME="$CI_HOME" security show-keychain-info "$CI_HOME/Library/Keychains/login.keychain"; then
+    echo_color "$GREEN" "✅ Keychain setup successful"
+else
+    echo_color "$RED" "❌ Failed to set up keychain"
+    exit 1
 fi
-if [ -z "${GITHUB_TOKEN:-}" ]; then
-  echo_color "$RED" "ERROR: GITHUB_TOKEN is not set in the root context!"
-  exit 1
-fi
-
-# Ensure variables are set with defaults if needed
-if [ -z "$MACHINE_LOCATION" ]; then
-  echo_color "$YELLOW" "Warning: MACHINE_LOCATION not set, using default 'office-1'"
-  MACHINE_LOCATION="office-1"
-fi
-
-if [ -z "$COMPUTER_NAME" ]; then
-  echo_color "$YELLOW" "Warning: COMPUTER_NAME not set, using hostname"
-  COMPUTER_NAME=$(hostname)
-fi
-
-echo_color "$BLUE" "Debug: Machine info in root context:"
-echo_color "$BLUE" "  Location: $MACHINE_LOCATION"
-echo_color "$BLUE" "  Computer Name: $COMPUTER_NAME"
-echo_color "$BLUE" "  GitHub Username: $GITHUB_USERNAME"
-echo_color "$BLUE" "  GitHub Token: [hidden]"
 
 # Create necessary directories
 mkdir -p "$CI_HOME/builds" "$CI_HOME/hooks" "$CI_HOME/plugins" "$CI_HOME/.tart/vms"
