@@ -100,8 +100,6 @@ check_image_exists() {
 # Function to pull Cirrus base image
 pull_cirrus_base() {
     log "Attempting to pull Cirrus base image $CIRRUS_BASE_IMAGE..."
-    log "Removing any cached versions of the base image..."
-    tart delete "$CIRRUS_BASE_IMAGE" || true
     if tart pull "$CIRRUS_BASE_IMAGE"; then
         log "Successfully pulled Cirrus base image"
         log "Verifying image after pull:"
