@@ -1214,7 +1214,7 @@ function getBuildBaseImageStep() {
       "set -x",
       ".buildkite/scripts/ensure-bun-image.sh 2>&1 | tee -a base-image-build.log",
       // After successful build, push to container registry
-      `echo \"$GITHUB_TOKEN\" | tart push ${IMAGE_CONFIG.baseImage.name} ${IMAGE_CONFIG.baseImage.fullName} --password-stdin`
+      `tart push ${IMAGE_CONFIG.baseImage.name} ${IMAGE_CONFIG.baseImage.fullName}`
     ],
     retry: {
       automatic: [
