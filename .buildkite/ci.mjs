@@ -1227,7 +1227,7 @@ function getBuildBaseImageStep() {
       "base-image-build.log"
     ],
     soft_fail: false,
-    timeout_in_minutes: 30
+    timeout_in_minutes: 90
   };
 }
 
