@@ -354,6 +354,30 @@ fi
 # --- Privileged setup (root) ---
 echo_color "$BLUE" "\n[2/3] Running privileged setup..."
 
+# Create CI user
+CI_USER="ci-mac"
+CI_HOME="/Users/$CI_USER"
+
+echo_color "$BLUE" "Setting up CI user $CI_USER..."
+# Create user if it doesn't exist
+if ! id "$CI_USER" &>/dev/null; then
+    # Create user with home directory
+    dscl . -create "/Users/$CI_USER"
+    dscl . -create "/Users/$CI_USER" UserShell /bin/bash
+    dscl . -create "/Users/$CI_USER" RealName "CI Mac User"
+    dscl . -create "/Users/$CI_USER" UniqueID 1001
+    dscl . -create "/Users/$CI_USER" PrimaryGroupID 20
+    dscl . -create "/Users/$CI_USER" NFSHomeDirectory "$CI_HOME"
+    
+    # Create home directory
+    mkdir -p "$CI_HOME"
+    chown "$CI_USER:staff" "$CI_HOME"
+    
+    echo_color "$GREEN" "✅ Created CI user $CI_USER"
+else
+    echo_color "$GREEN" "✅ CI user $CI_USER already exists"
+fi
+
 # Restore GITHUB_USERNAME and GITHUB_TOKEN from temp files if present
 if [ -f /tmp/github-username.txt ]; then
   GITHUB_USERNAME=$(cat /tmp/github-username.txt)
@@ -391,8 +415,9 @@ echo_color "$BLUE" "  Computer Name: $COMPUTER_NAME"
 echo_color "$BLUE" "  GitHub Username: $GITHUB_USERNAME"
 echo_color "$BLUE" "  GitHub Token: [hidden]"
 
-mkdir -p /opt/buildkite-agent /opt/tart/images /var/log/buildkite-agent
-# mkdir -p /opt/prometheus
+# Create necessary directories
+mkdir -p "$CI_HOME/builds" "$CI_HOME/hooks" "$CI_HOME/plugins" "$CI_HOME/.tart/vms"
+chown -R "$CI_USER:staff" "$CI_HOME"
 
 # --- Prevent system sleep (server mode) ---
 echo_color "$BLUE" "Configuring system to never sleep (server mode)..."
@@ -560,54 +585,24 @@ AGENT_COMPUTER_NAME=$(echo "$MACHINE_INFO" | grep -o '"computer_name":"[^"]*"' |
 AGENT_LOCATION_SANITIZED=$(echo "$AGENT_LOCATION" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd '[:alnum:]-')
 
 # Store the machine info in persistent files
-echo "$MACHINE_LOCATION" > /opt/buildkite-agent/.machine-location
-echo "$COMPUTER_NAME" > /opt/buildkite-agent/.computer-name
+echo "$MACHINE_LOCATION" > "$CI_HOME/.machine-location"
+echo "$COMPUTER_NAME" > "$CI_HOME/.computer-name"
+chown "$CI_USER:staff" "$CI_HOME/.machine-location" "$CI_HOME/.computer-name"
 
 # Create the agent name
 AGENT_NAME="macos-${AGENT_LOCATION_SANITIZED}-${AGENT_COMPUTER_NAME}-${AGENT_UUID:0:8}"
 echo_color "$BLUE" "Debug: Final AGENT_NAME: $AGENT_NAME"
 
 # Buildkite Agent config
-cat > /opt/buildkite-agent/buildkite-agent.cfg << EOF
+cat > "$CI_HOME/buildkite-agent.cfg" << EOF
 token="${BUILDKITE_AGENT_TOKEN}"
 name="${AGENT_NAME}"
 tags="os=darwin,arch=aarch64,queue=darwin,tart=true"
-build-path="/opt/buildkite-agent/builds"
-hooks-path="/opt/buildkite-agent/hooks"
-plugins-path="/opt/buildkite-agent/plugins"
+build-path="$CI_HOME/builds"
+hooks-path="$CI_HOME/hooks"
+plugins-path="$CI_HOME/plugins"
 EOF
-
-# Prometheus config (commented out for now)
-# cat > /opt/prometheus/prometheus.yml << EOF
-# global:
-#   scrape_interval: 15s
-#   evaluation_interval: 15s
-# 
-# # Basic auth configuration
-# basic_auth_users:
-#   ${PROMETHEUS_USER}: ${PROMETHEUS_PASSWORD}
-# 
-# scrape_configs:
-#   - job_name: 'node'
-#     static_configs:
-#       - targets: ['localhost:9100']
-#     basic_auth:
-#       username: ${PROMETHEUS_USER}
-#       password: ${PROMETHEUS_PASSWORD}
-# 
-#   - job_name: 'buildkite'
-#     static_configs:
-#       - targets: ['localhost:9200']
-#     basic_auth:
-#       username: ${PROMETHEUS_USER}
-#       password: ${PROMETHEUS_PASSWORD}
-# EOF
-# 
-# # Create Prometheus web config for basic auth
-# cat > /opt/prometheus/web.yml << EOF
-# basic_auth_users:
-#   ${PROMETHEUS_USER}: ${PROMETHEUS_PASSWORD}
-# EOF
+chown "$CI_USER:staff" "$CI_HOME/buildkite-agent.cfg"
 
 # SSH config
 cat > /etc/ssh/sshd_config.d/build-server.conf << EOF
@@ -621,10 +616,10 @@ EOF
 echo_color "$GREEN" "\n[3/3] Setup complete!"
 echo_color "$BLUE" "Log file: $LOGFILE"
 echo_color "$YELLOW" "Summary of what was done:"
+echo "  - Created CI user $CI_USER"
 echo "  - Homebrew and dependencies installed"
 echo "  - Tart installed via Cirrus Labs tap"
 echo "  - Buildkite agent configured"
-# echo "  - Prometheus configured with authentication"
 echo "  - SSH configuration updated"
 if [ "$VPN_ENABLED" = true ]; then
   echo "  - VPN setup completed"
@@ -634,10 +629,7 @@ fi
 AGENT_BIN="$(brew --prefix buildkite-agent)/bin/buildkite-agent"
 
 echo_color "$YELLOW" "Next steps:"
-# echo "  1. Access Prometheus at http://localhost:9090"
-# echo "     Username: $PROMETHEUS_USER"
-# echo "     Password: $PROMETHEUS_PASSWORD"
-echo "  1. Add your SSH keys to ~/.ssh/authorized_keys"
+echo "  1. Add your SSH keys to $CI_HOME/.ssh/authorized_keys"
 if [ "$VPN_ENABLED" = true ]; then
   case "$VPN_TYPE" in
     wireguard)
@@ -652,11 +644,10 @@ if [ "$VPN_ENABLED" = true ]; then
 else
   echo "  2. VPN setup was skipped (local access only)"
 fi
-echo "  3. Set up Tart images in /opt/tart/images"
-# echo "  4. Review and customize Prometheus config"
-echo "  4. Buildkite is ready to run. Start the agent with: $AGENT_BIN start"
-echo "  5. Create base VMs with: tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest sequoia-base"
-echo "  6. Start Buildkite agent with: $AGENT_BIN start"
+echo "  3. Set up Tart images in $CI_HOME/.tart/vms"
+echo "  4. Buildkite is ready to run. Start the agent with: sudo -u $CI_USER $AGENT_BIN start"
+echo "  5. Create base VMs with: sudo -u $CI_USER tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest sequoia-base"
+echo "  6. Start Buildkite agent with: sudo -u $CI_USER $AGENT_BIN start"
 echo "  7. Use these Buildkite aliases:"
 echo "      - bk-start: Start the agent"
 echo "      - bk-stop: Stop the agent"
@@ -673,7 +664,7 @@ if [[ "$(echo "$yn_vms" | tr '[:upper:]' '[:lower:]')" == "y" ]]; then
   base_vms=("base-macos-arm" "base-macos-intel" "base-m1" "base-m2" "base-m3" "base-m4")
   echo_color "$BLUE" "Creating all base VMs..."
   for vm in "${base_vms[@]}"; do
-    tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest "$vm"
+    sudo -u "$CI_USER" tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest "$vm"
   done
 fi
 
@@ -685,19 +676,24 @@ sudo tee "$BK_CFG" > /dev/null << EOF
 token="$BUILDKITE_AGENT_TOKEN"
 name="${AGENT_NAME}"
 tags="os=darwin,arch=aarch64,queue=darwin,tart=true"
-build-path="/opt/buildkite-agent/builds"
-hooks-path="/opt/buildkite-agent/hooks"
-plugins-path="/opt/buildkite-agent/plugins"
+build-path="$CI_HOME/builds"
+hooks-path="$CI_HOME/hooks"
+plugins-path="$CI_HOME/plugins"
 EOF
-sudo chown $(whoami):staff "$BK_CFG"
+sudo chown "$CI_USER:staff" "$BK_CFG"
 
-# --- Robustly set GITHUB_TOKEN in Homebrew service plist ---
+# --- Set up Buildkite agent service to run as CI user ---
 PLIST_PATH="/opt/homebrew/opt/buildkite-agent/homebrew.mxcl.buildkite-agent.plist"
-echo_color "$BLUE" "Setting GITHUB_TOKEN and GITHUB_USERNAME in $PLIST_PATH..."
-echo_color "$BLUE" "Debug: GITHUB_TOKEN value is: '[hidden]'"
-echo_color "$BLUE" "Debug: GITHUB_USERNAME value is: '$GITHUB_USERNAME'"
+echo_color "$BLUE" "Configuring Buildkite agent service to run as $CI_USER..."
 
-# Ensure EnvironmentVariables dict exists
+# Stop the service if it's running
+brew services stop buildkite-agent
+
+# Update the plist to run as CI user
+/usr/libexec/PlistBuddy -c "Set :UserName $CI_USER" "$PLIST_PATH"
+/usr/libexec/PlistBuddy -c "Set :WorkingDirectory $CI_HOME" "$PLIST_PATH"
+
+# Set environment variables
 if ! /usr/libexec/PlistBuddy -c "Print :EnvironmentVariables" "$PLIST_PATH" &>/dev/null; then
   /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables dict" "$PLIST_PATH"
 fi
@@ -716,8 +712,7 @@ else
   /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:GITHUB_USERNAME string $GITHUB_USERNAME" "$PLIST_PATH"
 fi
 
-# Debug: show the EnvironmentVariables section after update
-/usr/libexec/PlistBuddy -c "Print :EnvironmentVariables" "$PLIST_PATH"
+# Start the service as CI user
+brew services start buildkite-agent
 
-echo_color "$BLUE" "Restarting Buildkite agent service..."
-brew services restart buildkite-agent
+echo_color "$GREEN" "✅ Buildkite agent configured to run as $CI_USER"

@@ -28,6 +28,57 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
+# Initial environment diagnostics
+log "=== Initial Environment Diagnostics ==="
+log "Current user: $(whoami)"
+log "Current directory: $(pwd)"
+log "Directory contents:"
+ls -la
+
+log "=== Tart Environment ==="
+log "Tart version:"
+tart version || true
+log "Tart location:"
+which tart || true
+log "Tart permissions:"
+ls -l $(which tart) || true
+
+log "=== System Information ==="
+log "macOS version:"
+sw_vers
+log "CPU architecture:"
+uname -m
+log "Virtualization support:"
+sysctl kern.hv_support || true
+
+log "=== Tart State ==="
+log "Current tart images:"
+tart list || true
+log "Tart configuration:"
+tart config list || true
+
+log "=== Buildkite Environment ==="
+log "Buildkite agent version:"
+buildkite-agent --version || true
+log "Buildkite environment variables:"
+env | grep -i buildkite || true
+
+log "=== GitHub Authentication ==="
+log "GitHub token present: ${GITHUB_TOKEN:+yes}${GITHUB_TOKEN:-no}"
+log "GitHub username: ${GITHUB_USERNAME:-not set}"
+
+log "=== Tart Detailed Diagnostics ==="
+log "Tart process status:"
+ps aux | grep tart || true
+log "Tart directory permissions:"
+ls -la ~/.tart || true
+log "Tart configuration directory:"
+ls -la /etc/tart || true
+log "Tart system logs:"
+log show --predicate 'process == "tart"' --last 5m || true
+
+log "=== Starting Main Process ==="
+
 # Function to check system resources
 check_system_resources() {
     log "Checking system resources..."
