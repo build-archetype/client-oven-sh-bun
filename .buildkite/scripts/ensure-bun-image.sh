@@ -119,11 +119,11 @@ clone_base_image() {
     log "Starting clone operation (this may take several minutes)..."
     log "Current tart images:"
     tart list
-    log "Starting clone with timeout of 30 minutes..."
-    timeout 1800 tart clone "$CIRRUS_BASE_IMAGE" "$IMAGE_NAME" || {
+    log "Starting clone with timeout of 60 minutes..."
+    timeout 3600 tart clone "$CIRRUS_BASE_IMAGE" "$IMAGE_NAME" || {
         local exit_code=$?
         if [ $exit_code -eq 124 ]; then
-            log "Clone operation timed out after 30 minutes"
+            log "Clone operation timed out after 60 minutes"
         else
             log "Clone failed with exit code $exit_code"
         fi
