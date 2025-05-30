@@ -392,40 +392,69 @@ chmod -R 755 "$CI_HOME/Library"
 # Set up keychain for CI user
 echo_color "$BLUE" "Setting up keychain for CI user..."
 
-# Ensure the CI user has a login keychain
-echo_color "$BLUE" "Setting up login keychain..."
-if ! sudo -u "$CI_USER" env HOME="$CI_HOME" security list-keychains | grep -q "login.keychain"; then
-    echo_color "$BLUE" "Creating login keychain..."
-    sudo -u "$CI_USER" env HOME="$CI_HOME" security create-keychain -p "ci-keychain" "$CI_HOME/Library/Keychains/login.keychain"
-    # Add to search list immediately after creation
-    sudo -u "$CI_USER" env HOME="$CI_HOME" security list-keychains -s "$CI_HOME/Library/Keychains/login.keychain"
-fi
+# Create a dedicated keychain for CI user
+CI_KEYCHAIN="$CI_HOME/Library/Keychains/ci.keychain"
+echo_color "$BLUE" "Setting up CI keychain..."
 
-# Unlock the login keychain
-echo_color "$BLUE" "Unlocking login keychain..."
-sudo -u "$CI_USER" env HOME="$CI_HOME" security unlock-keychain -p "ci-keychain" "$CI_HOME/Library/Keychains/login.keychain"
+# 1. Ensure keychain directory exists with correct permissions
+echo_color "$BLUE" "Setting up keychain directory..."
+mkdir -p "$(dirname "$CI_KEYCHAIN")"
+chown -R "$CI_USER:staff" "$(dirname "$CI_KEYCHAIN")"
 
-# Set keychain to not require user interaction and make it accessible
-echo_color "$BLUE" "Configuring keychain for non-interactive use..."
-sudo -u "$CI_USER" env HOME="$CI_HOME" security set-keychain-settings -t 3600 -u -l "$CI_HOME/Library/Keychains/login.keychain" 2>/dev/null || true
-sudo -u "$CI_USER" env HOME="$CI_HOME" security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "ci-keychain" "$CI_HOME/Library/Keychains/login.keychain" 2>/dev/null || true
+# 2. Remove any existing keychain that might be in a bad state
+echo_color "$BLUE" "Cleaning up any existing keychain..."
+sudo -u "$CI_USER" env HOME="$CI_HOME" security delete-keychain "$CI_KEYCHAIN" 2>/dev/null || true
+rm -f "$CI_KEYCHAIN" "$CI_KEYCHAIN-db" 2>/dev/null || true
 
-# Ensure the keychain is in the search list
+# 3. Create fresh keychain with a known password
+echo_color "$BLUE" "Creating new keychain..."
+sudo -u "$CI_USER" env HOME="$CI_HOME" security create-keychain -p "ci-keychain-password" "$CI_KEYCHAIN" || {
+    echo_color "$RED" "Failed to create keychain"
+    exit 1
+}
+
+# 4. Remove from search list first to ensure clean state
+echo_color "$BLUE" "Resetting keychain search list..."
+sudo -u "$CI_USER" env HOME="$CI_HOME" security list-keychains | while read -r keychain; do
+    sudo -u "$CI_USER" env HOME="$CI_HOME" security list-keychains -d user -s "$keychain" 2>/dev/null || true
+done
+
+# 5. Add our keychain to search list
 echo_color "$BLUE" "Adding keychain to search list..."
-sudo -u "$CI_USER" env HOME="$CI_HOME" security list-keychains -s "$CI_HOME/Library/Keychains/login.keychain"
+sudo -u "$CI_USER" env HOME="$CI_HOME" security list-keychains -d user -s "$CI_KEYCHAIN" || {
+    echo_color "$RED" "Failed to add keychain to search list"
+    exit 1
+}
 
-# Add or update the GitHub token in the keychain if available
+# 6. Unlock the keychain with the known password
+echo_color "$BLUE" "Unlocking keychain..."
+sudo -u "$CI_USER" env HOME="$CI_HOME" security unlock-keychain -p "ci-keychain-password" "$CI_KEYCHAIN" || {
+    echo_color "$RED" "Failed to unlock keychain"
+    exit 1
+}
+
+# 7. Configure for non-interactive use
+echo_color "$BLUE" "Configuring keychain for non-interactive use..."
+sudo -u "$CI_USER" env HOME="$CI_HOME" security set-keychain-settings -t 3600 -u -l "$CI_KEYCHAIN" || {
+    echo_color "$RED" "Failed to set keychain settings"
+    exit 1
+}
+
+# 8. Add GitHub token if available
 if [ -n "$GITHUB_TOKEN" ]; then
     echo_color "$BLUE" "Adding GitHub token to keychain..."
     # Remove existing token if it exists
-    sudo -u "$CI_USER" env HOME="$CI_HOME" security delete-generic-password -a "$CI_USER" -s "GitHub Token" "$CI_HOME/Library/Keychains/login.keychain" 2>/dev/null || true
+    sudo -u "$CI_USER" env HOME="$CI_HOME" security delete-generic-password -a "$CI_USER" -s "GitHub Token" "$CI_KEYCHAIN" 2>/dev/null || true
     # Add new token
-    sudo -u "$CI_USER" env HOME="$CI_HOME" security add-generic-password -a "$CI_USER" -s "GitHub Token" -w "$GITHUB_TOKEN" "$CI_HOME/Library/Keychains/login.keychain"
+    sudo -u "$CI_USER" env HOME="$CI_HOME" security add-generic-password -a "$CI_USER" -s "GitHub Token" -w "$GITHUB_TOKEN" "$CI_KEYCHAIN" || {
+        echo_color "$RED" "Failed to add GitHub token"
+        exit 1
+    }
 fi
 
-# Verify keychain access
+# 9. Final verification
 echo_color "$BLUE" "Verifying keychain access..."
-if sudo -u "$CI_USER" env HOME="$CI_HOME" security show-keychain-info "$CI_HOME/Library/Keychains/login.keychain" 2>/dev/null; then
+if sudo -u "$CI_USER" env HOME="$CI_HOME" security show-keychain-info "$CI_KEYCHAIN" 2>/dev/null; then
     echo_color "$GREEN" "✅ Keychain setup successful"
 else
     echo_color "$RED" "❌ Failed to set up keychain"
