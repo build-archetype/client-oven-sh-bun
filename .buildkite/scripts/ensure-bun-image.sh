@@ -10,6 +10,15 @@ cleanup() {
         kill $VM_PID || true
         wait $VM_PID || true
     fi
+    # Always try to capture tart logs on exit
+    log "Capturing tart logs..."
+    tart list > tart_list.log
+    tart info "$IMAGE_NAME" > tart_info.log 2>&1 || true
+    if [ $exit_code -ne 0 ]; then
+        log "Script failed, capturing additional debug info..."
+        system_profiler SPVirtualizationDataType > virtualization_info.log 2>&1 || true
+        log show --predicate 'process == "tart"' --last 5m > tart_system_log.log 2>&1 || true
+    fi
     exit $exit_code
 }
 trap cleanup EXIT
@@ -288,14 +297,18 @@ if [ -n "$VM_PID" ] && ps -p $VM_PID > /dev/null; then
 fi
 
 # Only push if everything succeeded
-log "All operations completed successfully, pushing image..."
-if [ -n "$GITHUB_TOKEN" ]; then
-    tart push "$IMAGE_NAME" "$TARGET_IMAGE" || {
-        log "Failed to push image"
-        exit 1
-    }
-    log "Bun build image created, updated, and pushed successfully"
-else
-    log "No GitHub token available for pushing image"
-    exit 1
-fi 
+log "All operations completed successfully"
+# Commenting out push for now to debug VM issues
+# log "Pushing image..."
+# if [ -n "$GITHUB_TOKEN" ]; then
+#     tart push "$IMAGE_NAME" "$TARGET_IMAGE" || {
+#         log "Failed to push image"
+#         exit 1
+#     }
+#     log "Bun build image created, updated, and pushed successfully"
+# else
+#     log "No GitHub token available for pushing image"
+#     exit 1
+# fi
+
+log "Build completed successfully" 
