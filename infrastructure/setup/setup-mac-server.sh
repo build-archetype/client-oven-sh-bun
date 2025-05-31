@@ -4,6 +4,7 @@
 
 set -euo pipefail
 
+
 # Only show welcome/confirmation if not already in privileged (sudo/root) mode
 if [ "$EUID" -ne 0 ]; then
   # --- Welcome message ---
@@ -381,7 +382,10 @@ fi
 
 # Add sudoers configuration for tart commands
 echo_color "$BLUE" "Configuring sudo access for $CI_USER..."
-echo "$CI_USER ALL=(ALL) NOPASSWD: /opt/homebrew/bin/tart" | sudo tee /etc/sudoers.d/ci-mac-tart
+cat > /etc/sudoers.d/ci-mac-tart << EOF
+$CI_USER ALL=(ALL) NOPASSWD: /opt/homebrew/bin/tart
+$CI_USER ALL=(ALL) NOPASSWD: /opt/homebrew/Cellar/tart/*/libexec/tart.app/Contents/MacOS/tart
+EOF
 sudo chmod 440 /etc/sudoers.d/ci-mac-tart
 
 # Ensure proper ownership of home directory
