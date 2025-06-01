@@ -272,21 +272,38 @@ if [ "$goto_privileged_setup" = false ]; then
   # --- Homebrew install section (user) ---
   if [ "$EUID" -ne 0 ]; then
     echo_color "$BLUE" "\n[1/3] Installing Homebrew and dependencies..."
+    
+    # First, try to add Homebrew to PATH if it exists but isn't detected
+    if [ ! command -v brew &> /dev/null ]; then
+      if [ -f "/opt/homebrew/bin/brew" ]; then
+        echo_color "$BLUE" "Found Homebrew at /opt/homebrew, adding to PATH..."
+        eval "$('/opt/homebrew/bin/brew' shellenv)"
+        echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+      elif [ -f "/usr/local/bin/brew" ]; then
+        echo_color "$BLUE" "Found Homebrew at /usr/local, adding to PATH..."
+        eval "$('/usr/local/bin/brew' shellenv)"
+        echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.bash_profile
+      fi
+    fi
+    
+    # Now check if brew is available
     if ! command -v brew &> /dev/null; then
       echo_color "$YELLOW" "Homebrew not found. Installing..."
       /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
       # Add Homebrew to PATH for current shell
       if [ -d "/opt/homebrew/bin" ]; then
         eval "$('/opt/homebrew/bin/brew' shellenv)"
-        echo 'eval "$('/opt/homebrew/bin/brew' shellenv)"' >> ~/.zprofile
+        echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
       elif [ -d "/usr/local/bin" ]; then
         eval "$('/usr/local/bin/brew' shellenv)"
-        echo 'eval "$('/usr/local/bin/brew' shellenv)"' >> ~/.bash_profile
+        echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.bash_profile
       fi
       if ! command -v brew &> /dev/null; then
         echo_color "$RED" "Homebrew installation failed or not found in PATH. Aborting."
         exit 1
       fi
+    else
+      echo_color "$GREEN" "✅ Homebrew already installed."
     fi
     # Always install Tailscale and check for it
     brew install tailscale || { echo_color "$RED" "Failed to install Tailscale."; exit 1; }
