@@ -386,6 +386,10 @@ CI_DIRS=(
     "$REAL_HOME/.buildkite-agent/hooks"
     "$REAL_HOME/builds"
     "$REAL_HOME/plugins"
+    "$REAL_HOME/.tart"
+    "$REAL_HOME/.tart/tmp"
+    "$REAL_HOME/.tart/cache"
+    "$REAL_HOME/.tart/vms"
 )
 
 echo_color "$BLUE" "Creating CI directories..."
@@ -413,15 +417,12 @@ fi
 
 # Create comprehensive sudoers file for Tart
 cat > /etc/sudoers.d/tart-ci << EOF
-# Allow passwordless tart operations for CI user
-$REAL_USER ALL=(ALL) NOPASSWD: $TART_BIN *
-$REAL_USER ALL=(ALL) NOPASSWD: /opt/homebrew/bin/tart *
-$REAL_USER ALL=(ALL) NOPASSWD: /usr/local/bin/tart *
-$REAL_USER ALL=(ALL) NOPASSWD: /opt/homebrew/Cellar/tart/*/bin/tart *
+# Allow passwordless SSH operations for CI user (needed for VM access)
 $REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/ssh *
 $REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/sshpass *
+$REAL_USER ALL=(ALL) NOPASSWD: /opt/homebrew/bin/sshpass *
+$REAL_USER ALL=(ALL) NOPASSWD: /usr/local/bin/sshpass *
 EOF
-chmod 440 /etc/sudoers.d/tart-ci
 
 # --- Prevent system sleep (server mode) ---
 echo_color "$BLUE" "Configuring system to never sleep (server mode)..."
