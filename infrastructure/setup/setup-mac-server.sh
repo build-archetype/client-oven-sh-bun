@@ -381,8 +381,8 @@ echo_color "$BLUE" "Setting up CI for user $REAL_USER..."
 # Create necessary directories in user's home
 CI_DIRS=(
     "$REAL_HOME/.buildkite-agent"
+    "$REAL_HOME/.buildkite-agent/hooks"
     "$REAL_HOME/builds"
-    "$REAL_HOME/hooks"
     "$REAL_HOME/plugins"
     "$REAL_HOME/.tart/vms"
     "$REAL_HOME/.tart/cache"
@@ -449,7 +449,7 @@ token="${BUILDKITE_AGENT_TOKEN}"
 name="${AGENT_NAME}"
 tags="os=darwin,arch=${MACHINE_ARCH},queue=darwin,tart=true"
 build-path="$REAL_HOME/builds"
-hooks-path="$REAL_HOME/hooks"  
+hooks-path="$REAL_HOME/.buildkite-agent/hooks"
 plugins-path="$REAL_HOME/plugins"
 EOF
 chown "$REAL_USER:staff" "$REAL_HOME/.buildkite-agent/buildkite-agent.cfg"
