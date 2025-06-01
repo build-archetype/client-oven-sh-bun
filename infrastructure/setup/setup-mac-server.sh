@@ -386,8 +386,6 @@ CI_DIRS=(
     "$REAL_HOME/.buildkite-agent/hooks"
     "$REAL_HOME/builds"
     "$REAL_HOME/plugins"
-    "$REAL_HOME/.tart/vms"
-    "$REAL_HOME/.tart/cache"
 )
 
 echo_color "$BLUE" "Creating CI directories..."
