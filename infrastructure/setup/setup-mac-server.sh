@@ -336,18 +336,18 @@ if [ "$goto_privileged_setup" = false ]; then
       echo_color "$GREEN" "Tart is already installed."
     fi
 
-    # --- Install sshpass for Tart plugin ---
+    # --- Install sshpass if needed ---
     if ! command -v sshpass &> /dev/null; then
-      echo_color "$YELLOW" "sshpass is not installed. Installing from cirruslabs/cli tap..."
-      brew install cirruslabs/cli/sshpass
-      if command -v sshpass &> /dev/null; then
-        echo_color "$GREEN" "✅ sshpass installed successfully."
+      echo_color "$YELLOW" "Installing sshpass for VM access..."
+      # Find brew location and run with proper environment
+      if [ -f "/opt/homebrew/bin/brew" ]; then
+        sudo -u "$REAL_USER" /opt/homebrew/bin/brew install cirruslabs/cli/sshpass
+      elif [ -f "/usr/local/bin/brew" ]; then
+        sudo -u "$REAL_USER" /usr/local/bin/brew install cirruslabs/cli/sshpass
       else
-        echo_color "$RED" "sshpass installation failed. Please install manually: brew install cirruslabs/cli/sshpass"
+        echo_color "$RED" "Homebrew not found. Cannot install sshpass."
         exit 1
       fi
-    else
-      echo_color "$GREEN" "sshpass is already installed."
     fi
 
     echo_color "$BLUE" "Switching to root for system configuration..."
@@ -415,12 +415,6 @@ $REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/ssh *
 $REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/sshpass *
 EOF
 chmod 440 /etc/sudoers.d/tart-ci
-
-# --- Install sshpass if needed ---
-if ! command -v sshpass &> /dev/null; then
-    echo_color "$YELLOW" "Installing sshpass for VM access..."
-    sudo -u "$REAL_USER" brew install cirruslabs/cli/sshpass
-fi
 
 # --- Prevent system sleep (server mode) ---
 echo_color "$BLUE" "Configuring system to never sleep (server mode)..."
@@ -508,7 +502,11 @@ EOF
       ;;
     tailscale)
       # Ensure tailscaled is running
-      sudo brew services start tailscale
+      if [ -f "/opt/homebrew/bin/brew" ]; then
+        sudo -u "$REAL_USER" /opt/homebrew/bin/brew services start tailscale
+      elif [ -f "/usr/local/bin/brew" ]; then
+        sudo -u "$REAL_USER" /usr/local/bin/brew services start tailscale
+      fi
       if [ -n "${TAILSCALE_AUTH_KEY-}" ]; then
         # Start Tailscale with auth key
         echo_color "$BLUE" "Starting Tailscale with auth key..."
@@ -596,9 +594,16 @@ EOF
       # Install cloudflared if not present
       if ! command -v cloudflared &> /dev/null; then
         echo_color "$YELLOW" "Installing cloudflared..."
-        brew install cloudflared
+        if [ -f "/opt/homebrew/bin/brew" ]; then
+          sudo -u "$REAL_USER" /opt/homebrew/bin/brew install cloudflared
+        elif [ -f "/usr/local/bin/brew" ]; then
+          sudo -u "$REAL_USER" /usr/local/bin/brew install cloudflared
+        else
+          echo_color "$RED" "Homebrew not found. Cannot install cloudflared."
+          exit 1
+        fi
         if ! command -v cloudflared &> /dev/null; then
-          echo_color "$RED" "Failed to install cloudflared. Please install manually: brew install cloudflared"
+          echo_color "$RED" "Failed to install cloudflared. Please install manually with: brew install cloudflared"
           exit 1
         fi
         echo_color "$GREEN" "✅ cloudflared installed successfully."
@@ -626,15 +631,31 @@ chown -R "$REAL_USER:staff" /opt/homebrew/var/buildkite-agent || true
 chown -R "$REAL_USER:staff" /opt/homebrew/var/log || true
 
 # Start the agent as the actual user
-sudo -u "$REAL_USER" brew services start buildkite-agent
+if [ -f "/opt/homebrew/bin/brew" ]; then
+  sudo -u "$REAL_USER" /opt/homebrew/bin/brew services start buildkite-agent
+elif [ -f "/usr/local/bin/brew" ]; then
+  sudo -u "$REAL_USER" /usr/local/bin/brew services start buildkite-agent
+else
+  echo_color "$RED" "Homebrew not found. Cannot start buildkite-agent service."
+  exit 1
+fi
 
 # Verify it's running
 sleep 5
-if sudo -u "$REAL_USER" brew services list | grep -q "buildkite-agent.*started"; then
+if [ -f "/opt/homebrew/bin/brew" ]; then
+  if sudo -u "$REAL_USER" /opt/homebrew/bin/brew services list | grep -q "buildkite-agent.*started"; then
     echo_color "$GREEN" "✅ Buildkite agent started successfully"
-else
+  else
     echo_color "$YELLOW" "⚠️  Buildkite agent may not have started correctly"
     echo_color "$YELLOW" "Check logs at: /opt/homebrew/var/log/buildkite-agent.log"
+  fi
+elif [ -f "/usr/local/bin/brew" ]; then
+  if sudo -u "$REAL_USER" /usr/local/bin/brew services list | grep -q "buildkite-agent.*started"; then
+    echo_color "$GREEN" "✅ Buildkite agent started successfully"
+  else
+    echo_color "$YELLOW" "⚠️  Buildkite agent may not have started correctly"
+    echo_color "$YELLOW" "Check logs at: /usr/local/var/log/buildkite-agent.log"
+  fi
 fi
 
 echo_color "$GREEN" "\n[3/3] Setup complete!"
