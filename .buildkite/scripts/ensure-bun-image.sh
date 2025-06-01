@@ -159,18 +159,72 @@ main() {
     
     # Make bootstrap script executable
     log "Making bootstrap script executable..."
-    chmod +x scripts/bootstrap.sh
+    chmod +x scripts/bootstrap-macos.sh
     
-    # Run bootstrap in the VM
-    log "Running bootstrap in VM (this may take several minutes)..."
-    log "Command: tart run $LOCAL_IMAGE_NAME --dir=workspace:$PWD -- /bin/bash -c 'cd /Volumes/My Shared Files/workspace && ./scripts/bootstrap.sh --ci'"
+    # Start VM with shared directory
+    log "Starting VM: $LOCAL_IMAGE_NAME"
+    tart run "$LOCAL_IMAGE_NAME" --dir=workspace:"$PWD" --no-graphics &
+    VM_PID=$!
     
-    if tart run "$LOCAL_IMAGE_NAME" --dir=workspace:"$PWD" -- /bin/bash -c "cd '/Volumes/My Shared Files/workspace' && ./scripts/bootstrap.sh --ci"; then
-        log "✅ Bootstrap completed successfully"
-    else
-        log "❌ Bootstrap failed"
+    # Wait for VM to boot
+    log "Waiting for VM to boot (60 seconds)..."
+    sleep 60
+    
+    # Get VM IP
+    log "Getting VM IP address..."
+    VM_IP=""
+    for i in {1..10}; do
+        VM_IP=$(tart ip "$LOCAL_IMAGE_NAME" 2>/dev/null || echo "")
+        if [ -n "$VM_IP" ]; then
+            log "VM IP: $VM_IP"
+            break
+        fi
+        log "Attempt $i: waiting for VM IP..."
+        sleep 10
+    done
+    
+    if [ -z "$VM_IP" ]; then
+        log "❌ Could not get VM IP after 10 attempts"
+        kill $VM_PID 2>/dev/null || true
         exit 1
     fi
+    
+    # Install sshpass if not available
+    if ! command -v sshpass >/dev/null 2>&1; then
+        log "Installing sshpass..."
+        brew install sshpass
+    fi
+    
+    # Wait for SSH to be available and run bootstrap
+    log "Waiting for SSH to be available and running bootstrap..."
+    SSH_SUCCESS=false
+    for i in {1..30}; do
+        log "SSH attempt $i/30..."
+        if sshpass -p "admin" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 admin@"$VM_IP" "cd '/Volumes/My Shared Files/workspace' && ./scripts/bootstrap-macos.sh"; then
+            log "✅ Bootstrap completed successfully!"
+            SSH_SUCCESS=true
+            break
+        else
+            log "SSH attempt $i failed, retrying in 30 seconds..."
+            sleep 30
+        fi
+    done
+    
+    if [ "$SSH_SUCCESS" != "true" ]; then
+        log "❌ Bootstrap failed after 30 SSH attempts"
+        kill $VM_PID 2>/dev/null || true
+        exit 1
+    fi
+    
+    # Stop the VM gracefully
+    log "Shutting down VM..."
+    sshpass -p "admin" ssh -o StrictHostKeyChecking=no admin@"$VM_IP" "sudo shutdown -h now" || true
+    
+    # Wait for VM to stop
+    sleep 30
+    kill $VM_PID 2>/dev/null || true
+    
+    log "✅ Bootstrap completed successfully"
     
     # Push to registry if credentials exist
     if [ -f /tmp/github-token.txt ] && [ -f /tmp/github-username.txt ]; then
