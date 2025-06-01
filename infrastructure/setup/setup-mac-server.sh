@@ -355,60 +355,121 @@ fi
 # --- Privileged setup (root) ---
 echo_color "$BLUE" "\n[2/3] Running privileged setup..."
 
-# Create CI user
-CI_USER="ci-mac"
-CI_HOME="/Users/$CI_USER"
+# Get current user info (who ran sudo)
+REAL_USER="${SUDO_USER:-$USER}"
+REAL_HOME=$(eval echo ~$REAL_USER)
 
-echo_color "$BLUE" "Setting up CI user $CI_USER..."
-# Create user if it doesn't exist
-if ! id "$CI_USER" &>/dev/null; then
-    # Create user with home directory
-    dscl . -create "/Users/$CI_USER"
-    dscl . -create "/Users/$CI_USER" UserShell /bin/bash
-    dscl . -create "/Users/$CI_USER" RealName "CI Mac User"
-    dscl . -create "/Users/$CI_USER" UniqueID 1001
-    dscl . -create "/Users/$CI_USER" PrimaryGroupID 20
-    dscl . -create "/Users/$CI_USER" NFSHomeDirectory "$CI_HOME"
-    
-    # Create home directory
-    mkdir -p "$CI_HOME"
-    chown "$CI_USER:staff" "$CI_HOME"
-    chmod 755 "$CI_HOME"
-    
-    echo_color "$GREEN" "✅ Created CI user $CI_USER"
-else
-    echo_color "$GREEN" "✅ CI user $CI_USER already exists"
+echo_color "$BLUE" "Setting up CI for user $REAL_USER..."
+
+# Create necessary directories in user's home
+CI_DIRS=(
+    "$REAL_HOME/.buildkite-agent"
+    "$REAL_HOME/builds"
+    "$REAL_HOME/hooks"
+    "$REAL_HOME/plugins"
+    "$REAL_HOME/.tart/vms"
+    "$REAL_HOME/.tart/cache"
+)
+
+for dir in "${CI_DIRS[@]}"; do
+    mkdir -p "$dir"
+    chown -R "$REAL_USER:staff" "$dir"
+    chmod -R 755 "$dir"
+done
+
+# --- Fix Tart permissions ---
+echo_color "$BLUE" "Configuring Tart permissions..."
+
+# Find Tart binary location
+TART_BIN=$(which tart || echo "/opt/homebrew/bin/tart")
+if [ ! -f "$TART_BIN" ]; then
+    echo_color "$RED" "Tart not found! Please ensure it's installed."
+    exit 1
 fi
 
-# Add sudoers configuration for tart commands
-echo_color "$BLUE" "Configuring sudo access for $CI_USER..."
-cat > /etc/sudoers.d/ci-mac-tart << EOF
-$CI_USER ALL=(ALL) NOPASSWD: /opt/homebrew/bin/tart
-$CI_USER ALL=(ALL) NOPASSWD: /opt/homebrew/Cellar/tart/*/libexec/tart.app/Contents/MacOS/tart
+# Create comprehensive sudoers file for Tart
+cat > /etc/sudoers.d/tart-ci << EOF
+# Allow passwordless tart operations for CI user
+$REAL_USER ALL=(ALL) NOPASSWD: $TART_BIN *
+$REAL_USER ALL=(ALL) NOPASSWD: /opt/homebrew/bin/tart *
+$REAL_USER ALL=(ALL) NOPASSWD: /usr/local/bin/tart *
+$REAL_USER ALL=(ALL) NOPASSWD: /opt/homebrew/Cellar/tart/*/bin/tart *
+$REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/ssh *
+$REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/sshpass *
 EOF
-sudo chmod 440 /etc/sudoers.d/ci-mac-tart
+chmod 440 /etc/sudoers.d/tart-ci
 
-# Ensure proper ownership of home directory
-echo_color "$BLUE" "Ensuring proper home directory ownership..."
-chown -R "$CI_USER:staff" "$CI_HOME"
-chmod -R 755 "$CI_HOME"
-
-# Create necessary directories with proper permissions
-mkdir -p "$CI_HOME/Library/Keychains"
-chown -R "$CI_USER:staff" "$CI_HOME/Library"
-chmod -R 755 "$CI_HOME/Library"
-
-# Create necessary directories
-mkdir -p "$CI_HOME/builds" "$CI_HOME/hooks" "$CI_HOME/plugins" "$CI_HOME/.tart/vms"
-chown -R "$CI_USER:staff" "$CI_HOME"
+# --- Install sshpass if needed ---
+if ! command -v sshpass &> /dev/null; then
+    echo_color "$YELLOW" "Installing sshpass for VM access..."
+    sudo -u "$REAL_USER" brew install cirruslabs/cli/sshpass
+fi
 
 # --- Prevent system sleep (server mode) ---
 echo_color "$BLUE" "Configuring system to never sleep (server mode)..."
 sudo systemsetup -setcomputersleep Never
-sudo systemsetup -setdisplaysleep Never
+sudo systemsetup -setdisplaysleep Never  
 sudo systemsetup -setharddisksleep Never
 sudo pmset -a sleep 0
 sudo pmset -a disablesleep 1
+
+# --- Configure SSH ---
+echo_color "$BLUE" "Configuring SSH access..."
+FDA_CHECK_OUTPUT=$(sudo systemsetup -getremotelogin 2>&1)
+if echo "$FDA_CHECK_OUTPUT" | grep -q "Full Disk Access"; then
+    echo_color "$YELLOW" "\nIMPORTANT: Terminal needs Full Disk Access for SSH setup."
+    echo_color "$YELLOW" "Grant access in System Settings → Privacy & Security → Full Disk Access"
+    echo_color "$YELLOW" "Then re-run this script."
+    exit 1
+fi
+sudo systemsetup -setremotelogin on || true
+
+# Get machine info
+MACHINE_UUID=$(ioreg -rd1 -c IOPlatformExpertDevice | awk -F'"' '/IOPlatformUUID/{print $4}')
+MACHINE_ARCH=$(uname -m)
+AGENT_NAME="${COMPUTER_NAME}-${MACHINE_LOCATION}-${MACHINE_UUID:0:8}"
+
+# --- Write Buildkite config ---
+echo_color "$BLUE" "Writing Buildkite agent configuration..."
+
+# Write to user's home directory
+cat > "$REAL_HOME/.buildkite-agent/buildkite-agent.cfg" << EOF
+token="${BUILDKITE_AGENT_TOKEN}"
+name="${AGENT_NAME}"
+tags="os=darwin,arch=${MACHINE_ARCH},queue=darwin,tart=true"
+build-path="$REAL_HOME/builds"
+hooks-path="$REAL_HOME/hooks"  
+plugins-path="$REAL_HOME/plugins"
+EOF
+chown "$REAL_USER:staff" "$REAL_HOME/.buildkite-agent/buildkite-agent.cfg"
+chmod 600 "$REAL_HOME/.buildkite-agent/buildkite-agent.cfg"
+
+# Also write to Homebrew location
+mkdir -p /opt/homebrew/etc/buildkite-agent
+cp "$REAL_HOME/.buildkite-agent/buildkite-agent.cfg" /opt/homebrew/etc/buildkite-agent/
+chown "$REAL_USER:staff" /opt/homebrew/etc/buildkite-agent/buildkite-agent.cfg
+
+# --- Create environment hook for proper PATH ---
+cat > "$REAL_HOME/.buildkite-agent/hooks/environment" << 'EOF'
+#!/bin/bash
+set -euo pipefail
+
+# Ensure Homebrew is in PATH
+if [[ -d "/opt/homebrew" ]]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+else
+    eval "$(/usr/local/bin/brew shellenv)"
+fi
+
+# Ensure Tart can be found
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+# Set up build environment
+export HOMEBREW_NO_AUTO_UPDATE=1
+export HOMEBREW_NO_INSTALL_CLEANUP=1
+EOF
+chmod +x "$REAL_HOME/.buildkite-agent/hooks/environment"
+chown "$REAL_USER:staff" "$REAL_HOME/.buildkite-agent/hooks/environment"
 
 # VPN setup (if enabled)
 if [ "$VPN_ENABLED" = true ]; then
@@ -540,191 +601,23 @@ EOF
   esac
 fi
 
-# Get a unique machine identifier
-get_machine_info() {
-  # Get hardware UUID
-  local uuid
-  uuid=$(ioreg -rd1 -c IOPlatformExpertDevice | awk -F'"' '/IOPlatformUUID/{print $4}')
-  if [ -z "$uuid" ]; then
-    # Fallback: use serial number
-    uuid=$(system_profiler SPHardwareDataType | awk '/Serial/ {print $4}')
-  fi
-  if [ -z "$uuid" ]; then
-    # Fallback: use hostname
-    uuid=$(hostname)
-  fi
+# --- Start services as the real user ---
+echo_color "$BLUE" "Starting Buildkite agent as $REAL_USER..."
 
-  # Return all info as a JSON-like string
-  echo "{\"uuid\":\"$uuid\",\"location\":\"$MACHINE_LOCATION\",\"computer_name\":\"$COMPUTER_NAME\"}"
-}
+# Ensure proper ownership
+chown -R "$REAL_USER:staff" /opt/homebrew/var/buildkite-agent || true
+chown -R "$REAL_USER:staff" /opt/homebrew/var/log || true
 
-# Parse machine info
-MACHINE_INFO=$(get_machine_info)
-AGENT_UUID=$(echo "$MACHINE_INFO" | grep -o '"uuid":"[^"]*"' | cut -d'"' -f4)
-AGENT_LOCATION=$(echo "$MACHINE_INFO" | grep -o '"location":"[^"]*"' | cut -d'"' -f4)
-AGENT_COMPUTER_NAME=$(echo "$MACHINE_INFO" | grep -o '"computer_name":"[^"]*"' | cut -d'"' -f4)
+# Start the agent as the actual user
+sudo -u "$REAL_USER" brew services start buildkite-agent
 
-# Create a sanitized location name (remove spaces, special chars)
-AGENT_LOCATION_SANITIZED=$(echo "$AGENT_LOCATION" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd '[:alnum:]-')
-
-# Store the machine info in persistent files
-echo "$MACHINE_LOCATION" > "$CI_HOME/.machine-location"
-echo "$COMPUTER_NAME" > "$CI_HOME/.computer-name"
-chown "$CI_USER:staff" "$CI_HOME/.machine-location" "$CI_HOME/.computer-name"
-
-# Create the agent name
-AGENT_NAME="macos-${AGENT_LOCATION_SANITIZED}-${AGENT_COMPUTER_NAME}-${AGENT_UUID:0:8}"
-echo_color "$BLUE" "Debug: Final AGENT_NAME: $AGENT_NAME"
-
-# Buildkite Agent config
-cat > "$CI_HOME/buildkite-agent.cfg" << EOF
-token="${BUILDKITE_AGENT_TOKEN}"
-name="${AGENT_NAME}"
-tags="os=darwin,arch=aarch64,queue=darwin,tart=true"
-build-path="$CI_HOME/builds"
-hooks-path="$CI_HOME/hooks"
-plugins-path="$CI_HOME/plugins"
-EOF
-chown "$CI_USER:staff" "$CI_HOME/buildkite-agent.cfg"
-
-# SSH config
-cat > /etc/ssh/sshd_config.d/build-server.conf << EOF
-PermitRootLogin no
-PasswordAuthentication no
-PubkeyAuthentication yes
-AllowGroups wheel
-EOF
-
-# --- Final summary and next steps ---
-echo_color "$GREEN" "\n[3/3] Setup complete!"
-echo_color "$BLUE" "Log file: $LOGFILE"
-echo_color "$YELLOW" "Summary of what was done:"
-echo "  - Created CI user $CI_USER"
-echo "  - Homebrew and dependencies installed"
-echo "  - Tart installed via Cirrus Labs tap"
-echo "  - Buildkite agent configured"
-echo "  - SSH configuration updated"
-if [ "$VPN_ENABLED" = true ]; then
-  echo "  - VPN setup completed"
-fi
-
-# Define AGENT_BIN before using it in help text
-AGENT_BIN="$(brew --prefix buildkite-agent)/bin/buildkite-agent"
-
-echo_color "$YELLOW" "Next steps:"
-echo "  1. Add your SSH keys to $CI_HOME/.ssh/authorized_keys"
-if [ "$VPN_ENABLED" = true ]; then
-  case "$VPN_TYPE" in
-    wireguard)
-      echo "  2. Test WireGuard connection: wg show" ;;
-    tailscale)
-      echo "  2. Test Tailscale connection: tailscale status" ;;
-    unifi)
-      echo "  2. Test UniFi VPN connection: openvpn --status" ;;
-    cloudflare)
-      echo "  2. Test Cloudflare Tunnel connection: cloudflared tunnel info" ;;
-  esac
-else
-  echo "  2. VPN setup was skipped (local access only)"
-fi
-echo "  3. Set up Tart images in $CI_HOME/.tart/vms"
-echo "  4. Buildkite is ready to run. Start the agent with: sudo -u $CI_USER $AGENT_BIN start"
-echo "  5. Create base VMs with: sudo -u $CI_USER tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest sequoia-base"
-echo "  6. Start Buildkite agent with: sudo -u $CI_USER $AGENT_BIN start"
-echo_color "$GREEN" "\nAll done!"
-
-# --- Prompt to create all base VMs (single y/n) ---
-read -rp "Do you want to create the base VMs? (y/n): " yn_vms
-if [[ "$(echo "$yn_vms" | tr '[:upper:]' '[:lower:]')" == "y" ]]; then
-  base_vms=("base-macos-arm" "base-macos-intel" "base-m1" "base-m2" "base-m3" "base-m4")
-  echo_color "$BLUE" "Creating all base VMs..."
-  for vm in "${base_vms[@]}"; do
-    sudo -u "$CI_USER" tart clone ghcr.io/cirruslabs/macos-sequoia-base:latest "$vm"
-  done
-fi
-
-# --- Write Buildkite agent config to Homebrew location ---
-BK_CFG="/opt/homebrew/etc/buildkite-agent/buildkite-agent.cfg"
-echo_color "$BLUE" "Writing Buildkite agent config to $BK_CFG..."
-
-# Create Buildkite agent directories with correct permissions
-echo_color "$BLUE" "Creating Buildkite agent directories..."
-sudo mkdir -p /opt/homebrew/etc/buildkite-agent
-sudo mkdir -p /opt/homebrew/etc/buildkite-agent/hooks
-sudo mkdir -p /opt/homebrew/etc/buildkite-agent/plugins
-sudo mkdir -p /opt/homebrew/var/log
-sudo mkdir -p "$CI_HOME/builds"
-sudo mkdir -p "$CI_HOME/hooks"
-sudo mkdir -p "$CI_HOME/plugins"
-sudo chown -R "$CI_USER:staff" /opt/homebrew/etc/buildkite-agent
-sudo chown -R "$CI_USER:staff" /opt/homebrew/var/log
-sudo chown -R "$CI_USER:staff" "$CI_HOME/builds" "$CI_HOME/hooks" "$CI_HOME/plugins"
-
-sudo tee "$BK_CFG" > /dev/null << EOF
-token="$BUILDKITE_AGENT_TOKEN"
-name="${AGENT_NAME}"
-tags="os=darwin,arch=aarch64,queue=darwin,tart=true"
-build-path="$CI_HOME/builds"
-hooks-path="$CI_HOME/hooks"
-plugins-path="$CI_HOME/plugins"
-log-file="/opt/homebrew/var/log/buildkite-agent.log"
-EOF
-sudo chown "$CI_USER:staff" "$BK_CFG"
-
-# --- Set up Buildkite agent service to run as CI user ---
-PLIST_PATH="/opt/homebrew/opt/buildkite-agent/homebrew.mxcl.buildkite-agent.plist"
-echo_color "$BLUE" "Configuring Buildkite agent service to run as $CI_USER..."
-
-# Fix permissions on the plist file
-sudo chown root:wheel "$PLIST_PATH"
-sudo chmod 644 "$PLIST_PATH"
-
-# Ensure the CI user has access to Homebrew
-echo_color "$BLUE" "Setting up Homebrew permissions for CI user..."
-sudo chown -R "$CI_USER:staff" /opt/homebrew
-sudo chmod -R 755 /opt/homebrew
-
-# Set up Homebrew environment for CI user
-echo_color "$BLUE" "Setting up Homebrew environment for CI user..."
-sudo mkdir -p "$CI_HOME/Library/Caches/Homebrew"
-sudo mkdir -p "$CI_HOME/Library/Logs/Homebrew"
-sudo mkdir -p "$CI_HOME/Library/Application Support/Homebrew"
-sudo chown -R "$CI_USER:staff" "$CI_HOME/Library"
-sudo chmod -R 755 "$CI_HOME/Library"
-
-# Set up Homebrew environment variables for CI user
-echo_color "$BLUE" "Setting up Homebrew environment variables..."
-sudo tee "$CI_HOME/.zprofile" > /dev/null << EOF
-eval "\$(/opt/homebrew/bin/brew shellenv)"
-export HOMEBREW_CACHE="\$HOME/Library/Caches/Homebrew"
-export HOMEBREW_LOGS="\$HOME/Library/Logs/Homebrew"
-export HOMEBREW_NO_ANALYTICS=1
-EOF
-sudo chown "$CI_USER:staff" "$CI_HOME/.zprofile"
-sudo chmod 644 "$CI_HOME/.zprofile"
-
-# Get the buildkite-agent binary path
-AGENT_BIN="/opt/homebrew/opt/buildkite-agent/bin/buildkite-agent"
-
-# Stop any existing service
-echo_color "$BLUE" "Stopping any existing Buildkite agent service..."
-cd "$CI_HOME" && sudo -u "$CI_USER" env HOME="$CI_HOME" brew services stop buildkite-agent || true
-
-# Start the service as the CI user
-echo_color "$BLUE" "Starting Buildkite agent service as $CI_USER..."
-cd "$CI_HOME" && sudo -u "$CI_USER" env HOME="$CI_HOME" brew services start buildkite-agent
-
-# Verify the service is running
+# Verify it's running
 sleep 5
-if cd "$CI_HOME" && sudo -u "$CI_USER" env HOME="$CI_HOME" brew services list | grep -q "buildkite-agent.*started"; then
-  echo_color "$GREEN" "✅ Buildkite agent service started successfully"
+if sudo -u "$REAL_USER" brew services list | grep -q "buildkite-agent.*started"; then
+    echo_color "$GREEN" "✅ Buildkite agent started successfully"
 else
-  echo_color "$RED" "❌ Failed to start Buildkite agent service"
-  echo_color "$YELLOW" "Trying alternative start method..."
-  sudo -u "$CI_USER" "$AGENT_BIN" start
+    echo_color "$YELLOW" "⚠️  Buildkite agent may not have started correctly"
+    echo_color "$YELLOW" "Check logs at: /opt/homebrew/var/log/buildkite-agent.log"
 fi
 
-echo_color "$GREEN" "✅ Buildkite agent configured to run as $CI_USER"
-
-# --- Final summary and next steps ---
 echo_color "$GREEN" "\n[3/3] Setup complete!"

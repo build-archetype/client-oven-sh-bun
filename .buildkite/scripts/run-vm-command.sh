@@ -7,54 +7,53 @@ if [ -z "$1" ]; then
 fi
 
 VM_NAME="$1"
-VM_IP=$(tart ip "$VM_NAME")
-WORKSPACE_DIR="/Volumes/My Shared Files/workspace/client-oven-sh-bun"
-SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+COMMAND="${2:-echo 'VM is ready'}"
 
-# Function to check VM health
-check_vm_health() {
-    echo "Checking VM health..."
-    if ! tart list | grep -q "$VM_NAME.*running"; then
-        echo "Error: VM '$VM_NAME' is not running"
-        exit 1
-    fi
+# Function to wait for VM and get IP
+wait_for_vm() {
+    local vm_name="$1"
+    local max_attempts=30
+    local attempt=0
     
-    # Wait for SSH to be available
-    echo "Waiting for SSH to be available..."
-    for i in {1..30}; do
-        if sshpass -p admin ssh $SSH_OPTS -o ConnectTimeout=2 admin@$VM_IP echo "SSH is ready" >/dev/null 2>&1; then
-            echo "SSH is ready"
-            return 0
+    echo "Waiting for VM '$vm_name' to be ready..."
+    
+    while [ $attempt -lt $max_attempts ]; do
+        # Check if VM is running
+        if ! tart list | grep -q "$vm_name.*running"; then
+            echo "Error: VM '$vm_name' is not running"
+            return 1
         fi
-        echo "Attempt $i: SSH not ready yet..."
+        
+        # Try to get IP
+        VM_IP=$(tart ip "$vm_name" 2>/dev/null || echo "")
+        if [ -n "$VM_IP" ]; then
+            # Test SSH connectivity
+            if sshpass -p admin ssh -o StrictHostKeyChecking=no -o ConnectTimeout=2 "admin@$VM_IP" echo "test" &>/dev/null; then
+                echo "VM is ready at $VM_IP"
+                return 0
+            fi
+        fi
+        
+        attempt=$((attempt + 1))
+        echo "Attempt $attempt/$max_attempts: Waiting for VM..."
         sleep 2
     done
     
-    echo "Error: SSH did not become available after 60 seconds"
+    echo "Error: VM did not become ready within timeout"
+    return 1
+}
+
+# Wait for VM
+if ! wait_for_vm "$VM_NAME"; then
     exit 1
-}
-
-# Function to check if Bun is installed
-check_bun() {
-    echo "Checking Bun before bootstrap..."
-    if ! sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "which bun" >/dev/null 2>&1; then
-        echo "Error: Bun is not installed in the VM"
-        exit 1
-    fi
-}
-
-# Check VM health
-check_vm_health
-
-# If no command is provided, just check VM health and exit
-if [ -z "$2" ]; then
-    echo "No command provided. VM is healthy."
-    exit 0
 fi
 
-# Check Bun installation if command is provided
-check_bun
+# Get VM IP
+VM_IP=$(tart ip "$VM_NAME")
 
-# Run the command in the VM
-echo "Running command: $2"
-sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd '$WORKSPACE_DIR' && $2" 
+# SSH options for reliability
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
+
+# Execute command
+echo "Running command in VM: $COMMAND"
+exec sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "cd '/Volumes/My Shared Files/workspace' && $COMMAND" 

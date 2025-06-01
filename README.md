@@ -394,45 +394,143 @@ bun upgrade --canary
 
 Refer to the [Project > Contributing](https://bun.sh/docs/project/contributing) guide to start contributing to Bun.
 
+## Development & CI
+
+### macOS CI Setup
+
+Bun uses self-hosted macOS agents for continuous integration. The setup process has been streamlined to configure everything for the actual user rather than creating separate CI users.
+
+#### Quick Setup
+
+```bash
+# Clone and run the setup script
+git clone https://github.com/oven-sh/bun.git
+cd bun
+./infrastructure/setup/setup-mac-server.sh
+```
+
+#### Key Features
+
+- **User-focused setup**: Configures CI for the actual user (no separate `ci-mac` user)
+- **Tart virtualization**: Uses Tart VMs for isolated build environments
+- **Version-based images**: Base images are tagged with Bun version for efficient caching
+- **Robust SSH handling**: Improved VM connectivity with proper timeouts and retries
+- **Comprehensive permissions**: Proper sudoers configuration for Tart operations
+
+#### What the Setup Script Does
+
+1. **Installs dependencies**: Homebrew, Buildkite agent, Tart, sshpass, and other tools
+2. **Configures permissions**: Sets up sudoers rules for passwordless Tart operations
+3. **Creates directory structure**: Sets up `.buildkite-agent`, `builds`, `hooks`, `plugins`, `.tart/vms`, and `.tart/cache`
+4. **Configures environment**: Creates proper PATH configuration and environment hooks
+5. **Starts services**: Launches Buildkite agent as the actual user
+6. **Optional VPN setup**: Supports Tailscale, WireGuard, UniFi VPN, or Cloudflare Tunnel
+
+#### VM Management
+
+The CI system automatically manages base images:
+
+```bash
+# Check current images
+tart list
+
+# Images are named with Bun version: bun-build-macos-1.2.14
+# Base images are cached in ghcr.io/oven-sh/bun/bun-build-macos:1.2.14
+```
+
+#### Manual VM Operations
+
+```bash
+# Start a VM for debugging
+tart run bun-build-macos-1.2.14 --dir=workspace:$PWD
+
+# Run commands in a VM
+.buildkite/scripts/run-vm-command.sh bun-build-macos-1.2.14 "bun --version"
+
+# Build a new base image
+.buildkite/scripts/ensure-bun-image.sh
+```
+
+#### Troubleshooting
+
+**VM startup issues:**
+- Check system resources: `top` and `df -h`
+- Verify Tart installation: `tart --version`
+- Check VM logs: `cat vm.log`
+
+**SSH connectivity:**
+- Verify sshpass installation: `which sshpass`
+- Test VM network: `tart ip <vm-name>`
+- Check SSH configuration in the VM
+
+**Permission issues:**
+- Verify sudoers file: `sudo cat /etc/sudoers.d/tart-ci`
+- Check directory ownership: `ls -la ~/.buildkite-agent`
+- Ensure proper Homebrew permissions
+
+#### Configuration Files
+
+- **Agent config**: `~/.buildkite-agent/buildkite-agent.cfg`
+- **Environment hook**: `~/.buildkite-agent/hooks/environment`
+- **Sudoers rules**: `/etc/sudoers.d/tart-ci`
+- **Tart VMs**: `~/.tart/vms/`
+
+#### GitHub Container Registry
+
+The system automatically pushes base images to `ghcr.io/oven-sh/bun/bun-build-macos:VERSION` when GitHub credentials are provided during setup.
+
 ## License
 
 Refer to the [Project > License](https://bun.sh/docs/project/licensing) page for information about Bun's licensing.
 
-> **Note:** For public repositories, configure your Buildkite pipeline to use the HTTPS repository URL (e.g., `https://github.com/build-archetype/client-oven-sh-bun.git`) instead of the SSH URL. This avoids authentication issues during checkout, as HTTPS does not require an SSH key for public repos.
+## GitHub Container Registry Setup
 
-## Setting up the GitHub Token for Buildkite Agent
+### Authentication
 
-The Buildkite agent requires a `GITHUB_TOKEN` environment variable to push images to GitHub Container Registry (ghcr.io). This token is prompted for during the on-prem Mac server setup script and is exported to the agent's environment.
+The Buildkite agent requires GitHub Container Registry credentials to push and pull base images. These are configured during the setup process:
 
-### How it works
-- During setup, you will be prompted to enter your GitHub token.
-- The token is exported as `GITHUB_TOKEN` for the Buildkite agent, making it available to all jobs.
+```bash
+# During setup, you'll be prompted for:
+# - GitHub Username (for ghcr.io access)
+# - GitHub Token (with packages:write permission)
+```
 
-### How to add or update the token manually
-If you need to add or update the token after setup:
+### Manual Token Configuration
 
-1. **Edit the agent's environment file or config:**
-   - For agents started via shell, add to your shell profile or before starting the agent:
-     ```bash
-     export GITHUB_TOKEN=your_actual_token
-     buildkite-agent start
-     ```
-   - For agents running as a service (systemd):
-     - Edit `/etc/default/buildkite-agent` or `/etc/environment` (or the relevant service file) and add:
-       ```bash
-       export GITHUB_TOKEN=your_actual_token
-       ```
-     - Restart the agent:
-       ```bash
-       sudo systemctl restart buildkite-agent
-       ```
+If you need to update the token after initial setup:
 
-2. **Verify the token is available:**
-   - Run a Buildkite job with:
-     ```yaml
-     steps:
-       - command: "env | grep GITHUB_TOKEN"
-     ```
-   - You should see `GITHUB_TOKEN=your_actual_token` in the output.
+1. **Update stored credentials:**
+   ```bash
+   echo "your_username" | sudo tee /tmp/github-username.txt
+   echo "your_token" | sudo tee /tmp/github-token.txt
+   sudo chmod 600 /tmp/github-*.txt
+   ```
 
-**Note:** The token must have `write:packages` and `read:packages` permissions for your GitHub organization.
+2. **Restart the Buildkite agent:**
+   ```bash
+   brew services restart buildkite-agent
+   ```
+
+### Token Requirements
+
+Your GitHub token must have these permissions:
+- `write:packages` - Push images to ghcr.io
+- `read:packages` - Pull images from ghcr.io
+- `repo` - Access repository metadata (if private repo)
+
+### Verify Registry Access
+
+```bash
+# Test docker login
+echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_USERNAME" --password-stdin
+
+# Verify image access
+tart pull ghcr.io/oven-sh/bun/bun-build-macos:latest
+```
+
+### Image Naming Convention
+
+Base images follow this pattern:
+- **Versioned**: `ghcr.io/oven-sh/bun/bun-build-macos:1.2.14`
+- **Latest**: `ghcr.io/oven-sh/bun/bun-build-macos:latest`
+- **Local**: `bun-build-macos-1.2.14`
