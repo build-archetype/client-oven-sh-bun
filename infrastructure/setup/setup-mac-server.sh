@@ -377,6 +377,8 @@ REAL_USER="${SUDO_USER:-$USER}"
 REAL_HOME=$(eval echo ~$REAL_USER)
 
 echo_color "$BLUE" "Setting up CI for user $REAL_USER..."
+echo_color "$BLUE" "Debug: REAL_USER=$REAL_USER"
+echo_color "$BLUE" "Debug: REAL_HOME=$REAL_HOME"
 
 # Create necessary directories in user's home
 CI_DIRS=(
@@ -388,10 +390,17 @@ CI_DIRS=(
     "$REAL_HOME/.tart/cache"
 )
 
+echo_color "$BLUE" "Creating CI directories..."
 for dir in "${CI_DIRS[@]}"; do
+    echo_color "$BLUE" "  Creating: $dir"
     mkdir -p "$dir"
-    chown -R "$REAL_USER:staff" "$dir"
-    chmod -R 755 "$dir"
+    if [ -d "$dir" ]; then
+        echo_color "$GREEN" "    ✅ Created successfully"
+        chown -R "$REAL_USER:staff" "$dir"
+        chmod -R 755 "$dir"
+    else
+        echo_color "$RED" "    ❌ Failed to create directory"
+    fi
 done
 
 # --- Fix Tart permissions ---
@@ -461,6 +470,10 @@ cp "$REAL_HOME/.buildkite-agent/buildkite-agent.cfg" /opt/homebrew/etc/buildkite
 chown "$REAL_USER:staff" /opt/homebrew/etc/buildkite-agent/buildkite-agent.cfg
 
 # --- Create environment hook for proper PATH ---
+echo_color "$BLUE" "Creating environment hook..."
+echo_color "$BLUE" "Debug: Target file: $REAL_HOME/.buildkite-agent/hooks/environment"
+echo_color "$BLUE" "Debug: Directory exists: $([ -d "$REAL_HOME/.buildkite-agent/hooks" ] && echo "YES" || echo "NO")"
+
 cat > "$REAL_HOME/.buildkite-agent/hooks/environment" << 'EOF'
 #!/bin/bash
 set -euo pipefail
@@ -479,8 +492,15 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 export HOMEBREW_NO_AUTO_UPDATE=1
 export HOMEBREW_NO_INSTALL_CLEANUP=1
 EOF
-chmod +x "$REAL_HOME/.buildkite-agent/hooks/environment"
-chown "$REAL_USER:staff" "$REAL_HOME/.buildkite-agent/hooks/environment"
+
+if [ -f "$REAL_HOME/.buildkite-agent/hooks/environment" ]; then
+    echo_color "$GREEN" "✅ Environment hook created successfully"
+    chmod +x "$REAL_HOME/.buildkite-agent/hooks/environment"
+    chown "$REAL_USER:staff" "$REAL_HOME/.buildkite-agent/hooks/environment"
+else
+    echo_color "$RED" "❌ Failed to create environment hook"
+    ls -la "$REAL_HOME/.buildkite-agent/hooks/" || echo "Directory does not exist"
+fi
 
 # VPN setup (if enabled)
 if [ "$VPN_ENABLED" = true ]; then
