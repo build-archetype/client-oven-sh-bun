@@ -31,11 +31,21 @@ fix_tart_permissions() {
         mkdir -p "$tart_dir"
     fi
     
-    # Fix ownership
+    # Create tmp directory if it doesn't exist
+    if [ ! -d "$tart_dir/tmp" ]; then
+        log "Creating .tart/tmp directory..."
+        mkdir -p "$tart_dir/tmp"
+    fi
+    
+    # Fix ownership - need to fix the parent directory too
     log "Setting ownership to $real_user:staff..."
-    if [ "$real_user" != "$(whoami)" ]; then
-        # We're running as root/sudo, fix ownership
-        chown -R "$real_user:staff" "$tart_dir"
+    if [ "$(stat -f '%Su' "$tart_dir")" != "$real_user" ]; then
+        log "Fixing ownership of .tart directory (currently owned by $(stat -f '%Su' "$tart_dir"))"
+        if command -v sudo >/dev/null 2>&1; then
+            sudo chown -R "$real_user:staff" "$tart_dir"
+        else
+            chown -R "$real_user:staff" "$tart_dir"
+        fi
     fi
     
     # Set proper permissions
@@ -92,7 +102,19 @@ main() {
     BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
     REGISTRY="ghcr.io"
     ORGANIZATION="${GITHUB_REPOSITORY_OWNER:-build-archetype}"
-    REPOSITORY="${GITHUB_REPOSITORY##*/}"
+    
+    # Get repository name, handling various cases
+    if [ -n "${GITHUB_REPOSITORY:-}" ]; then
+        REPOSITORY="${GITHUB_REPOSITORY##*/}"
+    else
+        # Fallback: get from git remote or use default
+        REPOSITORY=$(git remote get-url origin 2>/dev/null | sed -E 's|.*/([^/]+)\.git$|\1|' || echo "client-oven-sh-bun")
+    fi
+    
+    log "Repository detection:"
+    log "  GITHUB_REPOSITORY: ${GITHUB_REPOSITORY:-<not set>}"
+    log "  GITHUB_REPOSITORY_OWNER: ${GITHUB_REPOSITORY_OWNER:-<not set>}"
+    log "  Detected repository: $REPOSITORY"
     
     # Get Bun version
     BUN_VERSION=$(get_bun_version)
