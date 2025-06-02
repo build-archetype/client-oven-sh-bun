@@ -74,8 +74,9 @@ cat > "$SHARED_ENV_FILE" << 'EOF'
 export PATH="$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
 
 # Set build paths to use symlink workspace without spaces instead of shared folder with spaces
-# IMPORTANT: Use ~/workspace symlink to avoid path quoting issues in compiler flags
-export BUILDKITE_BUILD_PATH="/Users/admin/workspace/build-workdir"
+# IMPORTANT: Use $HOME/workspace symlink to avoid path quoting issues in compiler flags
+# Note: Will be set to actual VM user's home in the VM environment
+export BUILDKITE_BUILD_PATH="VM_USER_HOME/workspace/build-workdir"
 
 EOF
 
@@ -89,7 +90,7 @@ while IFS='=' read -r -d '' name value; do
     if [[ -n "$name" && -n "$value" ]]; then
         # Override build path to use shared workspace for consistency
         if [[ "$name" == "BUILDKITE_BUILD_PATH" ]]; then
-            value="/Users/admin/workspace/build-workdir"
+            value="VM_USER_HOME/workspace/build-workdir"
             echo "  Overriding BUILDKITE_BUILD_PATH to use symlink workspace: $value"
         fi
         
@@ -124,6 +125,11 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     ln -sf \"/Volumes/My Shared Files/workspace\" ~/workspace
     echo \"✅ Created symlink: ~/workspace -> /Volumes/My Shared Files/workspace\"
     
+    echo \"Updating environment file with actual VM user home directory...\"
+    # Replace VM_USER_HOME placeholder with actual home directory
+    sed -i \"s|VM_USER_HOME|\$HOME|g\" ~/workspace/buildkite_env.sh
+    echo \"✅ Updated environment file with VM user home: \$HOME\"
+    
     echo \"Sourcing environment from shared filesystem...\"
     
     # Source the environment file from the shared workspace using the symlink
@@ -146,13 +152,15 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     echo \"  BUILDKITE_PIPELINE_SLUG: \$BUILDKITE_PIPELINE_SLUG\"
     echo \"  CANARY_REVISION: \$CANARY_REVISION\"
     echo \"  BUN_LINK_ONLY: \$BUN_LINK_ONLY\"
+    echo \"  BUILDKITE_BUILD_PATH: \$BUILDKITE_BUILD_PATH\"
     echo \"\"
     echo \"Total BUILDKITE_* variables available: \$(env | grep \\\"^BUILDKITE_\\\" | wc -l)\"
 '"
 
 echo "=== ENSURING BUILDKITE AGENT AVAILABILITY ==="
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
-    # Source environment first
+    # Source environment first and replace placeholders
+    sed -i \"s|VM_USER_HOME|\$HOME|g\" \"/Volumes/My Shared Files/workspace/buildkite_env.sh\"
     source \"/Volumes/My Shared Files/workspace/buildkite_env.sh\"
     
     # Check if buildkite-agent is already available
