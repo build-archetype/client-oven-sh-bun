@@ -73,9 +73,9 @@ cat > "$SHARED_ENV_FILE" << 'EOF'
 # Add standard paths
 export PATH="$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
 
-# Set build paths to use shared workspace instead of hardcoded paths
-# IMPORTANT: Set build path to a subdirectory so cache goes to workspace/cache instead of outside workspace
-export BUILDKITE_BUILD_PATH="/Volumes/My Shared Files/workspace/build-workdir"
+# Set build paths to use symlink workspace without spaces instead of shared folder with spaces
+# IMPORTANT: Use /workspace symlink to avoid path quoting issues in compiler flags
+export BUILDKITE_BUILD_PATH="/workspace/build-workdir"
 
 EOF
 
@@ -89,8 +89,8 @@ while IFS='=' read -r -d '' name value; do
     if [[ -n "$name" && -n "$value" ]]; then
         # Override build path to use shared workspace for consistency
         if [[ "$name" == "BUILDKITE_BUILD_PATH" ]]; then
-            value="/Volumes/My Shared Files/workspace/build-workdir"
-            echo "  Overriding BUILDKITE_BUILD_PATH to use shared workspace: $value"
+            value="/workspace/build-workdir"
+            echo "  Overriding BUILDKITE_BUILD_PATH to use symlink workspace: $value"
         fi
         
         # Use printf to properly escape the value
@@ -117,16 +117,23 @@ grep '^export BUILDKITE_' "$SHARED_ENV_FILE" | head -10
 
 echo "=== SOURCING ENVIRONMENT AND RUNNING COMMAND ==="
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
+    echo \"Setting up workspace symlink to avoid spaces in path...\"
+    
+    # Create a symlink without spaces to avoid compiler flag parsing issues
+    sudo rm -rf /workspace 2>/dev/null || true
+    sudo ln -sf \"/Volumes/My Shared Files/workspace\" /workspace
+    echo \"✅ Created symlink: /workspace -> /Volumes/My Shared Files/workspace\"
+    
     echo \"Sourcing environment from shared filesystem...\"
     
-    # Source the environment file from the shared workspace
-    if [ -f \"/Volumes/My Shared Files/workspace/buildkite_env.sh\" ]; then
-        source \"/Volumes/My Shared Files/workspace/buildkite_env.sh\"
-        echo \"✅ Environment file sourced from shared workspace\"
+    # Source the environment file from the shared workspace using the symlink
+    if [ -f \"/workspace/buildkite_env.sh\" ]; then
+        source \"/workspace/buildkite_env.sh\"
+        echo \"✅ Environment file sourced from /workspace/buildkite_env.sh\"
     else
-        echo \"❌ Environment file not found at /Volumes/My Shared Files/workspace/buildkite_env.sh!\"
-        echo \"Available files in shared workspace directory:\"
-        ls -la \"/Volumes/My Shared Files/workspace\" | head -10
+        echo \"❌ Environment file not found at /workspace/buildkite_env.sh!\"
+        echo \"Available files in workspace directory:\"
+        ls -la \"/workspace\" | head -10
         exit 1
     fi
     
@@ -196,7 +203,7 @@ echo "=== EXECUTING FINAL COMMAND ==="
 set +e
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     # Source environment and ensure buildkite-agent is in PATH
-    source \"/Volumes/My Shared Files/workspace/buildkite_env.sh\"
+    source \"/workspace/buildkite_env.sh\"
     
     # Add buildkite-agent to PATH multiple times to ensure it sticks
     export PATH=\"\$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:\$PATH\"
@@ -213,8 +220,8 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
         echo \"PATH: \$PATH\"
     fi
     
-    # Clean up environment file and run command
-    rm -f \"/Volumes/My Shared Files/workspace/buildkite_env.sh\" && cd \"/Volumes/My Shared Files/workspace\" && $COMMAND
+    # Clean up environment file and run command from symlinked workspace
+    rm -f \"/workspace/buildkite_env.sh\" && cd \"/workspace\" && $COMMAND
 '"
 EXIT_CODE=$?
 set -e
