@@ -76,12 +76,20 @@ install_basic_deps() {
 install_build_tools() {
     echo "Installing build tools..."
     retry_command 'brew install cmake ninja pkg-config golang'
+    
+    # Additional essential build tools from main bootstrap
+    echo "Installing additional build essentials..."
+    retry_command 'brew install make python3 libtool ruby perl'
 }
 
 # Install development tools
 install_dev_tools() {
     echo "Installing development tools..."
     retry_command 'brew install llvm@19'
+    
+    # Install ccache for faster compilation
+    echo "Installing ccache..."
+    retry_command 'brew install ccache'
     
     # Link LLVM tools with sudo
     echo "Creating symbolic links for LLVM tools..."
@@ -90,6 +98,60 @@ install_dev_tools() {
     retry_command 'sudo ln -sf "$(brew --prefix llvm@19)/bin/llvm-ar" /usr/local/bin/llvm-ar'
     retry_command 'sudo ln -sf "$(brew --prefix llvm@19)/bin/llvm-ranlib" /usr/local/bin/llvm-ranlib'
     retry_command 'sudo ln -sf "$(brew --prefix llvm@19)/bin/lld" /usr/local/bin/lld'
+}
+
+# Install Rust (required for building Bun)
+install_rust() {
+    echo "Installing Rust..."
+    
+    if ! command -v cargo >/dev/null 2>&1; then
+        echo "Rust not found, installing via rustup..."
+        
+        # Create dedicated Rust directory (following main bootstrap approach)
+        local rust_home="/opt/rust"
+        echo "Creating Rust home directory: $rust_home"
+        sudo mkdir -p "$rust_home"
+        sudo chown -R "$(whoami):staff" "$rust_home"
+        
+        # Set up Rust environment variables (following main bootstrap)
+        export RUSTUP_HOME="$rust_home"
+        export CARGO_HOME="$rust_home"
+        
+        # Install rustup and Rust non-interactively
+        retry_command 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path'
+        
+        # Add Rust environment to shell profiles
+        local rust_profile_content="export RUSTUP_HOME=\"$rust_home\"
+export CARGO_HOME=\"$rust_home\"
+export PATH=\"$rust_home/bin:\$PATH\""
+        
+        for profile in ~/.zprofile ~/.bash_profile ~/.bashrc ~/.zshrc ~/.profile; do
+            if [ -f "$profile" ] || [ "$profile" = ~/.zprofile ]; then
+                echo "Adding Rust environment to $profile..."
+                if ! grep -q "RUSTUP_HOME" "$profile" 2>/dev/null; then
+                    echo "$rust_profile_content" >> "$profile"
+                fi
+            fi
+        done
+        
+        # Update current session PATH
+        export PATH="$rust_home/bin:$PATH"
+        
+        # Verify Rust installation
+        echo "Verifying Rust installation..."
+        if command -v cargo >/dev/null 2>&1; then
+            echo "✅ Rust installed successfully"
+            echo "  Rustc version: $(rustc --version)"
+            echo "  Cargo version: $(cargo --version)"
+            echo "  Rust home: $rust_home"
+        else
+            error "Rust installation verification failed"
+        fi
+    else
+        echo "✅ Rust already installed"
+        echo "  Rustc version: $(rustc --version)"
+        echo "  Cargo version: $(cargo --version)"
+    fi
 }
 
 # Install bootstrap Bun (pre-built binary to build Bun with)
@@ -181,11 +243,25 @@ build_bun_from_source() {
     export CC="$(brew --prefix llvm@19)/bin/clang"
     export CXX="$(brew --prefix llvm@19)/bin/clang++"
     
+    # Ensure Rust is available in the PATH
+    local rust_home="/opt/rust"
+    if [ -d "$rust_home" ]; then
+        export RUSTUP_HOME="$rust_home"
+        export CARGO_HOME="$rust_home"
+        export PATH="$rust_home/bin:$PATH"
+    elif [ -f "$HOME/.cargo/env" ]; then
+        # Fallback to default cargo installation
+        source "$HOME/.cargo/env"
+        export PATH="$HOME/.cargo/bin:$PATH"
+    fi
+    
     echo "Build environment:"
     echo "  CC: $CC"
     echo "  CXX: $CXX"
     echo "  CMAKE_BUILD_TYPE: $CMAKE_BUILD_TYPE"
     echo "  Bootstrap Bun: $(which bun) (version: $(bun --version))"
+    echo "  Rust: $(which rustc 2>/dev/null || echo 'not found') (version: $(rustc --version 2>/dev/null || echo 'not available'))"
+    echo "  Cargo: $(which cargo 2>/dev/null || echo 'not found') (version: $(cargo --version 2>/dev/null || echo 'not available'))"
     
     # Check status before building
     check_bun_status "BEFORE BUILD CONFIGURATION"
@@ -296,6 +372,7 @@ main() {
     install_basic_deps
     install_build_tools
     install_dev_tools
+    install_rust
     
     # Install bootstrap Bun first (needed to build actual Bun)
     install_bootstrap_bun
@@ -316,6 +393,14 @@ main() {
     which ninja && ninja --version
     which go && go version
     which clang && clang --version
+    which rustc && rustc --version
+    which cargo && cargo --version
+    which make && make --version | head -1
+    which python3 && python3 --version
+    which libtool && libtool --version | head -1
+    which ruby && ruby --version
+    which perl && perl --version
+    which ccache && ccache --version
     
     # Final status check
     check_bun_status "FINAL STATE"

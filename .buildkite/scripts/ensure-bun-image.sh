@@ -137,9 +137,36 @@ version_compare() {
 # Check if local image exists and get its creation time
 get_local_image_info() {
     local image_name="$1"
-    if tart list | grep -q "^${image_name}"; then
+    
+    log "🔍 Checking for local image: $image_name"
+    log "Running: tart list"
+    
+    # Get the full tart list output for debugging
+    local tart_output=$(tart list 2>&1)
+    log "Tart list output:"
+    echo "$tart_output" | while IFS= read -r line; do
+        log "  $line"
+    done
+    
+    # Check if our specific image exists
+    if echo "$tart_output" | grep -q "^${image_name}"; then
+        log "✅ Found exact match for: $image_name"
         echo "exists"
     else
+        log "❌ No exact match found for: $image_name"
+        log "Looking for pattern: ^${image_name}"
+        
+        # Show similar images for debugging
+        local similar=$(echo "$tart_output" | grep -i "bun\|macos" || echo "none")
+        if [ "$similar" != "none" ]; then
+            log "Similar images found:"
+            echo "$similar" | while IFS= read -r line; do
+                log "  $line"
+            done
+        else
+            log "No Bun or macOS related images found"
+        fi
+        
         echo "missing"
     fi
 }
@@ -182,15 +209,19 @@ main() {
     BUN_VERSION=$(get_bun_version)
     log "Detected Bun version: $BUN_VERSION"
     
-    # Image names
-    LOCAL_IMAGE_NAME="bun-build-macos-${BUN_VERSION}"
-    REMOTE_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos:${BUN_VERSION}"
+    # Bootstrap script version - increment this when bootstrap changes to force new images
+    BOOTSTRAP_VERSION="2.1"  # Added Rust support + additional build dependencies (make, python3, libtool, ruby, perl, ccache)
+    
+    # Image names (include bootstrap version to force rebuilds when bootstrap changes)
+    LOCAL_IMAGE_NAME="bun-build-macos-${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
+    REMOTE_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos:${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
     LATEST_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos:latest"
     
     log "Configuration:"
     log "  Base image: $BASE_IMAGE"
     log "  Local name: $LOCAL_IMAGE_NAME"
     log "  Remote URL: $REMOTE_IMAGE_URL"
+    log "  Bootstrap version: $BOOTSTRAP_VERSION"
     log "  Force refresh: $force_refresh"
     
     # NEW LOGIC: Check local first, then remote, with version comparison
