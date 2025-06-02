@@ -293,7 +293,6 @@ function getEc2Agent(platform, options, ec2Options) {
     "cpu-count": cpuCount,
     "threads-per-core": threadsPerCore,
     "preemptible": false,
-    queue: "darwin",
   };
 }
 
@@ -307,9 +306,8 @@ function getCppAgent(platform, options) {
 
   if (os === "darwin") {
     return {
-      queue: "darwin",
-      os,
-      arch,
+      os: "darwin",
+      arch: arch === "aarch64" ? "arm64" : arch,
       tart: true,
     };
   }
@@ -361,9 +359,8 @@ function getTestAgent(platform, options) {
 
   if (os === "darwin") {
     return {
-      queue: "darwin",
-      os,
-      arch,
+      os: "darwin",
+      arch: arch === "aarch64" ? "arm64" : arch,
       tart: true,
     };
   }
@@ -478,7 +475,7 @@ function getBuildVendorStep(platform, options) {
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
         `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone ${IMAGE_CONFIG.baseImage.name} ${vmName}`,
+        `tart clone ${IMAGE_CONFIG.baseImage.versionedName} ${vmName}`,
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
@@ -524,7 +521,7 @@ function getBuildCppStep(platform, options) {
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
         `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone ${IMAGE_CONFIG.baseImage.name} ${vmName}`,
+        `tart clone ${IMAGE_CONFIG.baseImage.versionedName} ${vmName}`,
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
@@ -585,7 +582,7 @@ function getBuildZigStep(platform, options) {
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
         `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone ${IMAGE_CONFIG.baseImage.name} ${vmName}`,
+        `tart clone ${IMAGE_CONFIG.baseImage.versionedName} ${vmName}`,
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
@@ -631,7 +628,7 @@ function getLinkBunStep(platform, options) {
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
         `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone ${IMAGE_CONFIG.baseImage.name} ${vmName}`,
+        `tart clone ${IMAGE_CONFIG.baseImage.versionedName} ${vmName}`,
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
@@ -709,7 +706,7 @@ function getTestBunStep(platform, options, testOptions = {}) {
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
         `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone ${IMAGE_CONFIG.baseImage.name} ${vmName}`,
+        `tart clone ${IMAGE_CONFIG.baseImage.versionedName} ${vmName}`,
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
@@ -759,7 +756,9 @@ function getBuildImageStep(platform, options) {
     key: `${getImageKey(platform)}-build-image`,
     label: `${getImageLabel(platform)} - build-image`,
     agents: {
-      queue: "darwin",
+      os: "darwin",
+      arch: "arm64",
+      tart: true,
     },
     env: {
       DEBUG: "1",
@@ -784,7 +783,9 @@ function getReleaseStep(buildPlatforms, options) {
     key: "release",
     label: getBuildkiteEmoji("rocket"),
     agents: {
-      queue: "darwin",
+      os: "darwin",
+      arch: "arm64",
+      tart: true,
     },
     depends_on: buildPlatforms.map(platform => `${getTargetKey(platform)}-build-bun`),
     env: {
@@ -803,7 +804,9 @@ function getBenchmarkStep() {
     key: "benchmark",
     label: "📊",
     agents: {
-      queue: "darwin",
+      os: "darwin",
+      arch: "arm64",
+      tart: true,
     },
     depends_on: `linux-x64-build-bun`,
     command: "node .buildkite/scripts/upload-benchmark.mjs",
@@ -1204,7 +1207,8 @@ function getBuildBaseImageStep() {
     label: "Build Base Image",
     key: "build-base-image",
     agents: {
-      queue: "darwin",
+      os: "darwin",
+      arch: "arm64",
       tart: true
     },
     command: [

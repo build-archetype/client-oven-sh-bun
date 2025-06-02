@@ -5,6 +5,35 @@ const getOrgFromRepo = () => {
   return match ? match[1] : 'oven-sh'; // fallback to oven-sh if we can't determine
 };
 
+// Get Bun version from various sources
+const getBunVersion = () => {
+  try {
+    // Try to read from CMakeLists.txt
+    const fs = require('fs');
+    if (fs.existsSync('CMakeLists.txt')) {
+      const content = fs.readFileSync('CMakeLists.txt', 'utf8');
+      const match = content.match(/set\(Bun_VERSION\s+"([^"]+)"/);
+      if (match) {
+        return match[1];
+      }
+    }
+
+    // Try to read from package.json
+    if (fs.existsSync('package.json')) {
+      const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+      if (packageJson.version) {
+        return packageJson.version.replace(/^v/, '');
+      }
+    }
+
+    // Fallback
+    return "1.2.14";
+  } catch (error) {
+    console.warn("Could not determine Bun version, using default:", error.message);
+    return "1.2.14";
+  }
+};
+
 export const IMAGE_CONFIG = {
   baseImage: {
     registry: "ghcr.io",
@@ -12,6 +41,10 @@ export const IMAGE_CONFIG = {
     repository: "client-oven-sh-bun",
     name: "bun-build-macos",
     tag: "latest",
+    get versionedName() {
+      const version = getBunVersion();
+      return `bun-build-macos-${version}`;
+    },
     get fullName() {
       return `${this.registry}/${this.organization}/${this.repository}/${this.name}:${this.tag}`;
     }
