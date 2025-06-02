@@ -91,4 +91,19 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
 '"
 
 echo "=== RUNNING ACTUAL COMMAND ==="
-exec sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c 'cd \"/Volumes/My Shared Files/workspace\" && $COMMAND'" 
+
+# Copy workspace to local directory to avoid shared filesystem issues
+echo "=== COPYING WORKSPACE TO LOCAL DIRECTORY ==="
+sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
+    echo \"Creating local workspace directory...\"
+    rm -rf /tmp/workspace
+    mkdir -p /tmp/workspace
+    echo \"Copying files from shared directory...\"
+    rsync -av --exclude=\"build\" --exclude=\"node_modules\" --exclude=\"vendor\" \"/Volumes/My Shared Files/workspace/\" /tmp/workspace/
+    echo \"✅ Workspace copied to /tmp/workspace\"
+    echo \"Contents:\"
+    ls -la /tmp/workspace | head -10
+'"
+
+echo "=== RUNNING COMMAND IN LOCAL WORKSPACE ==="
+exec sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c 'cd /tmp/workspace && $COMMAND'" 
