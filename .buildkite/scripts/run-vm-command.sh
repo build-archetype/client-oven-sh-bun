@@ -73,6 +73,9 @@ cat > "$SHARED_ENV_FILE" << 'EOF'
 # Add standard paths
 export PATH="$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
 
+# Set build paths to use shared workspace instead of hardcoded paths
+export BUILDKITE_BUILD_PATH="/Volumes/My Shared Files/workspace"
+
 EOF
 
 # Export all current environment variables to the file
@@ -83,6 +86,12 @@ buildkite_count=0
 # Use a more reliable approach - loop through all environment variables
 while IFS='=' read -r -d '' name value; do
     if [[ -n "$name" && -n "$value" ]]; then
+        # Override build path to use shared workspace for consistency
+        if [[ "$name" == "BUILDKITE_BUILD_PATH" ]]; then
+            value="/Volumes/My Shared Files/workspace"
+            echo "  Overriding BUILDKITE_BUILD_PATH to use shared workspace: $value"
+        fi
+        
         # Use printf to properly escape the value
         printf 'export %s=%q\n' "$name" "$value" >> "$SHARED_ENV_FILE"
         env_count=$((env_count + 1))
