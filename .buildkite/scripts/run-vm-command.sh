@@ -184,7 +184,17 @@ echo "=== EXECUTING FINAL COMMAND ==="
 # Execute the command and capture the exit code
 # Ensure environment is sourced before running any command
 set +e
-sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c 'source \"/Volumes/My Shared Files/workspace/buildkite_env.sh\" && cd \"/Volumes/My Shared Files/workspace\" && $COMMAND'"
+sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
+    # Source environment and ensure buildkite-agent is in PATH
+    source \"/Volumes/My Shared Files/workspace/buildkite_env.sh\"
+    export PATH=\"\$HOME/.buildkite-agent/bin:\$PATH\"
+    
+    # Set TMPDIR for build tools
+    export TMPDIR=\"/tmp\"
+    
+    # Clean up environment file and run command
+    rm -f \"/Volumes/My Shared Files/workspace/buildkite_env.sh\" && cd \"/Volumes/My Shared Files/workspace\" && $COMMAND
+'"
 EXIT_CODE=$?
 set -e
 
