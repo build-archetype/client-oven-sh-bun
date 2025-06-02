@@ -44,7 +44,8 @@ export const IMAGE_CONFIG = {
     tag: "latest",
     get versionedName() {
       const version = getBunVersion();
-      return `bun-build-macos-${version}`;
+      const bootstrapVersion = "3.0"; // Must match the version in ensure-bun-image.sh
+      return `bun-build-macos-${version}-bootstrap-${bootstrapVersion}`;
     },
     get fullName() {
       return `${this.registry}/${this.organization}/${this.repository}/${this.name}:${this.tag}`;
