@@ -804,7 +804,11 @@ function getReleaseStep(buildPlatforms, options) {
  * @param {Platform[]} buildPlatforms
  * @returns {Step}
  */
-function getBenchmarkStep() {
+function getBenchmarkStep(buildPlatforms) {
+  // Find the first available build platform to depend on
+  const firstPlatform = buildPlatforms[0];
+  const dependsOn = firstPlatform ? `${getTargetKey(firstPlatform)}-build-bun` : undefined;
+  
   return {
     key: "benchmark",
     label: "📊",
@@ -813,7 +817,7 @@ function getBenchmarkStep() {
       arch: "arm64",
       tart: true,
     },
-    depends_on: `linux-x64-build-bun`,
+    depends_on: dependsOn,
     command: "node .buildkite/scripts/upload-benchmark.mjs",
   };
 }
@@ -1309,7 +1313,7 @@ async function getPipeline(options = {}) {
   }
 
   // Add benchmark step
-  steps.push(getBenchmarkStep());
+  steps.push(getBenchmarkStep(filteredBuildPlatforms));
 
   return {
     priority,
