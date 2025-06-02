@@ -1,3 +1,5 @@
+import { readFileSync, existsSync } from 'fs';
+
 // Get the organization from the repository URL
 const getOrgFromRepo = () => {
   const repo = process.env.BUILDKITE_REPO || '';
@@ -9,9 +11,8 @@ const getOrgFromRepo = () => {
 const getBunVersion = () => {
   try {
     // Try to read from CMakeLists.txt
-    const fs = require('fs');
-    if (fs.existsSync('CMakeLists.txt')) {
-      const content = fs.readFileSync('CMakeLists.txt', 'utf8');
+    if (existsSync('CMakeLists.txt')) {
+      const content = readFileSync('CMakeLists.txt', 'utf8');
       const match = content.match(/set\(Bun_VERSION\s+"([^"]+)"/);
       if (match) {
         return match[1];
@@ -19,8 +20,8 @@ const getBunVersion = () => {
     }
 
     // Try to read from package.json
-    if (fs.existsSync('package.json')) {
-      const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+    if (existsSync('package.json')) {
+      const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
       if (packageJson.version) {
         return packageJson.version.replace(/^v/, '');
       }
