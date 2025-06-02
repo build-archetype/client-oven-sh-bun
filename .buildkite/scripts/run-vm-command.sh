@@ -108,8 +108,8 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
 echo "=== RUNNING COMMAND IN LOCAL WORKSPACE ==="
 
 echo "=== CREATING HOST ENVIRONMENT FILE ==="
-# Use the same shared filesystem path that works for workspace copying
-SHARED_ENV_FILE="/Volumes/My Shared Files/buildkite_env.sh"
+# Create environment file directly in workspace directory (gets shared to VM)
+SHARED_ENV_FILE="./buildkite_env.sh"
 
 echo "Creating environment file on host at: $SHARED_ENV_FILE"
 
@@ -124,7 +124,7 @@ export PATH="$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
 EOF
 
 # Export all current environment variables to the file
-echo "Exporting all environment variables to shared file..."
+echo "Exporting all environment variables to workspace file..."
 env_count=0
 buildkite_count=0
 
@@ -148,7 +148,7 @@ echo "✅ Found $buildkite_count BUILDKITE_* environment variables"
 
 # Show file info
 echo "Environment file created:"
-echo "  File: $SHARED_ENV_FILE"
+echo "  File: $SHARED_ENV_FILE" 
 echo "  Size: $(wc -l < "$SHARED_ENV_FILE") lines"
 echo "  First 10 BUILDKITE_* variables:"
 grep '^export BUILDKITE_' "$SHARED_ENV_FILE" | head -10
@@ -157,16 +157,16 @@ echo "=== COPYING AND SOURCING ENVIRONMENT IN VM ==="
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     echo \"Copying environment file from shared filesystem...\"
     
-    # Copy the environment file to local VM storage (same path as workspace)
-    if [ -f \"/Volumes/My Shared Files/buildkite_env.sh\" ]; then
-        cp \"/Volumes/My Shared Files/buildkite_env.sh\" /tmp/buildkite_env.sh
+    # Copy the environment file from shared workspace to local VM storage
+    if [ -f \"/Volumes/My Shared Files/workspace/buildkite_env.sh\" ]; then
+        cp \"/Volumes/My Shared Files/workspace/buildkite_env.sh\" /tmp/buildkite_env.sh
         chmod +x /tmp/buildkite_env.sh
         echo \"✅ Environment file copied to VM\"
         echo \"File size: \$(wc -l < /tmp/buildkite_env.sh) lines\"
     else
-        echo \"❌ Environment file not found at /Volumes/My Shared Files/buildkite_env.sh!\"
-        echo \"Available files in shared directory:\"
-        ls -la \"/Volumes/My Shared Files\" | head -10
+        echo \"❌ Environment file not found at /Volumes/My Shared Files/workspace/buildkite_env.sh!\"
+        echo \"Available files in shared workspace directory:\"
+        ls -la \"/Volumes/My Shared Files/workspace\" | head -10
         exit 1
     fi
     
@@ -188,7 +188,7 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     echo \"  CANARY_REVISION: \$CANARY_REVISION\"
     echo \"  BUN_LINK_ONLY: \$BUN_LINK_ONLY\"
     echo \"\"
-    echo \"Total BUILDKITE_* variables available: \$(env | grep \"^BUILDKITE_\" | wc -l)\"
+    echo \"Total BUILDKITE_* variables available: \$(env | grep \\\"^BUILDKITE_\\\" | wc -l)\"
 '"
 
 echo "=== ENSURING BUILDKITE AGENT AVAILABILITY ==="
@@ -238,4 +238,17 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
 '"
 
 echo "=== EXECUTING FINAL COMMAND ==="
-exec sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c 'source /tmp/buildkite_env.sh && cd /tmp/workspace && $COMMAND'" 
+
+# Execute the command and capture the exit code
+set +e
+sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c 'source /tmp/buildkite_env.sh && cd /tmp/workspace && $COMMAND'"
+EXIT_CODE=$?
+set -e
+
+echo "=== CLEANUP ==="
+echo "Cleaning up environment file from workspace..."
+rm -f "$SHARED_ENV_FILE"
+echo "✅ Cleanup complete"
+
+# Exit with the same code as the VM command
+exit $EXIT_CODE 
