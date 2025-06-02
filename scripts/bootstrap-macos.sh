@@ -64,6 +64,30 @@ fetch() {
     fi
 }
 
+create_directory() {
+    local path="$1"
+    local path_dir="$path"
+    while ! [ -d "$path_dir" ]; do
+        path_dir="$(dirname "$path_dir")"
+    done
+
+    local path_needs_sudo="0"
+    if ! [ -r "$path_dir" ] || ! [ -w "$path_dir" ]; then
+        path_needs_sudo="1"
+    fi
+
+    local mkdir="$(require mkdir)"
+    if [ "$path_needs_sudo" = "1" ]; then
+        execute sudo "$mkdir" -p "$path"
+    else
+        execute "$mkdir" -p "$path"
+    fi
+
+    # Set ownership to current user
+    execute sudo chown -R "$(whoami):staff" "$path"
+    execute sudo chmod -R 755 "$path"
+}
+
 create_tmp_directory() {
     local mktemp="$(require mktemp)"
     local path="$(execute "$mktemp" -d)"
@@ -313,30 +337,16 @@ install_rust() {
     local rust_home="/opt/rust"
     
     print "Installing Rust..."
-    execute sudo mkdir -p "$rust_home"
-    execute sudo chown -R "$(whoami):staff" "$rust_home"
-    
+    create_directory "$rust_home"
     append_to_profile "export RUSTUP_HOME=$rust_home"
     append_to_profile "export CARGO_HOME=$rust_home"
 
-    # Install rustup directly by piping to sh (standard approach)
-    print "Downloading and running rustup installer..."
-    local curl="$(require curl)"
-    
-    # Set environment variables and run the installer
-    print "$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | RUSTUP_HOME=$rust_home CARGO_HOME=$rust_home sh -s -- -y --no-modify-path"
-    if ! RUSTUP_HOME="$rust_home" CARGO_HOME="$rust_home" "$curl" --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path; then
-        error "Rust installation failed"
-    fi
-    
+    local sh="$(require sh)"
+    local rustup_script=$(download_file "https://sh.rustup.rs")
+    execute "$sh" -lc "$rustup_script -y --no-modify-path"
     append_to_path "$rust_home/bin"
     
-    # Verify installation
-    if [ -f "$rust_home/bin/cargo" ]; then
-        print "✅ Rust installed successfully: $($rust_home/bin/cargo --version)"
-    else
-        error "Rust installation verification failed"
-    fi
+    print "✅ Rust installed successfully"
 }
 
 install_common_software() {
