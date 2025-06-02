@@ -105,41 +105,18 @@ echo "  Size: $(wc -l < "$SHARED_ENV_FILE") lines"
 echo "  First 10 BUILDKITE_* variables:"
 grep '^export BUILDKITE_' "$SHARED_ENV_FILE" | head -10
 
-# Copy workspace to local directory to avoid shared filesystem issues
-echo "=== COPYING WORKSPACE TO LOCAL DIRECTORY ==="
+echo "=== SOURCING ENVIRONMENT AND RUNNING COMMAND ==="
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
-    echo \"Creating local workspace directory...\"
-    rm -rf /tmp/workspace
-    mkdir -p /tmp/workspace
-    echo \"Copying files from shared directory...\"
-    rsync -av --exclude=\"build\" --exclude=\"node_modules\" --exclude=\"vendor\" \"/Volumes/My Shared Files/workspace/\" /tmp/workspace/
-    echo \"✅ Workspace copied to /tmp/workspace\"
-    echo \"Contents:\"
-    ls -la /tmp/workspace | head -10
-    echo \"\"
-    echo \"Checking for environment file:\"
-    if [ -f \"/tmp/workspace/buildkite_env.sh\" ]; then
-        echo \"✅ Environment file found: /tmp/workspace/buildkite_env.sh\"
-        echo \"Size: \$(wc -l < /tmp/workspace/buildkite_env.sh) lines\"
-    else
-        echo \"❌ Environment file NOT found at /tmp/workspace/buildkite_env.sh\"
-    fi
-'"
-
-echo "=== RUNNING COMMAND IN LOCAL WORKSPACE ==="
-
-echo "=== COPYING AND SOURCING ENVIRONMENT IN VM ==="
-sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
-    echo \"Workspace copied - now sourcing environment from copied workspace...\"
+    echo \"Sourcing environment from shared filesystem...\"
     
-    # Source the environment file from the copied workspace
-    if [ -f \"/tmp/workspace/buildkite_env.sh\" ]; then
-        source /tmp/workspace/buildkite_env.sh
-        echo \"✅ Environment file sourced from /tmp/workspace/buildkite_env.sh\"
+    # Source the environment file from the shared workspace
+    if [ -f \"/Volumes/My Shared Files/workspace/buildkite_env.sh\" ]; then
+        source \"/Volumes/My Shared Files/workspace/buildkite_env.sh\"
+        echo \"✅ Environment file sourced from shared workspace\"
     else
-        echo \"❌ Environment file not found at /tmp/workspace/buildkite_env.sh!\"
-        echo \"Available files in /tmp/workspace:\"
-        ls -la /tmp/workspace | head -10
+        echo \"❌ Environment file not found at /Volumes/My Shared Files/workspace/buildkite_env.sh!\"
+        echo \"Available files in shared workspace directory:\"
+        ls -la \"/Volumes/My Shared Files/workspace\" | head -10
         exit 1
     fi
     
@@ -159,7 +136,7 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
 echo "=== ENSURING BUILDKITE AGENT AVAILABILITY ==="
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     # Source environment first
-    source /tmp/workspace/buildkite_env.sh
+    source \"/Volumes/My Shared Files/workspace/buildkite_env.sh\"
     
     # Check if buildkite-agent is already available
     if command -v buildkite-agent >/dev/null 2>&1; then
@@ -207,7 +184,7 @@ echo "=== EXECUTING FINAL COMMAND ==="
 # Execute the command and capture the exit code
 # Ensure environment is sourced before running any command
 set +e
-sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c 'source /tmp/workspace/buildkite_env.sh && $COMMAND'"
+sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c 'source \"/Volumes/My Shared Files/workspace/buildkite_env.sh\" && cd \"/Volumes/My Shared Files/workspace\" && $COMMAND'"
 EXIT_CODE=$?
 set -e
 
