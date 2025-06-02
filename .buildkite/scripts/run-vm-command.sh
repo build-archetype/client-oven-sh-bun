@@ -74,7 +74,8 @@ cat > "$SHARED_ENV_FILE" << 'EOF'
 export PATH="$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
 
 # Set build paths to use shared workspace instead of hardcoded paths
-export BUILDKITE_BUILD_PATH="/Volumes/My Shared Files/workspace"
+# IMPORTANT: Set build path to a subdirectory so cache goes to workspace/cache instead of outside workspace
+export BUILDKITE_BUILD_PATH="/Volumes/My Shared Files/workspace/build-workdir"
 
 EOF
 
@@ -88,7 +89,7 @@ while IFS='=' read -r -d '' name value; do
     if [[ -n "$name" && -n "$value" ]]; then
         # Override build path to use shared workspace for consistency
         if [[ "$name" == "BUILDKITE_BUILD_PATH" ]]; then
-            value="/Volumes/My Shared Files/workspace"
+            value="/Volumes/My Shared Files/workspace/build-workdir"
             echo "  Overriding BUILDKITE_BUILD_PATH to use shared workspace: $value"
         fi
         
@@ -196,10 +197,21 @@ set +e
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     # Source environment and ensure buildkite-agent is in PATH
     source \"/Volumes/My Shared Files/workspace/buildkite_env.sh\"
-    export PATH=\"\$HOME/.buildkite-agent/bin:\$PATH\"
+    
+    # Add buildkite-agent to PATH multiple times to ensure it sticks
+    export PATH=\"\$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:\$PATH\"
     
     # Set TMPDIR for build tools
     export TMPDIR=\"/tmp\"
+    
+    # Verify buildkite-agent is available before running command
+    echo \"Verifying buildkite-agent availability...\"
+    if command -v buildkite-agent >/dev/null 2>&1; then
+        echo \"✅ buildkite-agent found at: \$(which buildkite-agent)\"
+    else
+        echo \"⚠️  buildkite-agent not found in PATH, but continuing...\"
+        echo \"PATH: \$PATH\"
+    fi
     
     # Clean up environment file and run command
     rm -f \"/Volumes/My Shared Files/workspace/buildkite_env.sh\" && cd \"/Volumes/My Shared Files/workspace\" && $COMMAND
