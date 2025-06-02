@@ -91,6 +91,7 @@ create_directory() {
 create_tmp_directory() {
     local mktemp="$(require mktemp)"
     local path="$(execute "$mktemp" -d)"
+    grant_to_user "$path"
     print "$path"
 }
 
@@ -100,6 +101,7 @@ download_file() {
     local file_tmp_path="$file_tmp_dir/$(basename "$file_url")"
 
     fetch "$file_url" >"$file_tmp_path"
+    grant_to_user "$file_tmp_path"
     print "$file_tmp_path"
 }
 
@@ -124,6 +126,17 @@ append_to_path() {
 
     append_to_profile "export PATH=\"$path:\$PATH\""
     export PATH="$path:$PATH"
+}
+
+grant_to_user() {
+    local path="$1"
+    if ! [ -f "$path" ] && ! [ -d "$path" ]; then
+        error "Could not find file or directory: \"$path\""
+    fi
+
+    local chown="$(require chown)"
+    execute sudo "$chown" -R "$(whoami):staff" "$path"
+    execute sudo chmod -R 755 "$path"
 }
 
 move_to_bin() {
