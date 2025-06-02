@@ -119,6 +119,9 @@ grep '^export BUILDKITE_' "$SHARED_ENV_FILE" | head -10
 echo "=== SOURCING ENVIRONMENT AND RUNNING COMMAND ==="
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     echo \"Setting up workspace symlink to avoid spaces in path...\"
+    echo \"Current user: \$(whoami)\"
+    echo \"Home directory: \$HOME\"
+    echo \"Working directory: \$(pwd)\"
     
     # Create a symlink without spaces in the user home directory (writable)
     rm -rf ~/workspace 2>/dev/null || true
@@ -126,9 +129,11 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     echo \"✅ Created symlink: ~/workspace -> /Volumes/My Shared Files/workspace\"
     
     echo \"Updating environment file with actual VM user home directory...\"
-    # Replace VM_USER_HOME placeholder with actual home directory
-    sed -i \"s|VM_USER_HOME|\$HOME|g\" ~/workspace/buildkite_env.sh
-    echo \"✅ Updated environment file with VM user home: \$HOME\"
+    # Instead of using sed with complex escaping, just recreate the file with correct paths
+    # Source the original file and re-export with correct HOME
+    source ~/workspace/buildkite_env.sh
+    export BUILDKITE_BUILD_PATH="\$HOME/workspace/build-workdir"
+    echo \"✅ Updated BUILDKITE_BUILD_PATH to: \$BUILDKITE_BUILD_PATH\"
     
     echo \"Sourcing environment from shared filesystem...\"
     
@@ -159,9 +164,9 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
 
 echo "=== ENSURING BUILDKITE AGENT AVAILABILITY ==="
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
-    # Source environment first and replace placeholders
-    sed -i \"s|VM_USER_HOME|\$HOME|g\" \"/Volumes/My Shared Files/workspace/buildkite_env.sh\"
+    # Source environment and fix the build path
     source \"/Volumes/My Shared Files/workspace/buildkite_env.sh\"
+    export BUILDKITE_BUILD_PATH=\"\$HOME/workspace/build-workdir\"
     
     # Check if buildkite-agent is already available
     if command -v buildkite-agent >/dev/null 2>&1; then
