@@ -109,37 +109,61 @@ echo "=== RUNNING COMMAND IN LOCAL WORKSPACE ==="
 
 # Create environment variables string for Buildkite
 BUILDKITE_ENV=""
-if [ -n "$BUILDKITE_JOB_ID" ]; then
-    BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE_JOB_ID='$BUILDKITE_JOB_ID';"
+
+echo "=== BUILDKITE ENVIRONMENT VARIABLES DETECTED ==="
+# Automatically pass through all BUILDKITE_* environment variables
+buildkite_vars_found=0
+for var in $(env | grep '^BUILDKITE_' | cut -d= -f1); do
+    value="${!var}"
+    if [ -n "$value" ]; then
+        echo "  $var: $value"
+        # Escape single quotes in the value
+        escaped_value=$(printf %s "$value" | sed "s/'/'\\\\''/g")
+        BUILDKITE_ENV="$BUILDKITE_ENV export $var='$escaped_value';"
+        buildkite_vars_found=$((buildkite_vars_found + 1))
+    fi
+done
+
+if [ $buildkite_vars_found -eq 0 ]; then
+    echo "  ⚠️  No BUILDKITE_* environment variables found!"
+else
+    echo "  ✅ Found $buildkite_vars_found BUILDKITE_* environment variables"
 fi
-if [ -n "$BUILDKITE_BUILD_ID" ]; then
-    BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE_BUILD_ID='$BUILDKITE_BUILD_ID';"
-fi
-if [ -n "$BUILDKITE_STEP_KEY" ]; then
-    BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE_STEP_KEY='$BUILDKITE_STEP_KEY';"
-fi
-if [ -n "$BUILDKITE_AGENT_ACCESS_TOKEN" ]; then
-    BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE_AGENT_ACCESS_TOKEN='$BUILDKITE_AGENT_ACCESS_TOKEN';"
-fi
-if [ -n "$BUILDKITE_AGENT_ENDPOINT" ]; then
-    BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE_AGENT_ENDPOINT='$BUILDKITE_AGENT_ENDPOINT';"
-fi
-if [ -n "$BUILDKITE_BUILD_URL" ]; then
-    BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE_BUILD_URL='$BUILDKITE_BUILD_URL';"
-fi
-if [ -n "$BUILDKITE_BUILD_NUMBER" ]; then
-    BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE_BUILD_NUMBER='$BUILDKITE_BUILD_NUMBER';"
-fi
-if [ -n "$BUILDKITE_ORGANIZATION_SLUG" ]; then
-    BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE_ORGANIZATION_SLUG='$BUILDKITE_ORGANIZATION_SLUG';"
-fi
-if [ -n "$BUILDKITE_PIPELINE_SLUG" ]; then
-    BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE_PIPELINE_SLUG='$BUILDKITE_PIPELINE_SLUG';"
-fi
+echo "==========================================="
 
 # Always set BUILDKITE=true and CI=true for CMake
 BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE='true';"
 BUILDKITE_ENV="$BUILDKITE_ENV export CI='true';"
+
+echo "=== ADDITIONAL BUILD ENVIRONMENT VARIABLES ==="
+# Pass through additional build configuration variables
+additional_vars=(
+    "BUN_LINK_ONLY"
+    "CANARY_REVISION"
+    "CMAKE_TLS_VERIFY"
+    "CMAKE_VERBOSE_MAKEFILE"
+    "ENABLE_BASELINE"
+    "ENABLE_CANARY"
+)
+
+additional_vars_found=0
+for var in "${additional_vars[@]}"; do
+    value="${!var}"
+    if [ -n "$value" ]; then
+        echo "  $var: $value"
+        # Escape single quotes in the value
+        escaped_value=$(printf %s "$value" | sed "s/'/'\\\\''/g")
+        BUILDKITE_ENV="$BUILDKITE_ENV export $var='$escaped_value';"
+        additional_vars_found=$((additional_vars_found + 1))
+    fi
+done
+
+if [ $additional_vars_found -eq 0 ]; then
+    echo "  ℹ️  No additional build variables found"
+else
+    echo "  ✅ Found $additional_vars_found additional build variables"
+fi
+echo "==========================================="
 
 # Ensure buildkite-agent is in PATH
 BUILDKITE_ENV="$BUILDKITE_ENV export PATH=\"\$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:\$PATH\";"
