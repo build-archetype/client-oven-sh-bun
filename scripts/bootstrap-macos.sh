@@ -2,7 +2,7 @@
 set -e
 set -x
 
-# Version: 2.0
+# Version: 3.0
 # A comprehensive bootstrap script for macOS based on the main bootstrap.sh
 
 # Constants
@@ -165,9 +165,15 @@ install_packages() {
 install_brew() {
     if ! command -v brew >/dev/null 2>&1; then
         print "Installing Homebrew..."
-        local bash="$(require bash)"
-        local script=$(download_file "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh")
-        execute_as_user "$bash" -lc "NONINTERACTIVE=1 $script"
+        
+        # Use the standard Homebrew installation method
+        print "Downloading and running Homebrew installer..."
+        local curl="$(require curl)"
+        
+        print "$ curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | NONINTERACTIVE=1 bash"
+        if ! NONINTERACTIVE=1 "$curl" -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | bash; then
+            error "Homebrew installation failed"
+        fi
         
         # Add Homebrew to PATH based on architecture
         case "$(uname -m)" in
@@ -183,6 +189,10 @@ install_brew() {
         append_to_profile "export HOMEBREW_NO_INSTALL_CLEANUP=1"
         append_to_profile "export HOMEBREW_NO_AUTO_UPDATE=1"
         append_to_profile "export HOMEBREW_NO_ANALYTICS=1"
+        
+        print "✅ Homebrew installed successfully"
+    else
+        print "✅ Homebrew already installed"
     fi
 }
 
@@ -234,9 +244,19 @@ install_bun() {
 }
 
 install_rosetta() {
-    if ! command -v arch >/dev/null 2>&1; then
-        print "Installing Rosetta 2..."
-        execute softwareupdate --install-rosetta --agree-to-license
+    # Only install Rosetta 2 on Apple Silicon Macs
+    if [ "$(uname -m)" = "arm64" ]; then
+        print "Checking Rosetta 2 installation..."
+        # Check if Rosetta 2 is already installed by trying to run an x86_64 binary
+        if ! /usr/bin/pgrep oahd >/dev/null 2>&1 && ! arch -x86_64 /usr/bin/true >/dev/null 2>&1; then
+            print "Installing Rosetta 2..."
+            execute softwareupdate --install-rosetta --agree-to-license
+            print "✅ Rosetta 2 installed successfully"
+        else
+            print "✅ Rosetta 2 already installed"
+        fi
+    else
+        print "✅ Rosetta 2 not needed on Intel Macs"
     fi
 }
 
@@ -263,13 +283,26 @@ install_llvm() {
         llvm_prefix="/usr/local/opt/llvm@$llvm_version_num"
     fi
     
-    print "Creating LLVM symlinks..."
-    execute sudo ln -sf "$llvm_prefix/bin/clang" /usr/local/bin/clang
-    execute sudo ln -sf "$llvm_prefix/bin/clang++" /usr/local/bin/clang++
-    execute sudo ln -sf "$llvm_prefix/bin/llvm-ar" /usr/local/bin/llvm-ar
-    execute sudo ln -sf "$llvm_prefix/bin/llvm-ranlib" /usr/local/bin/llvm-ranlib
-    execute sudo ln -sf "$llvm_prefix/bin/lld" /usr/local/bin/lld
-    execute sudo ln -sf "$llvm_prefix/bin/llvm-symbolizer" /usr/local/bin/llvm-symbolizer
+    # Determine the appropriate bin directory
+    local bin_dir="/usr/local/bin"
+    if [ "$(uname -m)" = "arm64" ] && [ -d "/opt/homebrew/bin" ]; then
+        bin_dir="/opt/homebrew/bin"
+    fi
+    
+    # Ensure bin directory exists and is writable
+    if [ ! -d "$bin_dir" ]; then
+        execute sudo mkdir -p "$bin_dir"
+    fi
+    
+    print "Creating LLVM symlinks in $bin_dir..."
+    execute sudo ln -sf "$llvm_prefix/bin/clang" "$bin_dir/clang"
+    execute sudo ln -sf "$llvm_prefix/bin/clang++" "$bin_dir/clang++"
+    execute sudo ln -sf "$llvm_prefix/bin/llvm-ar" "$bin_dir/llvm-ar"
+    execute sudo ln -sf "$llvm_prefix/bin/llvm-ranlib" "$bin_dir/llvm-ranlib"
+    execute sudo ln -sf "$llvm_prefix/bin/lld" "$bin_dir/lld"
+    execute sudo ln -sf "$llvm_prefix/bin/llvm-symbolizer" "$bin_dir/llvm-symbolizer"
+    
+    print "✅ LLVM installed and symlinked successfully"
 }
 
 install_ccache() {
@@ -286,12 +319,24 @@ install_rust() {
     append_to_profile "export RUSTUP_HOME=$rust_home"
     append_to_profile "export CARGO_HOME=$rust_home"
 
-    local sh="$(require sh)"
-    local rustup_script=$(download_file "https://sh.rustup.rs")
-    execute "$sh" -lc "RUSTUP_HOME=$rust_home CARGO_HOME=$rust_home $rustup_script -y --no-modify-path"
+    # Install rustup directly by piping to sh (standard approach)
+    print "Downloading and running rustup installer..."
+    local curl="$(require curl)"
+    
+    # Set environment variables and run the installer
+    print "$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | RUSTUP_HOME=$rust_home CARGO_HOME=$rust_home sh -s -- -y --no-modify-path"
+    if ! RUSTUP_HOME="$rust_home" CARGO_HOME="$rust_home" "$curl" --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path; then
+        error "Rust installation failed"
+    fi
+    
     append_to_path "$rust_home/bin"
     
-    print "✅ Rust installed successfully: $(cargo --version)"
+    # Verify installation
+    if [ -f "$rust_home/bin/cargo" ]; then
+        print "✅ Rust installed successfully: $($rust_home/bin/cargo --version)"
+    else
+        error "Rust installation verification failed"
+    fi
 }
 
 install_common_software() {
@@ -345,30 +390,70 @@ verify_installations() {
     print "Verifying installations..."
     
     local tools="bun cmake ninja go clang rustc cargo make python3 libtool ruby perl ccache zig"
+    local missing_tools=""
+    local verification_failed=false
+    
     for tool in $tools; do
         if command -v "$tool" >/dev/null 2>&1; then
             local version_output=""
             case "$tool" in
-            bun) version_output="$(bun --version)" ;;
-            cmake) version_output="$(cmake --version | head -1)" ;;
-            ninja) version_output="$(ninja --version)" ;;
-            go) version_output="$(go version)" ;;
-            clang) version_output="$(clang --version | head -1)" ;;
-            rustc) version_output="$(rustc --version)" ;;
-            cargo) version_output="$(cargo --version)" ;;
-            make) version_output="$(make --version | head -1)" ;;
-            python3) version_output="$(python3 --version)" ;;
-            libtool) version_output="$(libtool --version | head -1)" ;;
-            ruby) version_output="$(ruby --version)" ;;
-            perl) version_output="$(perl --version | head -2 | tail -1)" ;;
-            ccache) version_output="$(ccache --version | head -1)" ;;
-            zig) version_output="$(zig version)" ;;
+            bun) 
+                version_output="$(bun --version 2>/dev/null || echo 'version check failed')" 
+                ;;
+            cmake) 
+                version_output="$(cmake --version 2>/dev/null | head -1 || echo 'version check failed')" 
+                ;;
+            ninja) 
+                version_output="$(ninja --version 2>/dev/null || echo 'version check failed')" 
+                ;;
+            go) 
+                version_output="$(go version 2>/dev/null || echo 'version check failed')" 
+                ;;
+            clang) 
+                version_output="$(clang --version 2>/dev/null | head -1 || echo 'version check failed')" 
+                ;;
+            rustc) 
+                version_output="$(rustc --version 2>/dev/null || echo 'version check failed')" 
+                ;;
+            cargo) 
+                version_output="$(cargo --version 2>/dev/null || echo 'version check failed')" 
+                ;;
+            make) 
+                version_output="$(make --version 2>/dev/null | head -1 || echo 'version check failed')" 
+                ;;
+            python3) 
+                version_output="$(python3 --version 2>/dev/null || echo 'version check failed')" 
+                ;;
+            libtool) 
+                version_output="$(libtool --version 2>/dev/null | head -1 || echo 'version check failed')" 
+                ;;
+            ruby) 
+                version_output="$(ruby --version 2>/dev/null || echo 'version check failed')" 
+                ;;
+            perl) 
+                version_output="$(perl --version 2>/dev/null | head -2 | tail -1 || echo 'version check failed')" 
+                ;;
+            ccache) 
+                version_output="$(ccache --version 2>/dev/null | head -1 || echo 'version check failed')" 
+                ;;
+            zig) 
+                version_output="$(zig version 2>/dev/null || echo 'version check failed')" 
+                ;;
             esac
             print "✅ $tool: $version_output"
         else
             print "❌ $tool: not found"
+            missing_tools="$missing_tools $tool"
+            verification_failed=true
         fi
     done
+    
+    if [ "$verification_failed" = true ]; then
+        print "⚠️  Some tools are missing:$missing_tools"
+        print "   This may cause build failures. Check the installation logs above."
+    else
+        print "✅ All required tools verified successfully!"
+    fi
 }
 
 # Main installation process
