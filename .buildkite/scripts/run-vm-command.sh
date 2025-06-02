@@ -107,9 +107,6 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
 
 echo "=== RUNNING COMMAND IN LOCAL WORKSPACE ==="
 
-# Create environment variables string for Buildkite
-BUILDKITE_ENV=""
-
 echo "=== BUILDKITE ENVIRONMENT VARIABLES DETECTED ==="
 # Automatically pass through all BUILDKITE_* environment variables
 buildkite_vars_found=0
@@ -117,9 +114,6 @@ for var in $(env | grep '^BUILDKITE_' | cut -d= -f1); do
     value="${!var}"
     if [ -n "$value" ]; then
         echo "  $var: $value"
-        # Escape single quotes in the value
-        escaped_value=$(printf %s "$value" | sed "s/'/'\\\\''/g")
-        BUILDKITE_ENV="$BUILDKITE_ENV export $var='$escaped_value';"
         buildkite_vars_found=$((buildkite_vars_found + 1))
     fi
 done
@@ -132,8 +126,7 @@ fi
 echo "==========================================="
 
 # Always set BUILDKITE=true and CI=true for CMake
-BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE='true';"
-BUILDKITE_ENV="$BUILDKITE_ENV export CI='true';"
+echo "Setting BUILDKITE=true and CI=true"
 
 echo "=== ADDITIONAL BUILD ENVIRONMENT VARIABLES ==="
 # Pass through additional build configuration variables
@@ -151,9 +144,6 @@ for var in "${additional_vars[@]}"; do
     value="${!var}"
     if [ -n "$value" ]; then
         echo "  $var: $value"
-        # Escape single quotes in the value
-        escaped_value=$(printf %s "$value" | sed "s/'/'\\\\''/g")
-        BUILDKITE_ENV="$BUILDKITE_ENV export $var='$escaped_value';"
         additional_vars_found=$((additional_vars_found + 1))
     fi
 done
@@ -166,8 +156,6 @@ fi
 echo "==========================================="
 
 # Ensure buildkite-agent is in PATH
-BUILDKITE_ENV="$BUILDKITE_ENV export PATH=\"\$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:\$PATH\";"
-
 echo "=== SETTING UP BUILDKITE AGENT IN VM ==="
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     # Check if buildkite-agent is already available
@@ -211,4 +199,47 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     fi
 '"
 
-exec sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '$BUILDKITE_ENV cd /tmp/workspace && $COMMAND'" 
+echo "=== CREATING ENVIRONMENT FILE IN VM ==="
+# Create environment file in VM by writing each variable separately
+sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
+    echo \"Creating environment file...\"
+    cat > /tmp/buildkite_env.sh << \"ENVEOF\"
+#!/bin/bash
+# Buildkite environment variables
+export PATH=\"\$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:\$PATH\"
+export BUILDKITE=\"true\"
+export CI=\"true\"
+ENVEOF
+    chmod +x /tmp/buildkite_env.sh
+    echo \"✅ Environment file created\"
+'"
+
+# Pass BUILDKITE_* environment variables
+echo "Transferring BUILDKITE_* environment variables..."
+for var in $(env | grep '^BUILDKITE_' | cut -d= -f1); do
+    value="${!var}"
+    if [ -n "$value" ]; then
+        # Use printf to properly escape the value and append to the env file
+        sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" bash -l -c "printf 'export %s=%q\n' '$var' '$value' >> /tmp/buildkite_env.sh"
+    fi
+done
+
+# Pass additional build environment variables
+echo "Transferring additional build environment variables..."
+additional_vars=(
+    "BUN_LINK_ONLY"
+    "CANARY_REVISION"
+    "CMAKE_TLS_VERIFY"
+    "CMAKE_VERBOSE_MAKEFILE"
+    "ENABLE_BASELINE"
+    "ENABLE_CANARY"
+)
+
+for var in "${additional_vars[@]}"; do
+    value="${!var}"
+    if [ -n "$value" ]; then
+        sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" bash -l -c "printf 'export %s=%q\n' '$var' '$value' >> /tmp/buildkite_env.sh"
+    fi
+done
+
+exec sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c 'source /tmp/buildkite_env.sh && cd /tmp/workspace && $COMMAND'" 
