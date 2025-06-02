@@ -306,6 +306,7 @@ function getCppAgent(platform, options) {
 
   if (os === "darwin") {
     return {
+      queue: "darwin",
       os: "darwin",
       arch: arch === "aarch64" ? "arm64" : arch,
       tart: true,
@@ -330,6 +331,7 @@ function getZigAgent(platform, options) {
   // Use macOS agents for darwin platforms since they need to run Tart commands
   if (os === "darwin") {
     return {
+      queue: "darwin",
       os: "darwin",
       arch: arch === "aarch64" ? "arm64" : arch,
       tart: true,
@@ -364,6 +366,7 @@ function getTestAgent(platform, options) {
 
   if (os === "darwin") {
     return {
+      queue: "darwin",
       os: "darwin",
       arch: arch === "aarch64" ? "arm64" : arch,
       tart: true,
@@ -788,6 +791,7 @@ function getReleaseStep(buildPlatforms, options) {
     key: "release",
     label: getBuildkiteEmoji("rocket"),
     agents: {
+      queue: "darwin",
       os: "darwin",
       arch: "arm64",
       tart: true,
@@ -813,6 +817,7 @@ function getBenchmarkStep(buildPlatforms) {
     key: "benchmark",
     label: "📊",
     agents: {
+      queue: "darwin",
       os: "darwin",
       arch: "arm64",
       tart: true,
@@ -1114,6 +1119,7 @@ function getOptionsApplyStep() {
     command: `${command} --apply`,
     depends_on: ["options"],
     agents: {
+      queue: "darwin",
       os: "darwin",
       arch: "arm64", 
       tart: true,
@@ -1218,6 +1224,7 @@ function getBuildBaseImageStep() {
     label: "Build Base Image",
     key: "build-base-image",
     agents: {
+      queue: "darwin",
       os: "darwin",
       arch: "arm64",
       tart: true
