@@ -2,6 +2,129 @@
 
 This CI system is designed for Bun.sh builds, with a focus on macOS (Apple Silicon and Intel) using Tart VMs for full isolation. It can be extended to Linux and Windows, but by default only macOS jobs are enabled.
 
+## Smart Image Caching System
+
+The CI system includes an intelligent VM image caching mechanism that optimizes build times while ensuring you always get the latest available image. This system is implemented in `.buildkite/scripts/ensure-bun-image.sh`.
+
+### Caching Strategy (Remote-First Approach)
+
+The caching system follows a simple and effective "remote-first" strategy:
+
+1. **Always check remote registry first** - If an image exists in the registry, pull it (it might be newer than local)
+2. **Fallback to local image** - Use local image if remote doesn't exist but local does
+3. **Build new image** - If neither remote nor local exists, build from scratch
+4. **Force refresh option** - `--force-refresh` flag bypasses local cache entirely
+
+### Image Naming and Versioning
+
+Images follow a consistent naming pattern:
+- **Local name**: `bun-build-macos-{VERSION}` (e.g., `bun-build-macos-1.2.14`)
+- **Registry URL**: `ghcr.io/{ORGANIZATION}/{REPOSITORY}/bun-build-macos:{VERSION}`
+- **Latest tag**: `ghcr.io/{ORGANIZATION}/{REPOSITORY}/bun-build-macos:latest`
+
+Version detection is automatic:
+1. Extracts from `CMakeLists.txt` if available
+2. Falls back to `package.json` version field
+3. Uses git tags/commit as final fallback
+
+### SSH-Based Automation
+
+The image building process uses SSH automation to run bootstrap scripts inside VMs:
+
+- **Base image**: Uses `ghcr.io/cirruslabs/macos-sequoia-base:latest` which has SSH enabled
+- **Credentials**: Default `admin/admin` account for SSH access
+- **Shared directory**: Mounts current workspace as `/Volumes/My Shared Files/workspace`
+- **Bootstrap execution**: Runs `./scripts/bootstrap-macos.sh` via SSH inside the VM
+
+### Build Process Flow
+
+```bash
+# 1. Check command line options
+./ensure-bun-image.sh [--force-refresh]
+
+# 2. Detect repository and version
+REPOSITORY=$(git remote get-url origin | sed -E 's|.*/([^/]+)\.git$|\1|')
+BUN_VERSION=$(grep -E "set\(Bun_VERSION" CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/')
+
+# 3. Image availability check
+if [remote image exists]; then
+    pull and clone to local name
+elif [local image exists AND not force refresh]; then
+    use existing local image
+else
+    build new image
+fi
+
+# 4. Build process (if needed)
+- Clone base macOS image
+- Start VM with shared workspace directory
+- Wait for VM boot and SSH availability
+- Run bootstrap script via SSH
+- Gracefully shutdown VM
+- Push to registry (if credentials available)
+```
+
+### Registry Integration
+
+The system automatically pushes newly built images to GitHub Container Registry:
+
+- **Authentication**: Uses credential files (`/tmp/github-token.txt`, `/tmp/github-username.txt`)
+- **Push strategy**: Pushes both versioned tag and `:latest` tag
+- **Sharing**: Other developers/CI instances can pull pre-built images
+
+### Usage Examples
+
+```bash
+# Normal usage - use cache if available
+.buildkite/scripts/ensure-bun-image.sh
+
+# Force rebuild - ignore local cache
+.buildkite/scripts/ensure-bun-image.sh --force-refresh
+
+# Check what image would be used
+BUN_VERSION=$(get_bun_version)
+tart list | grep "bun-build-macos-${BUN_VERSION}"
+```
+
+### Debugging and Troubleshooting
+
+The script provides comprehensive debugging output:
+
+```bash
+# Shows user context, permissions, and directory states
+[2024-01-15 10:30:15] === DEBUGGING INFO ===
+[2024-01-15 10:30:15] Current user (whoami): buildkite-agent
+[2024-01-15 10:30:15] USER: buildkite-agent
+[2024-01-15 10:30:15] HOME: /var/lib/buildkite-agent
+[2024-01-15 10:30:15] ======================
+
+# Automatic permission fixing
+[2024-01-15 10:30:16] Fixing Tart permissions...
+[2024-01-15 10:30:16] Setting ownership to buildkite-agent:staff...
+
+# Image availability checks
+[2024-01-15 10:30:17] Checking registry for latest image...
+[2024-01-15 10:30:18] ✅ Image found and pulled from registry
+```
+
+Common issues and solutions:
+
+1. **Permission errors with Tart**:
+   - Script automatically fixes `.tart` directory permissions
+   - Ensures proper ownership for the current user
+
+2. **SSH connection failures**:
+   - Retries up to 30 times with 30-second intervals
+   - Installs `sshpass` if not available
+
+3. **VM boot issues**:
+   - Waits 60 seconds for initial boot
+   - Attempts IP detection up to 10 times
+
+4. **Registry authentication**:
+   - Requires GitHub token and username in credential files
+   - Gracefully skips push if credentials unavailable
+
 ## Usage -- Quick Start
 
 1. **Clone and run the setup script:**
@@ -34,6 +157,12 @@ This CI system is designed for Bun.sh builds, with a focus on macOS (Apple Silic
      tags="os=macos,arch=aarch64,queue=darwin"
      ```
    - All macOS build and test jobs will use the `darwin` queue. Make sure your agent is running and registered with this queue.
+
+5. **Image Preparation (Automatic)**:
+   - The CI pipeline automatically ensures the correct Bun build image is available
+   - First build may take 15-20 minutes as it bootstraps the development environment
+   - Subsequent builds use cached images and start much faster
+   - Images are automatically shared via GitHub Container Registry
 
 ## Non-Interactive and Interactive Setup
 

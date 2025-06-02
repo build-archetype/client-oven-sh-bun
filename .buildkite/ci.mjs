@@ -1214,12 +1214,15 @@ function getBuildBaseImageStep() {
       "{\n  \"auths\": {\n    \"ghcr.io\": {\n      \"auth\": \"$(echo -n \"$GITHUB_USERNAME:$GITHUB_TOKEN\" | base64)\"\n    }\n  }\n}",
       "EOF",
       "chmod 600 $HOME/.docker/config.json",
-      // Run the build script
+      // Store credentials for the script
+      "echo \"$GITHUB_TOKEN\" > /tmp/github-token.txt",
+      "echo \"$GITHUB_USERNAME\" > /tmp/github-username.txt",
+      // Run the build script (it handles its own registry push)
       "chmod +x .buildkite/scripts/ensure-bun-image.sh",
       "set -x",
       ".buildkite/scripts/ensure-bun-image.sh 2>&1 | tee -a base-image-build.log",
-      // After successful build, push to container registry
-      `tart push ${IMAGE_CONFIG.baseImage.name} ${IMAGE_CONFIG.baseImage.fullName}`
+      // Clean up credentials
+      "rm -f /tmp/github-token.txt /tmp/github-username.txt"
     ],
     retry: {
       automatic: [

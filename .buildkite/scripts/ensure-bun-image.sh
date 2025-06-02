@@ -56,6 +56,23 @@ fix_tart_permissions() {
     ls -la "$tart_dir" || log "Directory doesn't exist or can't be read"
 }
 
+# Check if image exists in registry
+image_exists_in_registry() {
+    local image_url="$1"
+    log "Checking if image exists: $image_url"
+    
+    # Fix permissions before trying to use tart
+    fix_tart_permissions
+    
+    if tart pull "$image_url" 2>&1; then
+        log "✅ Image found and pulled from registry"
+        return 0
+    else
+        log "❌ Image not found in registry"
+        return 1
+    fi
+}
+
 # Get Bun version
 get_bun_version() {
     local version=""
@@ -76,25 +93,19 @@ get_bun_version() {
     echo "$version"
 }
 
-# Check if image exists in registry
-image_exists_in_registry() {
-    local image_url="$1"
-    log "Checking if image exists: $image_url"
-    
-    # Fix permissions before trying to use tart
-    fix_tart_permissions
-    
-    if tart pull "$image_url" 2>&1; then
-        log "✅ Image found and pulled from registry"
-        return 0
-    else
-        log "❌ Image not found in registry"
-        return 1
-    fi
-}
-
 # Main execution
 main() {
+    # Parse arguments
+    local force_refresh=false
+    for arg in "$@"; do
+        case $arg in
+            --force-refresh)
+                force_refresh=true
+                shift
+                ;;
+        esac
+    done
+    
     # Fix Tart permissions first thing
     fix_tart_permissions
     
@@ -129,21 +140,37 @@ main() {
     log "  Base image: $BASE_IMAGE"
     log "  Local name: $LOCAL_IMAGE_NAME"
     log "  Remote URL: $REMOTE_IMAGE_URL"
+    log "  Force refresh: $force_refresh"
     
-    # Check if local image already exists
-    log "Checking for existing local images..."
-    tart list
-    if tart list | grep -q "^${LOCAL_IMAGE_NAME}"; then
-        log "✅ Local image already exists: $LOCAL_IMAGE_NAME"
+    # Check if local and remote are in sync
+    log "Checking image availability..."
+    
+    # Handle force refresh
+    if [ "$force_refresh" = true ]; then
+        log "🔄 Force refresh requested - will pull from remote or rebuild"
+        # Delete local image if it exists
+        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "No existing local image to delete"
+    fi
+    
+    # Always check remote first - if it exists, use it (it might be newer)
+    log "Checking registry for latest image..."
+    if image_exists_in_registry "$REMOTE_IMAGE_URL"; then
+        log "Cloning from registry to local name..."
+        # Delete local if it exists to avoid conflicts
+        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "No existing local image to delete"
+        tart clone "$REMOTE_IMAGE_URL" "$LOCAL_IMAGE_NAME"
+        log "✅ Cloned successfully from registry"
         exit 0
     fi
     
-    # Check registry
-    if image_exists_in_registry "$REMOTE_IMAGE_URL"; then
-        log "Cloning from registry to local name..."
-        tart clone "$REMOTE_IMAGE_URL" "$LOCAL_IMAGE_NAME"
-        log "✅ Cloned successfully"
-        exit 0
+    # Remote doesn't exist, check if we have local (unless force refresh)
+    if [ "$force_refresh" != true ]; then
+        log "No remote image found, checking for local image..."
+        if tart list | grep -q "^${LOCAL_IMAGE_NAME}"; then
+            log "✅ Local image exists: $LOCAL_IMAGE_NAME"
+            log "Using local image (no remote available)"
+            exit 0
+        fi
     fi
     
     log "Building new base image for Bun ${BUN_VERSION}..."

@@ -10,7 +10,7 @@ export const IMAGE_CONFIG = {
     registry: "ghcr.io",
     organization: "build-archetype",
     repository: "client-oven-sh-bun",
-    name: "base-bun-build-macos-darwin",
+    name: "bun-build-macos",
     tag: "latest",
     get fullName() {
       return `${this.registry}/${this.organization}/${this.repository}/${this.name}:${this.tag}`;
