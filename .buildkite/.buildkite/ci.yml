@@ -4,6 +4,7 @@ steps:
     label: Build Base Image
     key: "build-base-image"
     agents:
+      queue: darwin
       os: darwin
       arch: arm64
       tart: true
@@ -49,6 +50,7 @@ steps:
     key: "darwin-aarch64-build-vendor"
     label: ":darwin: aarch64 - build-vendor"
     agents:
+      queue: darwin
       os: darwin
       arch: arm64
       tart: true
@@ -88,13 +90,13 @@ steps:
     - log stream --predicate 'process == "tart" OR process CONTAINS "Virtualization"' > tart.log 2>&1 &
     - TART_LOG_PID=$!
     - trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT
-    - tart clone bun-build-macos-1.2.14 bun-build-1748826445871-522bf1ce-98e9-4547-b83f-a216139c59c2
-    - tart run bun-build-1748826445871-522bf1ce-98e9-4547-b83f-a216139c59c2 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
+    - tart clone bun-build-macos-1.2.14 bun-build-1748826764866-9f2c9a0f-31ce-41c3-8ddc-b9fd8206b080
+    - tart run bun-build-1748826764866-9f2c9a0f-31ce-41c3-8ddc-b9fd8206b080 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
     - sleep 30
     - chmod +x .buildkite/scripts/run-vm-command.sh
-    - .buildkite/scripts/run-vm-command.sh bun-build-1748826445871-522bf1ce-98e9-4547-b83f-a216139c59c2 "cd '/Volumes/My Shared Files/workspace' && ls -la && bun run build:release --target dependencies"
+    - .buildkite/scripts/run-vm-command.sh bun-build-1748826764866-9f2c9a0f-31ce-41c3-8ddc-b9fd8206b080 "cd '/Volumes/My Shared Files/workspace' && ls -la && bun run build:release --target dependencies"
     - buildkite-agent artifact upload vm.log || echo "No VM log to upload"
-    - tart delete bun-build-1748826445871-522bf1ce-98e9-4547-b83f-a216139c59c2
+    - tart delete bun-build-1748826764866-9f2c9a0f-31ce-41c3-8ddc-b9fd8206b080
     depends_on:
     - build-base-image
   
@@ -102,6 +104,7 @@ steps:
     key: "darwin-aarch64-build-cpp"
     label: ":darwin: aarch64 - build-cpp"
     agents:
+      queue: darwin
       os: darwin
       arch: arm64
       tart: true
@@ -142,14 +145,14 @@ steps:
     - log stream --predicate 'process == "tart" OR process CONTAINS "Virtualization"' > tart.log 2>&1 &
     - TART_LOG_PID=$!
     - trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT
-    - tart clone bun-build-macos-1.2.14 bun-build-1748826445877-51bb9a1f-da7a-4316-b5b9-56234d8cea54
-    - tart run bun-build-1748826445877-51bb9a1f-da7a-4316-b5b9-56234d8cea54 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
+    - tart clone bun-build-macos-1.2.14 bun-build-1748826764870-744ba301-95bb-492c-ad3c-620a9132eb86
+    - tart run bun-build-1748826764870-744ba301-95bb-492c-ad3c-620a9132eb86 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
     - sleep 30
     - chmod +x .buildkite/scripts/run-vm-command.sh
-    - .buildkite/scripts/run-vm-command.sh bun-build-1748826445877-51bb9a1f-da7a-4316-b5b9-56234d8cea54 "cd '/Volumes/My Shared Files/workspace' && bun run build:release --target bun"
-    - .buildkite/scripts/run-vm-command.sh bun-build-1748826445877-51bb9a1f-da7a-4316-b5b9-56234d8cea54 "cd '/Volumes/My Shared Files/workspace' && bun run build:release --target dependencies"
+    - .buildkite/scripts/run-vm-command.sh bun-build-1748826764870-744ba301-95bb-492c-ad3c-620a9132eb86 "cd '/Volumes/My Shared Files/workspace' && bun run build:release --target bun"
+    - .buildkite/scripts/run-vm-command.sh bun-build-1748826764870-744ba301-95bb-492c-ad3c-620a9132eb86 "cd '/Volumes/My Shared Files/workspace' && bun run build:release --target dependencies"
     - buildkite-agent artifact upload vm.log || echo "No VM log to upload"
-    - tart delete bun-build-1748826445877-51bb9a1f-da7a-4316-b5b9-56234d8cea54
+    - tart delete bun-build-1748826764870-744ba301-95bb-492c-ad3c-620a9132eb86
     depends_on:
     - build-base-image
   
@@ -157,6 +160,7 @@ steps:
     key: "darwin-aarch64-build-zig"
     label: ":darwin: aarch64 - build-zig"
     agents:
+      queue: darwin
       os: darwin
       arch: arm64
       tart: true
@@ -197,13 +201,13 @@ steps:
     - log stream --predicate 'process == "tart" OR process CONTAINS "Virtualization"' > tart.log 2>&1 &
     - TART_LOG_PID=$!
     - trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT
-    - tart clone bun-build-macos-1.2.14 bun-build-1748826445882-84ba167d-636c-4309-9da7-8c0d2a637dbe
-    - tart run bun-build-1748826445882-84ba167d-636c-4309-9da7-8c0d2a637dbe --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
+    - tart clone bun-build-macos-1.2.14 bun-build-1748826764875-e395b670-9cfb-4283-ab85-937ad3cd70d8
+    - tart run bun-build-1748826764875-e395b670-9cfb-4283-ab85-937ad3cd70d8 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
     - sleep 30
     - chmod +x .buildkite/scripts/run-vm-command.sh
-    - .buildkite/scripts/run-vm-command.sh bun-build-1748826445882-84ba167d-636c-4309-9da7-8c0d2a637dbe "cd '/Volumes/My Shared Files/workspace' && bun run build:release --target bun-zig --toolchain darwin-aarch64"
+    - .buildkite/scripts/run-vm-command.sh bun-build-1748826764875-e395b670-9cfb-4283-ab85-937ad3cd70d8 "cd '/Volumes/My Shared Files/workspace' && bun run build:release --target bun-zig --toolchain darwin-aarch64"
     - buildkite-agent artifact upload vm.log || echo "No VM log to upload"
-    - tart delete bun-build-1748826445882-84ba167d-636c-4309-9da7-8c0d2a637dbe
+    - tart delete bun-build-1748826764875-e395b670-9cfb-4283-ab85-937ad3cd70d8
     depends_on:
     - build-base-image
   
@@ -215,6 +219,7 @@ steps:
     - darwin-aarch64-build-zig
     - build-base-image
     agents:
+      queue: darwin
       os: darwin
       arch: arm64
       tart: true
@@ -255,18 +260,19 @@ steps:
     - log stream --predicate 'process == "tart" OR process CONTAINS "Virtualization"' > tart.log 2>&1 &
     - TART_LOG_PID=$!
     - trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT
-    - tart clone bun-build-macos-1.2.14 bun-build-1748826445886-dcedfdfd-704b-4667-ba05-ff126f830611
-    - tart run bun-build-1748826445886-dcedfdfd-704b-4667-ba05-ff126f830611 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
+    - tart clone bun-build-macos-1.2.14 bun-build-1748826764879-125d59bd-758a-4c4a-8881-86a2ee21a469
+    - tart run bun-build-1748826764879-125d59bd-758a-4c4a-8881-86a2ee21a469 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
     - sleep 30
     - chmod +x .buildkite/scripts/run-vm-command.sh
-    - .buildkite/scripts/run-vm-command.sh bun-build-1748826445886-dcedfdfd-704b-4667-ba05-ff126f830611 "cd '/Volumes/My Shared Files/workspace' && bun run build:release --target bun"
+    - .buildkite/scripts/run-vm-command.sh bun-build-1748826764879-125d59bd-758a-4c4a-8881-86a2ee21a469 "cd '/Volumes/My Shared Files/workspace' && bun run build:release --target bun"
     - buildkite-agent artifact upload vm.log || echo "No VM log to upload"
-    - tart delete bun-build-1748826445886-dcedfdfd-704b-4667-ba05-ff126f830611
+    - tart delete bun-build-1748826764879-125d59bd-758a-4c4a-8881-86a2ee21a469
   
 - 
     key: "darwin-x64-build-vendor"
     label: ":darwin: x64 - build-vendor"
     agents:
+      queue: darwin
       os: darwin
       arch: x64
       tart: true
@@ -306,13 +312,13 @@ steps:
     - log stream --predicate 'process == "tart" OR process CONTAINS "Virtualization"' > tart.log 2>&1 &
     - TART_LOG_PID=$!
     - trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT
-    - tart clone bun-build-macos-1.2.14 bun-build-1748826445891-e05ab817-0583-456d-b1bc-af6b5427b070
-    - tart run bun-build-1748826445891-e05ab817-0583-456d-b1bc-af6b5427b070 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
+    - tart clone bun-build-macos-1.2.14 bun-build-1748826764884-28c45b80-d390-4ed8-a191-a2b036315368
+    - tart run bun-build-1748826764884-28c45b80-d390-4ed8-a191-a2b036315368 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
     - sleep 30
     - chmod +x .buildkite/scripts/run-vm-command.sh
-    - .buildkite/scripts/run-vm-command.sh bun-build-1748826445891-e05ab817-0583-456d-b1bc-af6b5427b070 "cd '/Volumes/My Shared Files/workspace' && ls -la && bun run build:release --target dependencies"
+    - .buildkite/scripts/run-vm-command.sh bun-build-1748826764884-28c45b80-d390-4ed8-a191-a2b036315368 "cd '/Volumes/My Shared Files/workspace' && ls -la && bun run build:release --target dependencies"
     - buildkite-agent artifact upload vm.log || echo "No VM log to upload"
-    - tart delete bun-build-1748826445891-e05ab817-0583-456d-b1bc-af6b5427b070
+    - tart delete bun-build-1748826764884-28c45b80-d390-4ed8-a191-a2b036315368
     depends_on:
     - build-base-image
   
@@ -320,6 +326,7 @@ steps:
     key: "darwin-x64-build-cpp"
     label: ":darwin: x64 - build-cpp"
     agents:
+      queue: darwin
       os: darwin
       arch: x64
       tart: true
@@ -360,14 +367,14 @@ steps:
     - log stream --predicate 'process == "tart" OR process CONTAINS "Virtualization"' > tart.log 2>&1 &
     - TART_LOG_PID=$!
     - trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT
-    - tart clone bun-build-macos-1.2.14 bun-build-1748826445895-fbe7cf42-4ac4-4e5c-a9c4-fb95eca9fb9b
-    - tart run bun-build-1748826445895-fbe7cf42-4ac4-4e5c-a9c4-fb95eca9fb9b --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
+    - tart clone bun-build-macos-1.2.14 bun-build-1748826764888-3d096598-8ff4-4635-b156-165fd1684273
+    - tart run bun-build-1748826764888-3d096598-8ff4-4635-b156-165fd1684273 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
     - sleep 30
     - chmod +x .buildkite/scripts/run-vm-command.sh
-    - .buildkite/scripts/run-vm-command.sh bun-build-1748826445895-fbe7cf42-4ac4-4e5c-a9c4-fb95eca9fb9b "cd '/Volumes/My Shared Files/workspace' && bun run build:release --target bun"
-    - .buildkite/scripts/run-vm-command.sh bun-build-1748826445895-fbe7cf42-4ac4-4e5c-a9c4-fb95eca9fb9b "cd '/Volumes/My Shared Files/workspace' && bun run build:release --target dependencies"
+    - .buildkite/scripts/run-vm-command.sh bun-build-1748826764888-3d096598-8ff4-4635-b156-165fd1684273 "cd '/Volumes/My Shared Files/workspace' && bun run build:release --target bun"
+    - .buildkite/scripts/run-vm-command.sh bun-build-1748826764888-3d096598-8ff4-4635-b156-165fd1684273 "cd '/Volumes/My Shared Files/workspace' && bun run build:release --target dependencies"
     - buildkite-agent artifact upload vm.log || echo "No VM log to upload"
-    - tart delete bun-build-1748826445895-fbe7cf42-4ac4-4e5c-a9c4-fb95eca9fb9b
+    - tart delete bun-build-1748826764888-3d096598-8ff4-4635-b156-165fd1684273
     depends_on:
     - build-base-image
   
@@ -375,6 +382,7 @@ steps:
     key: "darwin-x64-build-zig"
     label: ":darwin: x64 - build-zig"
     agents:
+      queue: darwin
       os: darwin
       arch: x64
       tart: true
@@ -415,13 +423,13 @@ steps:
     - log stream --predicate 'process == "tart" OR process CONTAINS "Virtualization"' > tart.log 2>&1 &
     - TART_LOG_PID=$!
     - trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT
-    - tart clone bun-build-macos-1.2.14 bun-build-1748826445899-feab8806-5715-4e30-8c4c-5dc51c7e4ee6
-    - tart run bun-build-1748826445899-feab8806-5715-4e30-8c4c-5dc51c7e4ee6 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
+    - tart clone bun-build-macos-1.2.14 bun-build-1748826764891-53c500a7-2f0d-4bde-bd1a-a29188db7ca3
+    - tart run bun-build-1748826764891-53c500a7-2f0d-4bde-bd1a-a29188db7ca3 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
     - sleep 30
     - chmod +x .buildkite/scripts/run-vm-command.sh
-    - .buildkite/scripts/run-vm-command.sh bun-build-1748826445899-feab8806-5715-4e30-8c4c-5dc51c7e4ee6 "cd '/Volumes/My Shared Files/workspace' && bun run build:release --target bun-zig --toolchain darwin-x64"
+    - .buildkite/scripts/run-vm-command.sh bun-build-1748826764891-53c500a7-2f0d-4bde-bd1a-a29188db7ca3 "cd '/Volumes/My Shared Files/workspace' && bun run build:release --target bun-zig --toolchain darwin-x64"
     - buildkite-agent artifact upload vm.log || echo "No VM log to upload"
-    - tart delete bun-build-1748826445899-feab8806-5715-4e30-8c4c-5dc51c7e4ee6
+    - tart delete bun-build-1748826764891-53c500a7-2f0d-4bde-bd1a-a29188db7ca3
     depends_on:
     - build-base-image
   
@@ -433,6 +441,7 @@ steps:
     - darwin-x64-build-zig
     - build-base-image
     agents:
+      queue: darwin
       os: darwin
       arch: x64
       tart: true
@@ -473,13 +482,13 @@ steps:
     - log stream --predicate 'process == "tart" OR process CONTAINS "Virtualization"' > tart.log 2>&1 &
     - TART_LOG_PID=$!
     - trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT
-    - tart clone bun-build-macos-1.2.14 bun-build-1748826445903-b53793b0-3496-4cc0-8495-77bc61c75446
-    - tart run bun-build-1748826445903-b53793b0-3496-4cc0-8495-77bc61c75446 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
+    - tart clone bun-build-macos-1.2.14 bun-build-1748826764895-7ccbf010-b745-4b84-9342-1be9be2501ff
+    - tart run bun-build-1748826764895-7ccbf010-b745-4b84-9342-1be9be2501ff --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
     - sleep 30
     - chmod +x .buildkite/scripts/run-vm-command.sh
-    - .buildkite/scripts/run-vm-command.sh bun-build-1748826445903-b53793b0-3496-4cc0-8495-77bc61c75446 "cd '/Volumes/My Shared Files/workspace' && bun run build:release --target bun"
+    - .buildkite/scripts/run-vm-command.sh bun-build-1748826764895-7ccbf010-b745-4b84-9342-1be9be2501ff "cd '/Volumes/My Shared Files/workspace' && bun run build:release --target bun"
     - buildkite-agent artifact upload vm.log || echo "No VM log to upload"
-    - tart delete bun-build-1748826445903-b53793b0-3496-4cc0-8495-77bc61c75446
+    - tart delete bun-build-1748826764895-7ccbf010-b745-4b84-9342-1be9be2501ff
   
 - 
     key: "darwin-aarch64-14-test-bun"
@@ -488,6 +497,7 @@ steps:
     - darwin-aarch64-build-bun
     - build-base-image
     agents:
+      queue: darwin
       os: darwin
       arch: arm64
       tart: true
@@ -523,13 +533,13 @@ steps:
     - log stream --predicate 'process == "tart" OR process CONTAINS "Virtualization"' > tart.log 2>&1 &
     - TART_LOG_PID=$!
     - trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT
-    - tart clone bun-build-macos-1.2.14 bun-build-1748826445908-cadae9cd-7ddf-4591-96a0-d6084798e165
-    - tart run bun-build-1748826445908-cadae9cd-7ddf-4591-96a0-d6084798e165 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
+    - tart clone bun-build-macos-1.2.14 bun-build-1748826764899-2e527eca-8a71-4dc5-a7ce-c646cd0a46db
+    - tart run bun-build-1748826764899-2e527eca-8a71-4dc5-a7ce-c646cd0a46db --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
     - sleep 30
     - chmod +x .buildkite/scripts/run-vm-command.sh
-    - .buildkite/scripts/run-vm-command.sh bun-build-1748826445908-cadae9cd-7ddf-4591-96a0-d6084798e165 "cd '/Volumes/My Shared Files/workspace' && ./scripts/runner.node.mjs --step=darwin-aarch64-build-bun"
+    - .buildkite/scripts/run-vm-command.sh bun-build-1748826764899-2e527eca-8a71-4dc5-a7ce-c646cd0a46db "cd '/Volumes/My Shared Files/workspace' && ./scripts/runner.node.mjs --step=darwin-aarch64-build-bun"
     - buildkite-agent artifact upload vm.log || echo "No VM log to upload"
-    - tart delete bun-build-1748826445908-cadae9cd-7ddf-4591-96a0-d6084798e165
+    - tart delete bun-build-1748826764899-2e527eca-8a71-4dc5-a7ce-c646cd0a46db
   
 - 
     key: "darwin-aarch64-13-test-bun"
@@ -538,6 +548,7 @@ steps:
     - darwin-aarch64-build-bun
     - build-base-image
     agents:
+      queue: darwin
       os: darwin
       arch: arm64
       tart: true
@@ -573,13 +584,13 @@ steps:
     - log stream --predicate 'process == "tart" OR process CONTAINS "Virtualization"' > tart.log 2>&1 &
     - TART_LOG_PID=$!
     - trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT
-    - tart clone bun-build-macos-1.2.14 bun-build-1748826445912-5e1c7d88-0ddd-46d6-9ed0-52609ac8362c
-    - tart run bun-build-1748826445912-5e1c7d88-0ddd-46d6-9ed0-52609ac8362c --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
+    - tart clone bun-build-macos-1.2.14 bun-build-1748826764903-a3d5d45e-137c-4d9a-ab90-48fe370837e6
+    - tart run bun-build-1748826764903-a3d5d45e-137c-4d9a-ab90-48fe370837e6 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
     - sleep 30
     - chmod +x .buildkite/scripts/run-vm-command.sh
-    - .buildkite/scripts/run-vm-command.sh bun-build-1748826445912-5e1c7d88-0ddd-46d6-9ed0-52609ac8362c "cd '/Volumes/My Shared Files/workspace' && ./scripts/runner.node.mjs --step=darwin-aarch64-build-bun"
+    - .buildkite/scripts/run-vm-command.sh bun-build-1748826764903-a3d5d45e-137c-4d9a-ab90-48fe370837e6 "cd '/Volumes/My Shared Files/workspace' && ./scripts/runner.node.mjs --step=darwin-aarch64-build-bun"
     - buildkite-agent artifact upload vm.log || echo "No VM log to upload"
-    - tart delete bun-build-1748826445912-5e1c7d88-0ddd-46d6-9ed0-52609ac8362c
+    - tart delete bun-build-1748826764903-a3d5d45e-137c-4d9a-ab90-48fe370837e6
   
 - 
     key: "darwin-x64-14-test-bun"
@@ -588,6 +599,7 @@ steps:
     - darwin-x64-build-bun
     - build-base-image
     agents:
+      queue: darwin
       os: darwin
       arch: x64
       tart: true
@@ -623,13 +635,13 @@ steps:
     - log stream --predicate 'process == "tart" OR process CONTAINS "Virtualization"' > tart.log 2>&1 &
     - TART_LOG_PID=$!
     - trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT
-    - tart clone bun-build-macos-1.2.14 bun-build-1748826445916-dec814da-6569-4ea6-abce-9eba22f3fa06
-    - tart run bun-build-1748826445916-dec814da-6569-4ea6-abce-9eba22f3fa06 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
+    - tart clone bun-build-macos-1.2.14 bun-build-1748826764907-a5d3cc10-a12c-4d6b-b273-83a7478a4cd0
+    - tart run bun-build-1748826764907-a5d3cc10-a12c-4d6b-b273-83a7478a4cd0 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
     - sleep 30
     - chmod +x .buildkite/scripts/run-vm-command.sh
-    - .buildkite/scripts/run-vm-command.sh bun-build-1748826445916-dec814da-6569-4ea6-abce-9eba22f3fa06 "cd '/Volumes/My Shared Files/workspace' && ./scripts/runner.node.mjs --step=darwin-x64-build-bun"
+    - .buildkite/scripts/run-vm-command.sh bun-build-1748826764907-a5d3cc10-a12c-4d6b-b273-83a7478a4cd0 "cd '/Volumes/My Shared Files/workspace' && ./scripts/runner.node.mjs --step=darwin-x64-build-bun"
     - buildkite-agent artifact upload vm.log || echo "No VM log to upload"
-    - tart delete bun-build-1748826445916-dec814da-6569-4ea6-abce-9eba22f3fa06
+    - tart delete bun-build-1748826764907-a5d3cc10-a12c-4d6b-b273-83a7478a4cd0
   
 - 
     key: "darwin-x64-13-test-bun"
@@ -638,6 +650,7 @@ steps:
     - darwin-x64-build-bun
     - build-base-image
     agents:
+      queue: darwin
       os: darwin
       arch: x64
       tart: true
@@ -673,18 +686,19 @@ steps:
     - log stream --predicate 'process == "tart" OR process CONTAINS "Virtualization"' > tart.log 2>&1 &
     - TART_LOG_PID=$!
     - trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT
-    - tart clone bun-build-macos-1.2.14 bun-build-1748826445920-a66c27ee-4b98-4ae9-90ff-c6ad407f7d42
-    - tart run bun-build-1748826445920-a66c27ee-4b98-4ae9-90ff-c6ad407f7d42 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
+    - tart clone bun-build-macos-1.2.14 bun-build-1748826764910-2c747ef7-863b-43c9-a78b-e9387a720506
+    - tart run bun-build-1748826764910-2c747ef7-863b-43c9-a78b-e9387a720506 --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &
     - sleep 30
     - chmod +x .buildkite/scripts/run-vm-command.sh
-    - .buildkite/scripts/run-vm-command.sh bun-build-1748826445920-a66c27ee-4b98-4ae9-90ff-c6ad407f7d42 "cd '/Volumes/My Shared Files/workspace' && ./scripts/runner.node.mjs --step=darwin-x64-build-bun"
+    - .buildkite/scripts/run-vm-command.sh bun-build-1748826764910-2c747ef7-863b-43c9-a78b-e9387a720506 "cd '/Volumes/My Shared Files/workspace' && ./scripts/runner.node.mjs --step=darwin-x64-build-bun"
     - buildkite-agent artifact upload vm.log || echo "No VM log to upload"
-    - tart delete bun-build-1748826445920-a66c27ee-4b98-4ae9-90ff-c6ad407f7d42
+    - tart delete bun-build-1748826764910-2c747ef7-863b-43c9-a78b-e9387a720506
   
 - 
     key: release
     label: ":rocket:"
     agents:
+      queue: darwin
       os: darwin
       arch: arm64
       tart: true
@@ -699,6 +713,7 @@ steps:
     key: benchmark
     label: 📊
     agents:
+      queue: darwin
       os: darwin
       arch: arm64
       tart: true
