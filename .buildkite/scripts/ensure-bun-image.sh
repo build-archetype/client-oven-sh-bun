@@ -313,8 +313,8 @@ main() {
     # Start VM with shared directory
     log "Starting VM: $LOCAL_IMAGE_NAME"
     tart run "$LOCAL_IMAGE_NAME" --dir=workspace:"$PWD" --no-graphics &
-    VM_PID=$!
-    
+VM_PID=$!
+
     # Wait for VM to boot
     log "Waiting for VM to boot (60 seconds)..."
     sleep 60
@@ -381,10 +381,10 @@ main() {
     if [ "$SSH_SUCCESS" != "true" ]; then
         log "❌ Bootstrap failed after 30 SSH attempts"
         kill $VM_PID 2>/dev/null || true
-        exit 1
+    exit 1
     fi
-    
-    # Stop the VM gracefully
+
+# Stop the VM gracefully
     log "Shutting down VM..."
     sshpass -p "admin" ssh -o StrictHostKeyChecking=no admin@"$VM_IP" "sudo shutdown -h now" || true
     

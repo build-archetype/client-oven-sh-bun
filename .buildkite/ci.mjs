@@ -493,8 +493,9 @@ function getBuildVendorStep(platform, options) {
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
         `.buildkite/scripts/run-vm-command.sh ${vmName} "ls -la && ${getBuildCommand(platform, options)} --target dependencies"`,
-        'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
-        `tart delete ${vmName}`,
+        'buildkite-agent artifact upload vm.log || true',
+        `echo "Checking VM status before cleanup..."`,
+        `if tart list | grep -q "${vmName}"; then echo "VM ${vmName} exists, deleting..."; tart delete ${vmName} || true; else echo "VM ${vmName} not found - may have been cleaned up earlier or crashed"; fi || true`,
         // Log final state
         "echo '=== FINAL TART STATE (BUILD VENDOR) ==='",
         "echo 'Available Tart VMs:'",
@@ -550,13 +551,14 @@ function getBuildCppStep(platform, options) {
         'chmod +x .buildkite/scripts/run-vm-command.sh',
         `.buildkite/scripts/run-vm-command.sh ${vmName} "ls -la && ${command} --target bun"`,
         `.buildkite/scripts/run-vm-command.sh ${vmName} "ls -la && ${command} --target dependencies"`,
-        'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
-        `tart delete ${vmName}`,
+        'buildkite-agent artifact upload vm.log || true',
+        `echo "Checking VM status before cleanup..."`,
+        `if tart list | grep -q "${vmName}"; then echo "VM ${vmName} exists, deleting..."; tart delete ${vmName} || true; else echo "VM ${vmName} not found - may have been cleaned up earlier or crashed"; fi || true`,
         // Log final state
         "echo '=== FINAL TART STATE (BUILD CPP) ==='",
         "echo 'Available Tart VMs:'",
         "tart list || echo 'Failed to list VMs'",
-        "echo '==================================='"
+        "echo '====================================='",
       ]
     };
   }
@@ -620,8 +622,9 @@ function getBuildZigStep(platform, options) {
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
         `.buildkite/scripts/run-vm-command.sh ${vmName} "ls -la && ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}"`,
-        'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
-        `tart delete ${vmName}`,
+        'buildkite-agent artifact upload vm.log || true',
+        `echo "Checking VM status before cleanup..."`,
+        `if tart list | grep -q "${vmName}"; then echo "VM ${vmName} exists, deleting..."; tart delete ${vmName} || true; else echo "VM ${vmName} not found - may have been cleaned up earlier or crashed"; fi || true`,
         // Log final state
         "echo '=== FINAL TART STATE (BUILD ZIG) ==='",
         "echo 'Available Tart VMs:'",
@@ -633,7 +636,7 @@ function getBuildZigStep(platform, options) {
 
   return {
     ...baseStep,
-    command: `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`
+    command: `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
   };
 }
 
@@ -676,8 +679,9 @@ function getLinkBunStep(platform, options) {
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
         `.buildkite/scripts/run-vm-command.sh ${vmName} "ls -la && ${getBuildCommand(platform, options)} --target bun"`,
-        'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
-        `tart delete ${vmName}`,
+        'buildkite-agent artifact upload vm.log || true',
+        `echo "Checking VM status before cleanup..."`,
+        `if tart list | grep -q "${vmName}"; then echo "VM ${vmName} exists, deleting..."; tart delete ${vmName} || true; else echo "VM ${vmName} not found - may have been cleaned up earlier or crashed"; fi || true`,
         // Log final state
         "echo '=== FINAL TART STATE (LINK BUN) ==='",
         "echo 'Available Tart VMs:'",
@@ -764,13 +768,14 @@ function getTestBunStep(platform, options, testOptions = {}) {
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
         `.buildkite/scripts/run-vm-command.sh ${vmName} "./scripts/runner.node.mjs ${args.join(" ")}"`,
-        'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
-        `tart delete ${vmName}`,
+        'buildkite-agent artifact upload vm.log || true',
+        `echo "Checking VM status before cleanup..."`,
+        `if tart list | grep -q "${vmName}"; then echo "VM ${vmName} exists, deleting..."; tart delete ${vmName} || true; else echo "VM ${vmName} not found - may have been cleaned up earlier or crashed"; fi || true`,
         // Log final state
         "echo '=== FINAL TART STATE (TEST BUN) ==='",
         "echo 'Available Tart VMs:'",
         "tart list || echo 'Failed to list VMs'",
-        "echo '=================================='"
+        "echo '==================================='"
       ]
     };
   }
