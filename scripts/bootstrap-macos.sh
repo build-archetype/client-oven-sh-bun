@@ -362,6 +362,40 @@ install_rust() {
     print "✅ Rust installed successfully"
 }
 
+install_buildkite_agent() {
+    print "Installing Buildkite Agent..."
+    
+    local buildkite_home="/opt/buildkite-agent"
+    create_directory "$buildkite_home"
+    
+    local curl="$(require curl)"
+    local sh="$(require sh)"
+    
+    # Download and run the official Buildkite Agent installer
+    local installer_script=$(download_file "https://raw.githubusercontent.com/buildkite/agent/main/install.sh")
+    
+    # Set environment for the installer
+    export DESTINATION="$buildkite_home"
+    export INSTALL_PATH="$buildkite_home"
+    
+    execute "$sh" "$installer_script"
+    
+    # Create symlink in system bin directory
+    local bin_dir="/usr/local/bin"
+    if [ "$(uname -m)" = "arm64" ] && [ -d "/opt/homebrew/bin" ]; then
+        bin_dir="/opt/homebrew/bin"
+    fi
+    
+    execute sudo ln -sf "$buildkite_home/bin/buildkite-agent" "$bin_dir/buildkite-agent"
+    
+    # Create default config directory
+    local config_dir="$HOME/.buildkite-agent"
+    create_directory "$config_dir"
+    execute sudo chown -R "$(whoami):staff" "$config_dir"
+    
+    print "✅ Buildkite Agent installed successfully: $(buildkite-agent --version)"
+}
+
 install_common_software() {
     print "Installing common software..."
     
@@ -379,6 +413,7 @@ install_common_software() {
     install_rosetta
     install_nodejs
     install_bun
+    install_buildkite_agent
 }
 
 install_build_essentials() {
@@ -412,7 +447,7 @@ install_docker() {
 verify_installations() {
     print "Verifying installations..."
     
-    local tools="bun cmake ninja go clang rustc cargo make python3 libtool ruby perl ccache zig"
+    local tools="bun cmake ninja go clang rustc cargo make python3 libtool ruby perl ccache zig buildkite-agent"
     local missing_tools=""
     local verification_failed=false
     
@@ -461,6 +496,9 @@ verify_installations() {
                 ;;
             zig) 
                 version_output="$(zig version 2>/dev/null || echo 'version check failed')" 
+                ;;
+            buildkite-agent) 
+                version_output="$(buildkite-agent --version 2>/dev/null || echo 'version check failed')" 
                 ;;
             esac
             print "✅ $tool: $version_output"

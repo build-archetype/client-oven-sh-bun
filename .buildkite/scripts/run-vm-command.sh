@@ -106,4 +106,73 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
 '"
 
 echo "=== RUNNING COMMAND IN LOCAL WORKSPACE ==="
-exec sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c 'cd /tmp/workspace && $COMMAND'" 
+
+# Create environment variables string for Buildkite
+BUILDKITE_ENV=""
+if [ -n "$BUILDKITE_JOB_ID" ]; then
+    BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE_JOB_ID='$BUILDKITE_JOB_ID';"
+fi
+if [ -n "$BUILDKITE_BUILD_ID" ]; then
+    BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE_BUILD_ID='$BUILDKITE_BUILD_ID';"
+fi
+if [ -n "$BUILDKITE_STEP_KEY" ]; then
+    BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE_STEP_KEY='$BUILDKITE_STEP_KEY';"
+fi
+if [ -n "$BUILDKITE_AGENT_ACCESS_TOKEN" ]; then
+    BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE_AGENT_ACCESS_TOKEN='$BUILDKITE_AGENT_ACCESS_TOKEN';"
+fi
+if [ -n "$BUILDKITE_AGENT_ENDPOINT" ]; then
+    BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE_AGENT_ENDPOINT='$BUILDKITE_AGENT_ENDPOINT';"
+fi
+
+# Always set BUILDKITE=true and CI=true for CMake
+BUILDKITE_ENV="$BUILDKITE_ENV export BUILDKITE='true';"
+BUILDKITE_ENV="$BUILDKITE_ENV export CI='true';"
+
+# Ensure buildkite-agent is in PATH
+BUILDKITE_ENV="$BUILDKITE_ENV export PATH=\"\$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:\$PATH\";"
+
+echo "=== SETTING UP BUILDKITE AGENT IN VM ==="
+sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
+    # Check if buildkite-agent is already available
+    if command -v buildkite-agent >/dev/null 2>&1; then
+        echo \"✅ Buildkite agent already available: \$(buildkite-agent --version)\"
+    else
+        echo \"Installing buildkite-agent...\"
+        
+        # Try to install in user home first (faster fallback)
+        if [ ! -d \"\$HOME/.buildkite-agent\" ]; then
+            echo \"Downloading buildkite-agent installer...\"
+            curl -fsSL https://raw.githubusercontent.com/buildkite/agent/main/install.sh > /tmp/install-buildkite.sh
+            chmod +x /tmp/install-buildkite.sh
+            
+            # Install to user home directory
+            export DESTINATION=\$HOME/.buildkite-agent
+            bash /tmp/install-buildkite.sh
+            
+            # Add to PATH for this session
+            export PATH=\"\$HOME/.buildkite-agent/bin:\$PATH\"
+            
+            # Create system-wide symlink if possible
+            if sudo -n true 2>/dev/null; then
+                sudo ln -sf \"\$HOME/.buildkite-agent/bin/buildkite-agent\" \"/usr/local/bin/buildkite-agent\" 2>/dev/null || true
+            fi
+            
+            rm -f /tmp/install-buildkite.sh
+        else
+            # Already installed, just add to PATH
+            export PATH=\"\$HOME/.buildkite-agent/bin:\$PATH\"
+        fi
+        
+        echo \"✅ Buildkite agent setup complete\"
+    fi
+    
+    # Verify installation
+    if command -v buildkite-agent >/dev/null 2>&1; then
+        echo \"✅ Buildkite agent ready: \$(buildkite-agent --version)\"
+    else
+        echo \"⚠️  Buildkite agent installation may have failed, but continuing...\"
+    fi
+'"
+
+exec sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '$BUILDKITE_ENV cd /tmp/workspace && $COMMAND'" 

@@ -412,7 +412,6 @@ function getBuildEnv(target, options) {
   const revision = typeof canary === "number" ? canary : 1;
 
   return {
-    BUILDKITE: "true",
     ENABLE_BASELINE: baseline ? "ON" : "OFF",
     ENABLE_CANARY: revision > 0 ? "ON" : "OFF",
     CANARY_REVISION: revision,
