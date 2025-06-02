@@ -149,12 +149,12 @@ get_local_image_info() {
     done
     
     # Check if our specific image exists
-    if echo "$tart_output" | grep -q "^${image_name}"; then
+    if echo "$tart_output" | grep -q "^local[[:space:]]\+${image_name}[[:space:]]"; then
         log "✅ Found exact match for: $image_name"
         echo "exists"
     else
         log "❌ No exact match found for: $image_name"
-        log "Looking for pattern: ^${image_name}"
+        log "Looking for pattern: ^local[[:space:]]\+${image_name}[[:space:]]"
         
         # Show similar images for debugging
         local similar=$(echo "$tart_output" | grep -i "bun\|macos" || echo "none")
