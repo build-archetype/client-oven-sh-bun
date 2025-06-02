@@ -108,7 +108,7 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
 echo "=== RUNNING COMMAND IN LOCAL WORKSPACE ==="
 
 echo "=== CREATING HOST ENVIRONMENT FILE ==="
-# Create shared environment file path
+# Use the same shared filesystem path that works for workspace copying
 SHARED_ENV_FILE="/Volumes/My Shared Files/buildkite_env.sh"
 
 echo "Creating environment file on host at: $SHARED_ENV_FILE"
@@ -157,20 +157,18 @@ echo "=== COPYING AND SOURCING ENVIRONMENT IN VM ==="
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     echo \"Copying environment file from shared filesystem...\"
     
-    # Copy the environment file to local VM storage
+    # Copy the environment file to local VM storage (same path as workspace)
     if [ -f \"/Volumes/My Shared Files/buildkite_env.sh\" ]; then
         cp \"/Volumes/My Shared Files/buildkite_env.sh\" /tmp/buildkite_env.sh
         chmod +x /tmp/buildkite_env.sh
         echo \"✅ Environment file copied to VM\"
         echo \"File size: \$(wc -l < /tmp/buildkite_env.sh) lines\"
     else
-        echo \"❌ Environment file not found in shared filesystem!\"
+        echo \"❌ Environment file not found at /Volumes/My Shared Files/buildkite_env.sh!\"
+        echo \"Available files in shared directory:\"
+        ls -la \"/Volumes/My Shared Files\" | head -10
         exit 1
     fi
-    
-    echo \"\"
-    echo \"First 10 lines of environment file:\"
-    head -10 /tmp/buildkite_env.sh
     
     echo \"\"
     echo \"BUILDKITE_* variables in file:\"
@@ -181,7 +179,7 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     source /tmp/buildkite_env.sh
     
     echo \"\"
-    echo \"=== ENVIRONMENT VERIFICATION IN VM ==="
+    echo \"=== ENVIRONMENT VERIFICATION IN VM ===\"
     echo \"After sourcing environment file:\"
     echo \"  BUILDKITE: \$BUILDKITE\"
     echo \"  CI: \$CI\"
@@ -190,11 +188,7 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     echo \"  CANARY_REVISION: \$CANARY_REVISION\"
     echo \"  BUN_LINK_ONLY: \$BUN_LINK_ONLY\"
     echo \"\"
-    echo \"Total BUILDKITE_* variables available:\"
-    env | grep \"^BUILDKITE_\" | wc -l
-    echo \"\"
-    echo \"All BUILDKITE_* variables:\"
-    env | grep \"^BUILDKITE_\" | head -10
+    echo \"Total BUILDKITE_* variables available: \$(env | grep \"^BUILDKITE_\" | wc -l)\"
 '"
 
 echo "=== ENSURING BUILDKITE AGENT AVAILABILITY ==="
