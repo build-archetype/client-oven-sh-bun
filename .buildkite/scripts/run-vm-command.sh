@@ -57,55 +57,7 @@ SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerA
 # Execute command
 echo "Running command in VM: $COMMAND"
 
-# First, check Bun availability and version for debugging
-echo "=== BUN AVAILABILITY CHECK ==="
-sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
-    echo \"Current user: \$(whoami)\"
-    echo \"Current directory: \$(pwd)\"
-    echo \"PATH: \$PATH\"
-    echo \"\"
-    echo \"Checking Bun availability:\"
-    if command -v bun >/dev/null 2>&1; then
-        echo \"✅ Bun found at: \$(which bun)\"
-        echo \"✅ Bun version: \$(bun --version)\"
-        echo \"✅ Bun executable permissions: \$(ls -la \$(which bun))\"
-    else
-        echo \"❌ Bun not found in PATH\"
-        echo \"Checking common locations:\"
-        for loc in /usr/local/bin/bun /opt/homebrew/bin/bun /usr/bin/bun; do
-            if [ -f \"\$loc\" ]; then
-                echo \"  Found: \$loc (\$(ls -la \$loc))\"
-                echo \"  Version: \$(\$loc --version 2>/dev/null || echo 'failed to get version')\"
-            else
-                echo \"  Not found: \$loc\"
-            fi
-        done
-    fi
-    echo \"\"
-    echo \"Available binaries in PATH:\"
-    echo \$PATH | tr ':' '\n' | while read dir; do
-        if [ -d \"\$dir\" ] && [ -r \"\$dir\" ]; then
-            echo \"  \$dir: \$(ls \$dir 2>/dev/null | grep -E '^(bun|node|npm)' | head -3 || echo 'none')\"
-        fi
-    done
-'"
-
 echo "=== RUNNING ACTUAL COMMAND ==="
-
-# Copy workspace to local directory to avoid shared filesystem issues
-echo "=== COPYING WORKSPACE TO LOCAL DIRECTORY ==="
-sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
-    echo \"Creating local workspace directory...\"
-    rm -rf /tmp/workspace
-    mkdir -p /tmp/workspace
-    echo \"Copying files from shared directory...\"
-    rsync -av --exclude=\"build\" --exclude=\"node_modules\" --exclude=\"vendor\" \"/Volumes/My Shared Files/workspace/\" /tmp/workspace/
-    echo \"✅ Workspace copied to /tmp/workspace\"
-    echo \"Contents:\"
-    ls -la /tmp/workspace | head -10
-'"
-
-echo "=== RUNNING COMMAND IN LOCAL WORKSPACE ==="
 
 echo "=== CREATING HOST ENVIRONMENT FILE ==="
 # Create environment file directly in workspace directory (gets shared to VM)
@@ -152,6 +104,29 @@ echo "  File: $SHARED_ENV_FILE"
 echo "  Size: $(wc -l < "$SHARED_ENV_FILE") lines"
 echo "  First 10 BUILDKITE_* variables:"
 grep '^export BUILDKITE_' "$SHARED_ENV_FILE" | head -10
+
+# Copy workspace to local directory to avoid shared filesystem issues
+echo "=== COPYING WORKSPACE TO LOCAL DIRECTORY ==="
+sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
+    echo \"Creating local workspace directory...\"
+    rm -rf /tmp/workspace
+    mkdir -p /tmp/workspace
+    echo \"Copying files from shared directory...\"
+    rsync -av --exclude=\"build\" --exclude=\"node_modules\" --exclude=\"vendor\" \"/Volumes/My Shared Files/workspace/\" /tmp/workspace/
+    echo \"✅ Workspace copied to /tmp/workspace\"
+    echo \"Contents:\"
+    ls -la /tmp/workspace | head -10
+    echo \"\"
+    echo \"Checking for environment file:\"
+    if [ -f \"/tmp/workspace/buildkite_env.sh\" ]; then
+        echo \"✅ Environment file found: /tmp/workspace/buildkite_env.sh\"
+        echo \"Size: \$(wc -l < /tmp/workspace/buildkite_env.sh) lines\"
+    else
+        echo \"❌ Environment file NOT found at /tmp/workspace/buildkite_env.sh\"
+    fi
+'"
+
+echo "=== RUNNING COMMAND IN LOCAL WORKSPACE ==="
 
 echo "=== COPYING AND SOURCING ENVIRONMENT IN VM ==="
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
