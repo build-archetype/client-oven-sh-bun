@@ -481,9 +481,7 @@ function getBuildVendorStep(platform, options) {
       command: [
         // Log initial state
         "echo '=== INITIAL TART STATE (BUILD VENDOR) ==='",
-        "echo 'Available Tart images:'",
-        "tart list images || echo 'Failed to list images'",
-        "echo 'Available Tart VMs:'", 
+        "echo 'Available Tart VMs:'",
         "tart list || echo 'Failed to list VMs'",
         "echo '========================================='",
         'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
@@ -499,8 +497,6 @@ function getBuildVendorStep(platform, options) {
         `tart delete ${vmName}`,
         // Log final state
         "echo '=== FINAL TART STATE (BUILD VENDOR) ==='",
-        "echo 'Available Tart images:'",
-        "tart list images || echo 'Failed to list images'",
         "echo 'Available Tart VMs:'",
         "tart list || echo 'Failed to list VMs'",
         "echo '======================================'"
@@ -541,9 +537,7 @@ function getBuildCppStep(platform, options) {
       command: [
         // Log initial state
         "echo '=== INITIAL TART STATE (BUILD CPP) ==='",
-        "echo 'Available Tart images:'",
-        "tart list images || echo 'Failed to list images'",
-        "echo 'Available Tart VMs:'", 
+        "echo 'Available Tart VMs:'",
         "tart list || echo 'Failed to list VMs'",
         "echo '======================================'",
         'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
@@ -560,8 +554,6 @@ function getBuildCppStep(platform, options) {
         `tart delete ${vmName}`,
         // Log final state
         "echo '=== FINAL TART STATE (BUILD CPP) ==='",
-        "echo 'Available Tart images:'",
-        "tart list images || echo 'Failed to list images'",
         "echo 'Available Tart VMs:'",
         "tart list || echo 'Failed to list VMs'",
         "echo '==================================='"
@@ -616,9 +608,7 @@ function getBuildZigStep(platform, options) {
       command: [
         // Log initial state
         "echo '=== INITIAL TART STATE (BUILD ZIG) ==='",
-        "echo 'Available Tart images:'",
-        "tart list images || echo 'Failed to list images'",
-        "echo 'Available Tart VMs:'", 
+        "echo 'Available Tart VMs:'",
         "tart list || echo 'Failed to list VMs'",
         "echo '======================================'",
         'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
@@ -634,8 +624,6 @@ function getBuildZigStep(platform, options) {
         `tart delete ${vmName}`,
         // Log final state
         "echo '=== FINAL TART STATE (BUILD ZIG) ==='",
-        "echo 'Available Tart images:'",
-        "tart list images || echo 'Failed to list images'",
         "echo 'Available Tart VMs:'",
         "tart list || echo 'Failed to list VMs'",
         "echo '==================================='"
@@ -676,9 +664,7 @@ function getLinkBunStep(platform, options) {
       command: [
         // Log initial state
         "echo '=== INITIAL TART STATE (LINK BUN) ==='",
-        "echo 'Available Tart images:'",
-        "tart list images || echo 'Failed to list images'",
-        "echo 'Available Tart VMs:'", 
+        "echo 'Available Tart VMs:'",
         "tart list || echo 'Failed to list VMs'",
         "echo '====================================='",
         'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
@@ -694,8 +680,6 @@ function getLinkBunStep(platform, options) {
         `tart delete ${vmName}`,
         // Log final state
         "echo '=== FINAL TART STATE (LINK BUN) ==='",
-        "echo 'Available Tart images:'",
-        "tart list images || echo 'Failed to list images'",
         "echo 'Available Tart VMs:'",
         "tart list || echo 'Failed to list VMs'",
         "echo '=================================='"
@@ -768,9 +752,7 @@ function getTestBunStep(platform, options, testOptions = {}) {
       command: [
         // Log initial state
         "echo '=== INITIAL TART STATE (TEST BUN) ==='",
-        "echo 'Available Tart images:'",
-        "tart list images || echo 'Failed to list images'",
-        "echo 'Available Tart VMs:'", 
+        "echo 'Available Tart VMs:'",
         "tart list || echo 'Failed to list VMs'",
         "echo '====================================='",
         'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
@@ -786,8 +768,6 @@ function getTestBunStep(platform, options, testOptions = {}) {
         `tart delete ${vmName}`,
         // Log final state
         "echo '=== FINAL TART STATE (TEST BUN) ==='",
-        "echo 'Available Tart images:'",
-        "tart list images || echo 'Failed to list images'",
         "echo 'Available Tart VMs:'",
         "tart list || echo 'Failed to list VMs'",
         "echo '=================================='"
@@ -1302,9 +1282,7 @@ function getBuildBaseImageStep() {
     command: [
       // Log initial state
       "echo '=== INITIAL TART STATE ==='",
-      "echo 'Available Tart images:'",
-      "tart list images || echo 'Failed to list images'",
-      "echo 'Available Tart VMs:'", 
+      "echo 'Available Tart VMs:'",
       "tart list || echo 'Failed to list VMs'",
       "echo '=========================='",
       // Set up Docker config for authentication
@@ -1324,10 +1302,8 @@ function getBuildBaseImageStep() {
       "rm -f /tmp/github-token.txt /tmp/github-username.txt",
       // Log final state
       "echo '=== FINAL TART STATE ==='",
-      "echo 'Available Tart images:'",
-      "tart list images || echo 'Failed to list images'",
       "echo 'Available Tart VMs:'",
-      "tart list || echo 'Failed to list VMs'", 
+      "tart list || echo 'Failed to list VMs'",
       "echo '========================'"
     ],
     retry: {
