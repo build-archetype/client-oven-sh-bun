@@ -479,6 +479,13 @@ function getBuildVendorStep(platform, options) {
     return {
       ...baseStep,
       command: [
+        // Log initial state
+        "echo '=== INITIAL TART STATE (BUILD VENDOR) ==='",
+        "echo 'Available Tart images:'",
+        "tart list images || echo 'Failed to list images'",
+        "echo 'Available Tart VMs:'", 
+        "tart list || echo 'Failed to list VMs'",
+        "echo '========================================='",
         'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
@@ -487,9 +494,16 @@ function getBuildVendorStep(platform, options) {
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ls -la && ${getBuildCommand(platform, options)} --target dependencies"`,
+        `.buildkite/scripts/run-vm-command.sh ${vmName} "ls -la && ${getBuildCommand(platform, options)} --target dependencies"`,
         'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
-        `tart delete ${vmName}`
+        `tart delete ${vmName}`,
+        // Log final state
+        "echo '=== FINAL TART STATE (BUILD VENDOR) ==='",
+        "echo 'Available Tart images:'",
+        "tart list images || echo 'Failed to list images'",
+        "echo 'Available Tart VMs:'",
+        "tart list || echo 'Failed to list VMs'",
+        "echo '======================================'"
       ]
     };
   }
@@ -525,6 +539,13 @@ function getBuildCppStep(platform, options) {
     return {
       ...baseStep,
       command: [
+        // Log initial state
+        "echo '=== INITIAL TART STATE (BUILD CPP) ==='",
+        "echo 'Available Tart images:'",
+        "tart list images || echo 'Failed to list images'",
+        "echo 'Available Tart VMs:'", 
+        "tart list || echo 'Failed to list VMs'",
+        "echo '======================================'",
         'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
@@ -533,10 +554,17 @@ function getBuildCppStep(platform, options) {
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ${command} --target bun"`,
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ${command} --target dependencies"`,
+        `.buildkite/scripts/run-vm-command.sh ${vmName} "ls -la && ${command} --target bun"`,
+        `.buildkite/scripts/run-vm-command.sh ${vmName} "ls -la && ${command} --target dependencies"`,
         'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
-        `tart delete ${vmName}`
+        `tart delete ${vmName}`,
+        // Log final state
+        "echo '=== FINAL TART STATE (BUILD CPP) ==='",
+        "echo 'Available Tart images:'",
+        "tart list images || echo 'Failed to list images'",
+        "echo 'Available Tart VMs:'",
+        "tart list || echo 'Failed to list VMs'",
+        "echo '==================================='"
       ]
     };
   }
@@ -586,6 +614,13 @@ function getBuildZigStep(platform, options) {
     return {
       ...baseStep,
       command: [
+        // Log initial state
+        "echo '=== INITIAL TART STATE (BUILD ZIG) ==='",
+        "echo 'Available Tart images:'",
+        "tart list images || echo 'Failed to list images'",
+        "echo 'Available Tart VMs:'", 
+        "tart list || echo 'Failed to list VMs'",
+        "echo '======================================'",
         'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
@@ -594,9 +629,16 @@ function getBuildZigStep(platform, options) {
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}"`,
+        `.buildkite/scripts/run-vm-command.sh ${vmName} "ls -la && ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}"`,
         'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
-        `tart delete ${vmName}`
+        `tart delete ${vmName}`,
+        // Log final state
+        "echo '=== FINAL TART STATE (BUILD ZIG) ==='",
+        "echo 'Available Tart images:'",
+        "tart list images || echo 'Failed to list images'",
+        "echo 'Available Tart VMs:'",
+        "tart list || echo 'Failed to list VMs'",
+        "echo '==================================='"
       ]
     };
   }
@@ -632,6 +674,13 @@ function getLinkBunStep(platform, options) {
     return {
       ...baseStep,
       command: [
+        // Log initial state
+        "echo '=== INITIAL TART STATE (LINK BUN) ==='",
+        "echo 'Available Tart images:'",
+        "tart list images || echo 'Failed to list images'",
+        "echo 'Available Tart VMs:'", 
+        "tart list || echo 'Failed to list VMs'",
+        "echo '====================================='",
         'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
@@ -640,9 +689,16 @@ function getLinkBunStep(platform, options) {
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ${getBuildCommand(platform, options)} --target bun"`,
+        `.buildkite/scripts/run-vm-command.sh ${vmName} "ls -la && ${getBuildCommand(platform, options)} --target bun"`,
         'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
-        `tart delete ${vmName}`
+        `tart delete ${vmName}`,
+        // Log final state
+        "echo '=== FINAL TART STATE (LINK BUN) ==='",
+        "echo 'Available Tart images:'",
+        "tart list images || echo 'Failed to list images'",
+        "echo 'Available Tart VMs:'",
+        "tart list || echo 'Failed to list VMs'",
+        "echo '=================================='"
       ]
     };
   }
@@ -710,6 +766,13 @@ function getTestBunStep(platform, options, testOptions = {}) {
     return {
       ...baseStep,
       command: [
+        // Log initial state
+        "echo '=== INITIAL TART STATE (TEST BUN) ==='",
+        "echo 'Available Tart images:'",
+        "tart list images || echo 'Failed to list images'",
+        "echo 'Available Tart VMs:'", 
+        "tart list || echo 'Failed to list VMs'",
+        "echo '====================================='",
         'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
         'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
         'TART_LOG_PID=$!',
@@ -718,9 +781,16 @@ function getTestBunStep(platform, options, testOptions = {}) {
         `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
         'sleep 30',
         'chmod +x .buildkite/scripts/run-vm-command.sh',
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "cd '/Volumes/My Shared Files/workspace' && ./scripts/runner.node.mjs ${args.join(" ")}"`,
+        `.buildkite/scripts/run-vm-command.sh ${vmName} "./scripts/runner.node.mjs ${args.join(" ")}"`,
         'buildkite-agent artifact upload vm.log || echo "No VM log to upload"',
-        `tart delete ${vmName}`
+        `tart delete ${vmName}`,
+        // Log final state
+        "echo '=== FINAL TART STATE (TEST BUN) ==='",
+        "echo 'Available Tart images:'",
+        "tart list images || echo 'Failed to list images'",
+        "echo 'Available Tart VMs:'",
+        "tart list || echo 'Failed to list VMs'",
+        "echo '=================================='"
       ]
     };
   }
@@ -1230,6 +1300,13 @@ function getBuildBaseImageStep() {
       tart: true
     },
     command: [
+      // Log initial state
+      "echo '=== INITIAL TART STATE ==='",
+      "echo 'Available Tart images:'",
+      "tart list images || echo 'Failed to list images'",
+      "echo 'Available Tart VMs:'", 
+      "tart list || echo 'Failed to list VMs'",
+      "echo '=========================='",
       // Set up Docker config for authentication
       "mkdir -p $HOME/.docker",
       "cat > $HOME/.docker/config.json << EOF",
@@ -1244,7 +1321,14 @@ function getBuildBaseImageStep() {
       "set -x",
       ".buildkite/scripts/ensure-bun-image.sh 2>&1 | tee -a base-image-build.log",
       // Clean up credentials
-      "rm -f /tmp/github-token.txt /tmp/github-username.txt"
+      "rm -f /tmp/github-token.txt /tmp/github-username.txt",
+      // Log final state
+      "echo '=== FINAL TART STATE ==='",
+      "echo 'Available Tart images:'",
+      "tart list images || echo 'Failed to list images'",
+      "echo 'Available Tart VMs:'",
+      "tart list || echo 'Failed to list VMs'", 
+      "echo '========================'"
     ],
     retry: {
       automatic: [
@@ -1257,7 +1341,7 @@ function getBuildBaseImageStep() {
       "base-image-build.log"
     ],
     soft_fail: false,
-    timeout_in_minutes: 90
+    timeout_in_minutes: 180
   };
 }
 
