@@ -325,13 +325,18 @@ function getCppAgent(platform, options) {
  * @returns {Agent}
  */
 function getZigAgent(platform, options) {
-  const { arch } = platform;
+  const { os, arch } = platform;
 
-  // Uncomment to restore to using macOS on-prem for Zig.
-  // return {
-  //   queue: "build-zig",
-  // };
+  // Use macOS agents for darwin platforms since they need to run Tart commands
+  if (os === "darwin") {
+    return {
+      os: "darwin",
+      arch: arch === "aarch64" ? "arm64" : arch,
+      tart: true,
+    };
+  }
 
+  // Use Linux EC2 agents for non-macOS platforms
   return getEc2Agent(
     {
       os: "linux",
