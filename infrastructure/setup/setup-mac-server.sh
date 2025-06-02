@@ -140,11 +140,34 @@ if [ "$goto_privileged_setup" = false ]; then
     prompt_secret GITHUB_TOKEN "Enter your GitHub Token (for ghcr.io pushes)"
   fi
 
-  # Store GITHUB_USERNAME and GITHUB_TOKEN in temp files for root context
-  echo "$GITHUB_USERNAME" > /tmp/github-username.txt
-  chmod 600 /tmp/github-username.txt
-  echo "$GITHUB_TOKEN" > /tmp/github-token.txt
-  chmod 600 /tmp/github-token.txt
+  # Create dedicated CI keychain and store credentials securely
+  CI_KEYCHAIN="$REAL_HOME/Library/Keychains/bun-ci.keychain-db"
+  CI_KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+  echo_color "$BLUE" "Creating secure CI keychain..."
+  # Create the keychain
+  security create-keychain -p "$CI_KEYCHAIN_PASSWORD" "$CI_KEYCHAIN"
+  # Add to keychain search list
+  security list-keychains -d user -s "$CI_KEYCHAIN" $(security list-keychains -d user | sed s/\"//g)
+  # Set keychain to not lock automatically and not require password for access
+  security set-keychain-settings "$CI_KEYCHAIN"
+  # Unlock the keychain (it will stay unlocked due to settings above)
+  security unlock-keychain -p "$CI_KEYCHAIN_PASSWORD" "$CI_KEYCHAIN"
+
+  # Store GitHub credentials in the CI keychain
+  echo_color "$BLUE" "Storing GitHub credentials in secure keychain..."
+  security add-generic-password -a "bun-ci" -s "github-username" -w "$GITHUB_USERNAME" -k "$CI_KEYCHAIN"
+  security add-generic-password -a "bun-ci" -s "github-token" -w "$GITHUB_TOKEN" -k "$CI_KEYCHAIN"
+
+  # Store keychain password securely for later access
+  echo "$CI_KEYCHAIN_PASSWORD" > "$REAL_HOME/.buildkite-agent/ci-keychain-password.txt"
+  chmod 600 "$REAL_HOME/.buildkite-agent/ci-keychain-password.txt"
+  chown "$REAL_USER:staff" "$REAL_HOME/.buildkite-agent/ci-keychain-password.txt"
+
+  # Set ownership of keychain
+  chown "$REAL_USER:staff" "$CI_KEYCHAIN"
+
+  echo_color "$GREEN" "✅ Credentials stored securely in CI keychain"
 
   # 2. Prometheus credentials (commented out for now)
   # prompt_secret PROMETHEUS_USER "Enter Prometheus admin username" "admin"
@@ -490,6 +513,41 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 # Set up build environment
 export HOMEBREW_NO_AUTO_UPDATE=1
 export HOMEBREW_NO_INSTALL_CLEANUP=1
+
+# Load GitHub credentials from CI keychain
+load_github_credentials() {
+    local ci_keychain="$HOME/Library/Keychains/bun-ci.keychain-db"
+    local keychain_password_file="$HOME/.buildkite-agent/ci-keychain-password.txt"
+    
+    # Check if keychain exists
+    if [ ! -f "$ci_keychain" ]; then
+        echo "⚠️  CI keychain not found at $ci_keychain"
+        return 1
+    fi
+    
+    # Unlock keychain if needed
+    if [ -f "$keychain_password_file" ]; then
+        local keychain_password=$(cat "$keychain_password_file")
+        security unlock-keychain -p "$keychain_password" "$ci_keychain" 2>/dev/null || true
+    fi
+    
+    # Load credentials
+    local username=$(security find-generic-password -a "bun-ci" -s "github-username" -w -k "$ci_keychain" 2>/dev/null || echo "")
+    local token=$(security find-generic-password -a "bun-ci" -s "github-token" -w -k "$ci_keychain" 2>/dev/null || echo "")
+    
+    if [ -n "$username" ] && [ -n "$token" ]; then
+        export GITHUB_USERNAME="$username"
+        export GITHUB_TOKEN="$token"
+        echo "✅ GitHub credentials loaded from keychain"
+        return 0
+    else
+        echo "⚠️  Failed to load GitHub credentials from keychain"
+        return 1
+    fi
+}
+
+# Load the credentials
+load_github_credentials || echo "⚠️  GitHub credentials not available - registry pushes may fail"
 EOF
 
 if [ -f "$REAL_HOME/.buildkite-agent/hooks/environment" ]; then

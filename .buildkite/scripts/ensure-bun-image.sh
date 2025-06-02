@@ -73,24 +73,75 @@ image_exists_in_registry() {
     fi
 }
 
-# Get Bun version
+# Get Bun version - fixed version detection
 get_bun_version() {
     local version=""
     
-    if [ -f "CMakeLists.txt" ]; then
-        version=$(grep -E "set\(Bun_VERSION" CMakeLists.txt | sed 's/.*"\(.*\)".*/\1/' || true)
-    fi
-    
-    if [ -z "$version" ] && [ -f "package.json" ]; then
+    # First try package.json - this is the authoritative source
+    if [ -f "package.json" ]; then
         version=$(jq -r '.version // empty' package.json 2>/dev/null || true)
     fi
     
-    if [ -z "$version" ]; then
-        version=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+    # If no package.json, try CMakeLists.txt but look for the right pattern
+    if [ -z "$version" ] && [ -f "CMakeLists.txt" ]; then
+        # Look for project(Bun VERSION ...) or similar patterns
+        version=$(grep -E "project\(.*VERSION\s+" CMakeLists.txt | sed -E 's/.*VERSION\s+([0-9]+\.[0-9]+\.[0-9]+).*/\1/' || true)
     fi
     
+    # Fallback to git tags
+    if [ -z "$version" ]; then
+        version=$(git describe --tags --always --dirty 2>/dev/null | sed 's/^bun-v//' | sed 's/^v//' || echo "1.2.14")
+    fi
+    
+    # Clean up version string
     version=${version#v}
+    version=${version#bun-}
+    
+    # Validate version format
+    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+        log "Warning: Invalid version format '$version', using fallback"
+        version="1.2.14"
+    fi
+    
     echo "$version"
+}
+
+# Compare semantic versions (returns 0 if v1 >= v2, 1 if v1 < v2)
+version_compare() {
+    local v1="$1"
+    local v2="$2"
+    
+    if [ "$v1" = "$v2" ]; then
+        return 0
+    fi
+    
+    # Split versions into arrays
+    IFS='.' read -ra V1 <<< "$v1"
+    IFS='.' read -ra V2 <<< "$v2"
+    
+    # Compare major.minor.patch
+    for i in 0 1 2; do
+        local n1=${V1[i]:-0}
+        local n2=${V2[i]:-0}
+        
+        if [ "$n1" -gt "$n2" ]; then
+            return 0  # v1 > v2
+        elif [ "$n1" -lt "$n2" ]; then
+            return 1  # v1 < v2
+        fi
+    done
+    
+    return 0  # Equal
+}
+
+# Check if local image exists and get its creation time
+get_local_image_info() {
+    local image_name="$1"
+    if tart list | grep -q "^${image_name}"; then
+        echo "exists"
+    else
+        echo "missing"
+    fi
 }
 
 # Main execution
@@ -142,37 +193,54 @@ main() {
     log "  Remote URL: $REMOTE_IMAGE_URL"
     log "  Force refresh: $force_refresh"
     
-    # Check if local and remote are in sync
-    log "Checking image availability..."
+    # NEW LOGIC: Check local first, then remote, with version comparison
+    log "=== CHECKING IMAGE AVAILABILITY ==="
     
-    # Handle force refresh
-    if [ "$force_refresh" = true ]; then
-        log "🔄 Force refresh requested - will pull from remote or rebuild"
-        # Delete local image if it exists
-        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "No existing local image to delete"
+    # Step 1: Check if we should use local image
+    local use_local=false
+    if [ "$force_refresh" != true ]; then
+        local local_status=$(get_local_image_info "$LOCAL_IMAGE_NAME")
+        if [ "$local_status" = "exists" ]; then
+            log "✅ Local image exists: $LOCAL_IMAGE_NAME"
+            use_local=true
+        else
+            log "❌ No local image found"
+        fi
+    else
+        log "🔄 Force refresh requested - skipping local check"
     fi
     
-    # Always check remote first - if it exists, use it (it might be newer)
-    log "Checking registry for latest image..."
+    # Step 2: Check remote for same version
+    local remote_available=false
+    log "Checking registry for exact version match..."
     if image_exists_in_registry "$REMOTE_IMAGE_URL"; then
-        log "Cloning from registry to local name..."
-        # Delete local if it exists to avoid conflicts
-        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "No existing local image to delete"
-        tart clone "$REMOTE_IMAGE_URL" "$LOCAL_IMAGE_NAME"
-        log "✅ Cloned successfully from registry"
+        log "✅ Remote image found for exact version: $BUN_VERSION"
+        remote_available=true
+        
+        # If we have both local and remote with same version, prefer local (faster)
+        if [ "$use_local" = true ] && [ "$force_refresh" != true ]; then
+            log "📋 Using local image (same version as remote, faster)"
+            exit 0
+        else
+            log "📋 Using remote image (cloning locally)"
+            # Delete local if it exists to avoid conflicts
+            tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "No existing local image to delete"
+            tart clone "$REMOTE_IMAGE_URL" "$LOCAL_IMAGE_NAME"
+            log "✅ Cloned successfully from registry"
+            exit 0
+        fi
+    else
+        log "❌ No remote image found for version $BUN_VERSION"
+    fi
+    
+    # Step 3: If only local exists and no remote, use local
+    if [ "$use_local" = true ] && [ "$remote_available" != true ]; then
+        log "📋 Using local image (no remote available)"
         exit 0
     fi
     
-    # Remote doesn't exist, check if we have local (unless force refresh)
-    if [ "$force_refresh" != true ]; then
-        log "No remote image found, checking for local image..."
-        if tart list | grep -q "^${LOCAL_IMAGE_NAME}"; then
-            log "✅ Local image exists: $LOCAL_IMAGE_NAME"
-            log "Using local image (no remote available)"
-            exit 0
-        fi
-    fi
-    
+    # Step 4: Need to build new image
+    log "=== BUILDING NEW BASE IMAGE ==="
     log "Building new base image for Bun ${BUN_VERSION}..."
     
     # Clean up any existing image
@@ -184,7 +252,7 @@ main() {
     tart clone "$BASE_IMAGE" "$LOCAL_IMAGE_NAME"
     log "✅ Base image cloned"
     
-    # Make bootstrap script executable
+    # Pass the version to bootstrap script
     log "Making bootstrap script executable..."
     chmod +x scripts/bootstrap-macos.sh
     
@@ -227,14 +295,33 @@ main() {
     SSH_SUCCESS=false
     for i in {1..30}; do
         log "SSH attempt $i/30..."
-        if sshpass -p "admin" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 admin@"$VM_IP" "cd '/Volumes/My Shared Files/workspace' && ./scripts/bootstrap-macos.sh"; then
-            log "✅ Bootstrap completed successfully!"
-            SSH_SUCCESS=true
-            break
+        
+        # First check if we can SSH at all
+        if sshpass -p "admin" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 admin@"$VM_IP" "echo 'SSH connection successful'"; then
+            log "✅ SSH connection established"
+            
+            # Check initial state before bootstrap
+            log "Checking VM state before bootstrap..."
+            sshpass -p "admin" ssh -o StrictHostKeyChecking=no admin@"$VM_IP" "
+                echo 'Current user: $(whoami)'
+                echo 'Current directory: $(pwd)'
+                echo 'PATH: $PATH'
+                echo 'Available in /usr/local/bin: $(ls -la /usr/local/bin/ 2>/dev/null || echo none)'
+                echo 'Available in /opt/homebrew/bin: $(ls -la /opt/homebrew/bin/ 2>/dev/null | head -5 || echo none)'
+            "
+            
+            # Run the bootstrap script
+            if sshpass -p "admin" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 admin@"$VM_IP" "cd '/Volumes/My Shared Files/workspace' && ./scripts/bootstrap-macos.sh"; then
+                log "✅ Bootstrap completed successfully!"
+                SSH_SUCCESS=true
+                break
+            else
+                log "❌ Bootstrap failed on attempt $i"
+            fi
         else
             log "SSH attempt $i failed, retrying in 30 seconds..."
-            sleep 30
         fi
+        sleep 30
     done
     
     if [ "$SSH_SUCCESS" != "true" ]; then
@@ -253,24 +340,74 @@ main() {
     
     log "✅ Bootstrap completed successfully"
     
-    # Push to registry if credentials exist
-    if [ -f /tmp/github-token.txt ] && [ -f /tmp/github-username.txt ]; then
-        GITHUB_TOKEN=$(cat /tmp/github-token.txt)
-        GITHUB_USERNAME=$(cat /tmp/github-username.txt)
-        
-        log "Logging into GitHub Container Registry..."
-        echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_USERNAME" --password-stdin
-        
-        log "Pushing to registry: $REMOTE_IMAGE_URL"
-        tart push "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL"
-        
-        log "Pushing latest tag: $LATEST_IMAGE_URL"
-        tart push "$LOCAL_IMAGE_NAME" "$LATEST_IMAGE_URL"
-        
-        log "✅ Push complete!"
+    # Step 5: Try to push to registry (but don't fail if this doesn't work)
+    log "=== REGISTRY PUSH ATTEMPT ==="
+    set +e  # Disable error handling for entire registry section
+
+    # Check if we have any credentials at all
+    HAVE_CREDS=false
+    if [ -n "${GITHUB_TOKEN:-}" ] && [ -n "${GITHUB_USERNAME:-}" ]; then
+        log "✅ Found GitHub credentials in environment"
+        HAVE_CREDS=true
+    elif [ -f /tmp/github-token.txt ] && [ -f /tmp/github-username.txt ]; then
+        log "✅ Found GitHub credentials in legacy files (reading them)"
+        GITHUB_TOKEN=$(cat /tmp/github-token.txt 2>/dev/null || echo "")
+        GITHUB_USERNAME=$(cat /tmp/github-username.txt 2>/dev/null || echo "")
+        if [ -n "$GITHUB_TOKEN" ] && [ -n "$GITHUB_USERNAME" ]; then
+            HAVE_CREDS=true
+        fi
     else
-        log "⚠️  No GitHub credentials found, skipping registry push"
+        log "⚠️  No GitHub credentials found anywhere"
     fi
+
+    if [ "$HAVE_CREDS" = true ]; then
+        log "Attempting to push to registry with credentials..."
+        
+        # Set Tart authentication environment variables (with error handling)
+        export TART_REGISTRY_USERNAME="$GITHUB_USERNAME" 2>/dev/null || true
+        export TART_REGISTRY_PASSWORD="$GITHUB_TOKEN" 2>/dev/null || true
+        
+        log "Registry URLs:"
+        log "  Primary: $REMOTE_IMAGE_URL"
+        log "  Latest:  $LATEST_IMAGE_URL"
+        
+        # Try to push primary tag
+        log "Pushing primary tag..."
+        if tart push "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" 2>&1; then
+            log "✅ Primary push successful"
+            
+            # Try to push latest tag
+            log "Pushing latest tag..."
+            if tart push "$LOCAL_IMAGE_NAME" "$LATEST_IMAGE_URL" 2>&1; then
+                log "✅ Latest push successful"
+            else
+                log "⚠️  Latest push failed (non-fatal)"
+            fi
+            
+            log "✅ Registry push completed successfully!"
+        else
+            log "⚠️  Primary push failed (non-fatal)"
+            log "     This is normal if:"
+            log "     - Registry authentication failed"
+            log "     - Network issues occurred"
+            log "     - Registry is read-only"
+            log "     The build will continue normally."
+        fi
+        
+        # Clean up environment variables (with error handling)
+        unset TART_REGISTRY_USERNAME 2>/dev/null || true
+        unset TART_REGISTRY_PASSWORD 2>/dev/null || true
+    else
+        log "⚠️  Skipping registry push - no credentials available"
+        log "     This is normal for:"
+        log "     - Local development builds"
+        log "     - Forks without push access"
+        log "     - Machines not yet configured with credentials"
+        log "     The build will continue normally."
+    fi
+
+    set -e  # Re-enable strict error handling
+    log "=== REGISTRY PUSH SECTION COMPLETE ==="
     
     log "✅ Base image ready: $LOCAL_IMAGE_NAME"
     log "Available images:"

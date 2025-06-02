@@ -56,4 +56,39 @@ SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerA
 
 # Execute command
 echo "Running command in VM: $COMMAND"
-exec sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "cd '/Volumes/My Shared Files/workspace' && $COMMAND" 
+
+# First, check Bun availability and version for debugging
+echo "=== BUN AVAILABILITY CHECK ==="
+sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
+    echo \"Current user: \$(whoami)\"
+    echo \"Current directory: \$(pwd)\"
+    echo \"PATH: \$PATH\"
+    echo \"\"
+    echo \"Checking Bun availability:\"
+    if command -v bun >/dev/null 2>&1; then
+        echo \"✅ Bun found at: \$(which bun)\"
+        echo \"✅ Bun version: \$(bun --version)\"
+        echo \"✅ Bun executable permissions: \$(ls -la \$(which bun))\"
+    else
+        echo \"❌ Bun not found in PATH\"
+        echo \"Checking common locations:\"
+        for loc in /usr/local/bin/bun /opt/homebrew/bin/bun /usr/bin/bun; do
+            if [ -f \"\$loc\" ]; then
+                echo \"  Found: \$loc (\$(ls -la \$loc))\"
+                echo \"  Version: \$(\$loc --version 2>/dev/null || echo 'failed to get version')\"
+            else
+                echo \"  Not found: \$loc\"
+            fi
+        done
+    fi
+    echo \"\"
+    echo \"Available binaries in PATH:\"
+    echo \$PATH | tr ':' '\n' | while read dir; do
+        if [ -d \"\$dir\" ] && [ -r \"\$dir\" ]; then
+            echo \"  \$dir: \$(ls \$dir 2>/dev/null | grep -E '^(bun|node|npm)' | head -3 || echo 'none')\"
+        fi
+    done
+'"
+
+echo "=== RUNNING ACTUAL COMMAND ==="
+exec sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c 'cd \"/Volumes/My Shared Files/workspace\" && $COMMAND'" 
