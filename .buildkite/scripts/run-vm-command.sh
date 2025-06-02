@@ -155,28 +155,18 @@ grep '^export BUILDKITE_' "$SHARED_ENV_FILE" | head -10
 
 echo "=== COPYING AND SOURCING ENVIRONMENT IN VM ==="
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
-    echo \"Copying environment file from shared filesystem...\"
+    echo \"Workspace copied - now sourcing environment from copied workspace...\"
     
-    # Copy the environment file from shared workspace to local VM storage
-    if [ -f \"/Volumes/My Shared Files/workspace/buildkite_env.sh\" ]; then
-        cp \"/Volumes/My Shared Files/workspace/buildkite_env.sh\" /tmp/buildkite_env.sh
-        chmod +x /tmp/buildkite_env.sh
-        echo \"✅ Environment file copied to VM\"
-        echo \"File size: \$(wc -l < /tmp/buildkite_env.sh) lines\"
+    # Source the environment file from the copied workspace
+    if [ -f \"/tmp/workspace/buildkite_env.sh\" ]; then
+        source /tmp/workspace/buildkite_env.sh
+        echo \"✅ Environment file sourced from /tmp/workspace/buildkite_env.sh\"
     else
-        echo \"❌ Environment file not found at /Volumes/My Shared Files/workspace/buildkite_env.sh!\"
-        echo \"Available files in shared workspace directory:\"
-        ls -la \"/Volumes/My Shared Files/workspace\" | head -10
+        echo \"❌ Environment file not found at /tmp/workspace/buildkite_env.sh!\"
+        echo \"Available files in /tmp/workspace:\"
+        ls -la /tmp/workspace | head -10
         exit 1
     fi
-    
-    echo \"\"
-    echo \"BUILDKITE_* variables in file:\"
-    grep \"^export BUILDKITE_\" /tmp/buildkite_env.sh | head -10
-    
-    echo \"\"
-    echo \"Sourcing environment file...\"
-    source /tmp/buildkite_env.sh
     
     echo \"\"
     echo \"=== ENVIRONMENT VERIFICATION IN VM ===\"
@@ -194,7 +184,7 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
 echo "=== ENSURING BUILDKITE AGENT AVAILABILITY ==="
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     # Source environment first
-    source /tmp/buildkite_env.sh
+    source /tmp/workspace/buildkite_env.sh
     
     # Check if buildkite-agent is already available
     if command -v buildkite-agent >/dev/null 2>&1; then
@@ -240,8 +230,9 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
 echo "=== EXECUTING FINAL COMMAND ==="
 
 # Execute the command and capture the exit code
+# Ensure environment is sourced before running any command
 set +e
-sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c 'source /tmp/buildkite_env.sh && cd /tmp/workspace && $COMMAND'"
+sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c 'source /tmp/workspace/buildkite_env.sh && $COMMAND'"
 EXIT_CODE=$?
 set -e
 
