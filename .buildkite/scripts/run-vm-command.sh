@@ -132,34 +132,19 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     # Instead of using sed with complex escaping, just recreate the file with correct paths
     # Source the original file and re-export with correct HOME
     source ~/workspace/buildkite_env.sh
-    export BUILDKITE_BUILD_PATH="\$HOME/workspace/build-workdir"
+    export BUILDKITE_BUILD_PATH=\"\$HOME/workspace/build-workdir\"
     echo \"✅ Updated BUILDKITE_BUILD_PATH to: \$BUILDKITE_BUILD_PATH\"
     
     echo \"Sourcing environment from shared filesystem...\"
     
-    # Source the environment file from the shared workspace using the symlink
-    if [ -f \"\$HOME/workspace/buildkite_env.sh\" ]; then
-        source \"\$HOME/workspace/buildkite_env.sh\"
-        echo \"✅ Environment file sourced from \$HOME/workspace/buildkite_env.sh\"
+    # Environment is already sourced above, just verify the symlink workspace exists
+    if [ -d \"\$HOME/workspace\" ]; then
+        echo \"✅ Environment ready and workspace symlink verified\"
     else
-        echo \"❌ Environment file not found at \$HOME/workspace/buildkite_env.sh!\"
-        echo \"Available files in workspace directory:\"
-        ls -la \"\$HOME/workspace\" | head -10
+        echo \"❌ Workspace symlink not found at \$HOME/workspace!\"
+        ls -la \"\$HOME/\"
         exit 1
     fi
-    
-    echo \"\"
-    echo \"=== ENVIRONMENT VERIFICATION IN VM ===\"
-    echo \"After sourcing environment file:\"
-    echo \"  BUILDKITE: \$BUILDKITE\"
-    echo \"  CI: \$CI\"
-    echo \"  BUILDKITE_BUILD_ID: \$BUILDKITE_BUILD_ID\"
-    echo \"  BUILDKITE_PIPELINE_SLUG: \$BUILDKITE_PIPELINE_SLUG\"
-    echo \"  CANARY_REVISION: \$CANARY_REVISION\"
-    echo \"  BUN_LINK_ONLY: \$BUN_LINK_ONLY\"
-    echo \"  BUILDKITE_BUILD_PATH: \$BUILDKITE_BUILD_PATH\"
-    echo \"\"
-    echo \"Total BUILDKITE_* variables available: \$(env | grep \\\"^BUILDKITE_\\\" | wc -l)\"
 '"
 
 echo "=== ENSURING BUILDKITE AGENT AVAILABILITY ==="
