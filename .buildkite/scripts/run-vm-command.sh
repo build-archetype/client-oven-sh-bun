@@ -92,6 +92,9 @@ while IFS='=' read -r -d '' name value; do
         if [[ "$name" == "BUILDKITE_BUILD_PATH" ]]; then
             value="VM_USER_HOME/workspace/build-workdir"
             echo "  Overriding BUILDKITE_BUILD_PATH to use symlink workspace: $value"
+        elif [[ "$name" == "HOME" ]]; then
+            # Skip host HOME to avoid clobbering VM HOME
+            continue
         fi
         
         # Use printf to properly escape the value
@@ -148,20 +151,7 @@ echo "--- ls -la $WORKSPACE ---"
 ls -la "$WORKSPACE" || true
 
 # Source environment
-if [ -f "$WORKSPACE/buildkite_env.sh" ]; then
-  ORIGINAL_HOME=$HOME
-  source "$WORKSPACE/buildkite_env.sh"
-  export HOME="$ORIGINAL_HOME"
-else
-  echo "❌ buildkite_env.sh not found at $WORKSPACE";
-  exit 1
-fi
-
-# Reset HOME to actual VM user after host env file may have overridden it
-export HOME="$WORK_ROOT/.."  # parent dir of WORK_ROOT is user home (e.g., /Users/admin)
-
-export BUILDKITE_BUILD_PATH="$WORKSPACE/build-workdir"
-echo "BUILDKITE_BUILD_PATH=$BUILDKITE_BUILD_PATH"
+source "$WORKSPACE/buildkite_env.sh"
 
 REMOTE
 
@@ -218,9 +208,7 @@ else
 fi
 WORKSPACE="$WORK_ROOT/workspace"
 
-ORIGINAL_HOME=$HOME
 source "$WORKSPACE/buildkite_env.sh"
-export HOME="$ORIGINAL_HOME"
 
 export BUILDKITE_BUILD_PATH="$WORKSPACE/build-workdir"
 echo "✅ BUILDKITE_BUILD_PATH set to: $BUILDKITE_BUILD_PATH"
