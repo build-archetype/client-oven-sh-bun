@@ -118,31 +118,34 @@ grep '^export BUILDKITE_' "$SHARED_ENV_FILE" | head -10
 
 echo "=== SOURCING ENVIRONMENT AND RUNNING COMMAND ==="
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
-    echo \"Setting up workspace symlink to avoid spaces in path...\"
+    echo \"Setting up workspace mount without spaces...\"
     echo \"Current user: \$(whoami)\"
     echo \"Home directory: \$HOME\"
     echo \"Working directory: \$(pwd)\"
     
-    # Create a symlink without spaces in the user home directory (writable)
-    rm -rf ~/workspace 2>/dev/null || true
-    ln -sf \"/Volumes/My Shared Files/workspace\" ~/workspace
-    echo \"✅ Created symlink: ~/workspace -> /Volumes/My Shared Files/workspace\"
+    # Remount the Virtio-FS share to a path without spaces
+    sudo umount "/Volumes/My Shared Files" 2>/dev/null || true
+    sudo mkdir -p "\$HOME/virtiofs"
+    sudo mount_virtiofs com.apple.virtio-fs.automount "\$HOME/virtiofs"
+    export VM_WORK_ROOT="\$HOME/virtiofs"
+    export VM_WORKSPACE="\$VM_WORK_ROOT/workspace"
+    echo \"✅ Remounted Virtio-FS to: \$VM_WORK_ROOT\"
+    echo \"✅ Workspace directory expected at: \$VM_WORKSPACE\"
     
-    echo \"Updating environment file with actual VM user home directory...\"
-    # Instead of using sed with complex escaping, just recreate the file with correct paths
-    # Source the original file and re-export with correct HOME
-    source ~/workspace/buildkite_env.sh
-    export BUILDKITE_BUILD_PATH=\"\$HOME/workspace/build-workdir\"
-    echo \"✅ Updated BUILDKITE_BUILD_PATH to: \$BUILDKITE_BUILD_PATH\"
-    
-    echo \"Sourcing environment from shared filesystem...\"
-    
-    # Environment is already sourced above, just verify the symlink workspace exists
-    if [ -d \"\$HOME/workspace\" ]; then
-        echo \"✅ Environment ready and workspace symlink verified\"
+    # Source the environment file and fix paths
+    if [ -f "\$VM_WORKSPACE/buildkite_env.sh" ]; then
+        source "\$VM_WORKSPACE/buildkite_env.sh"
     else
-        echo \"❌ Workspace symlink not found at \$HOME/workspace!\"
-        ls -la \"\$HOME/\"
+        echo \"❌ Environment file not found at \$VM_WORKSPACE/buildkite_env.sh\"
+        ls -la "\$VM_WORK_ROOT" | head -20
+        exit 1
+    fi
+    export BUILDKITE_BUILD_PATH="\$VM_WORKSPACE/build-workdir"
+    echo \"✅ BUILDKITE_BUILD_PATH set to: \$BUILDKITE_BUILD_PATH\"
+    
+    # Verify workspace directory exists
+    if [ ! -d "\$VM_WORKSPACE" ]; then
+        echo \"❌ Workspace directory \$VM_WORKSPACE does not exist\"
         exit 1
     fi
 '"
@@ -150,8 +153,9 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
 echo "=== ENSURING BUILDKITE AGENT AVAILABILITY ==="
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     # Source environment and fix the build path
-    source \"/Volumes/My Shared Files/workspace/buildkite_env.sh\"
-    export BUILDKITE_BUILD_PATH=\"\$HOME/workspace/build-workdir\"
+    source "\$HOME/virtiofs/workspace/buildkite_env.sh"
+    export BUILDKITE_BUILD_PATH="\$HOME/virtiofs/workspace/build-workdir"
+    echo \"✅ BUILDKITE_BUILD_PATH set to: \$BUILDKITE_BUILD_PATH\"
     
     # Check if buildkite-agent is already available
     if command -v buildkite-agent >/dev/null 2>&1; then
@@ -201,25 +205,24 @@ echo "=== EXECUTING FINAL COMMAND ==="
 set +e
 sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     # Source environment and ensure buildkite-agent is in PATH
-    source \"\$HOME/workspace/buildkite_env.sh\"
+    source "\$HOME/virtiofs/workspace/buildkite_env.sh"
+    export BUILDKITE_BUILD_PATH="\$HOME/virtiofs/workspace/build-workdir"
+    echo \"✅ BUILDKITE_BUILD_PATH set to: \$BUILDKITE_BUILD_PATH\"
     
     # Add buildkite-agent to PATH multiple times to ensure it sticks
-    export PATH=\"\$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:\$PATH\"
-    
-    # Set TMPDIR for build tools
-    export TMPDIR=\"/tmp\"
-    
-    # Verify buildkite-agent is available before running command
+    export PATH="\$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:\$PATH"
+    export TMPDIR="/tmp"
     echo \"Verifying buildkite-agent availability...\"
+    
     if command -v buildkite-agent >/dev/null 2>&1; then
-        echo \"✅ buildkite-agent found at: \$(which buildkite-agent)\"
+        echo \"✅ buildkite-agent found at: \\$(which buildkite-agent)\"
     else
         echo \"⚠️  buildkite-agent not found in PATH, but continuing...\"
-        echo \"PATH: \$PATH\"
+        echo \"PATH: \\$PATH\"
     fi
     
     # Clean up environment file and run command from symlinked workspace
-    rm -f \"\$HOME/workspace/buildkite_env.sh\" && cd \"\$HOME/workspace\" && $COMMAND
+    rm -f "\$HOME/virtiofs/workspace/buildkite_env.sh" && cd "\$HOME/virtiofs/workspace" && $COMMAND
 '"
 EXIT_CODE=$?
 set -e
