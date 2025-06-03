@@ -64,8 +64,8 @@ cat > "$ENV_FILE" << 'EOF'
 #!/bin/bash
 # Environment variables exported from Buildkite host
 
-# Add standard paths
-export PATH="$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+# Add standard paths (including Rust/Cargo)
+export PATH="$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:$HOME/.cargo/bin:$PATH"
 
 EOF
 
@@ -149,6 +149,25 @@ if command -v bun >/dev/null 2>&1; then
     BUN_BIN=$(command -v bun)
     sudo ln -sf "$BUN_BIN" /usr/local/bin/bun 2>/dev/null || true
 fi
+
+# Debug: Show Rust/Cargo availability
+echo "=== Rust Debug Info ==="
+if command -v cargo >/dev/null 2>&1; then
+    echo "✅ Cargo found: $(command -v cargo)"
+    echo "✅ Cargo version: $(cargo --version)"
+else
+    echo "❌ Cargo not found in PATH"
+fi
+
+if command -v rustc >/dev/null 2>&1; then
+    echo "✅ Rustc found: $(command -v rustc)"
+    echo "✅ Rustc version: $(rustc --version)"
+else
+    echo "❌ Rustc not found in PATH"
+fi
+
+echo "Current PATH: $PATH"
+echo "========================"
 
 echo "✅ VM environment setup complete"
 REMOTE_SETUP
