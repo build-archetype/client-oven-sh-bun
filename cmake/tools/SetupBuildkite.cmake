@@ -4,6 +4,21 @@ if(NOT BUILDKITE_CACHE OR NOT BUN_LINK_ONLY)
   return()
 endif()
 
+# Add timing function
+function(get_timestamp VAR)
+  string(TIMESTAMP ${VAR} "%Y-%m-%d %H:%M:%S")
+  set(${VAR} ${${VAR}} PARENT_SCOPE)
+endfunction()
+
+# Add build environment logging
+message(STATUS "=== Build Environment ===")
+message(STATUS "OS: ${OS}")
+message(STATUS "Architecture: ${ARCH}")
+message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
+message(STATUS "Build Path: ${BUILD_PATH}")
+message(STATUS "CMake Version: ${CMAKE_VERSION}")
+message(STATUS "=======================")
+
 optionx(BUILDKITE_ORGANIZATION_SLUG STRING "The organization slug to use on Buildkite" DEFAULT "bun")
 optionx(BUILDKITE_PIPELINE_SLUG STRING "The pipeline slug to use on Buildkite" DEFAULT "bun")
 optionx(BUILDKITE_BUILD_ID STRING "The build ID to use on Buildkite")
@@ -35,6 +50,14 @@ endif()
 setx(BUILDKITE_BUILD_URL https://buildkite.com/${BUILDKITE_ORGANIZATION_SLUG}/${BUILDKITE_PIPELINE_SLUG}/builds/${BUILDKITE_BUILD_ID})
 setx(BUILDKITE_BUILD_PATH ${BUILDKITE_BUILDS_PATH}/builds/${BUILDKITE_BUILD_ID})
 
+# Log request details with timing
+get_timestamp(START_TIME)
+message(STATUS "Making request to Buildkite API:")
+message(STATUS "Start Time: ${START_TIME}")
+message(STATUS "URL: ${BUILDKITE_BUILD_URL}")
+message(STATUS "Headers: Accept: application/json")
+message(STATUS "Output path: ${BUILDKITE_BUILD_PATH}/build.json")
+
 file(
   DOWNLOAD ${BUILDKITE_BUILD_URL}
   HTTPHEADER "Accept: application/json"
@@ -42,12 +65,31 @@ file(
   STATUS BUILDKITE_BUILD_STATUS
   ${BUILDKITE_BUILD_PATH}/build.json
 )
+
+get_timestamp(END_TIME)
+message(STATUS "End Time: ${END_TIME}")
+
 if(NOT BUILDKITE_BUILD_STATUS EQUAL 0)
   message(FATAL_ERROR "No build found: ${BUILDKITE_BUILD_STATUS} ${BUILDKITE_BUILD_URL}")
   return()
 endif()
 
+# Add debugging information with JSON validation
+message(STATUS "Buildkite API Response Status: ${BUILDKITE_BUILD_STATUS}")
 file(READ ${BUILDKITE_BUILD_PATH}/build.json BUILDKITE_BUILD)
+
+# Validate JSON structure
+if(NOT BUILDKITE_BUILD MATCHES ".*\"id\".*")
+  message(FATAL_ERROR "Invalid build.json: Missing 'id' field")
+endif()
+
+if(NOT BUILDKITE_BUILD MATCHES ".*\"jobs\".*")
+  message(FATAL_ERROR "Invalid build.json: Missing 'jobs' field")
+endif()
+
+message(STATUS "Buildkite API Response Content: ${BUILDKITE_BUILD}")
+message(STATUS "Content length: ${BUILDKITE_BUILD_LENGTH} bytes")
+
 string(JSON BUILDKITE_BUILD_UUID GET ${BUILDKITE_BUILD} id)
 string(JSON BUILDKITE_JOBS GET ${BUILDKITE_BUILD} jobs)
 string(JSON BUILDKITE_JOBS_COUNT LENGTH ${BUILDKITE_JOBS})
@@ -57,6 +99,12 @@ if(NOT BUILDKITE_JOBS_COUNT GREATER 0)
   return()
 endif()
 
+# Initialize job tracking with timing
+get_timestamp(JOBS_START_TIME)
+message(STATUS "=== Processing Jobs ===")
+message(STATUS "Start Time: ${JOBS_START_TIME}")
+message(STATUS "Total Jobs: ${BUILDKITE_JOBS_COUNT}")
+
 set(BUILDKITE_JOBS_FAILED)
 set(BUILDKITE_JOBS_NOT_FOUND)
 set(BUILDKITE_JOBS_NO_ARTIFACTS)
@@ -65,6 +113,9 @@ set(BUILDKITE_JOBS_MATCH)
 
 math(EXPR BUILDKITE_JOBS_MAX_INDEX "${BUILDKITE_JOBS_COUNT} - 1")
 foreach(i RANGE ${BUILDKITE_JOBS_MAX_INDEX})
+  get_timestamp(JOB_START_TIME)
+  message(STATUS "Processing Job ${i}/${BUILDKITE_JOBS_MAX_INDEX} at ${JOB_START_TIME}")
+  
   string(JSON BUILDKITE_JOB GET ${BUILDKITE_JOBS} ${i})
   string(JSON BUILDKITE_JOB_ID GET ${BUILDKITE_JOB} id)
   string(JSON BUILDKITE_JOB_PASSED GET ${BUILDKITE_JOB} passed)
@@ -75,20 +126,32 @@ foreach(i RANGE ${BUILDKITE_JOBS_MAX_INDEX})
     string(JSON BUILDKITE_JOB_NAME GET ${BUILDKITE_JOB} name)
   endif()
 
+  message(STATUS "Job Details:")
+  message(STATUS "  ID: ${BUILDKITE_JOB_ID}")
+  message(STATUS "  Name: ${BUILDKITE_JOB_NAME}")
+  message(STATUS "  Passed: ${BUILDKITE_JOB_PASSED}")
+  message(STATUS "  Group ID: ${BUILDKITE_JOB_GROUP_ID}")
+  message(STATUS "  Group Key: ${BUILDKITE_JOB_GROUP_KEY}")
+
   if(NOT BUILDKITE_JOB_PASSED)
     list(APPEND BUILDKITE_JOBS_FAILED ${BUILDKITE_JOB_NAME})
+    message(STATUS "  Status: Failed")
     continue()
   endif()
 
   if(NOT (BUILDKITE_GROUP_ID AND BUILDKITE_GROUP_ID STREQUAL BUILDKITE_JOB_GROUP_ID) AND
      NOT (BUILDKITE_GROUP_KEY AND BUILDKITE_GROUP_KEY STREQUAL BUILDKITE_JOB_GROUP_KEY))
     list(APPEND BUILDKITE_JOBS_NO_MATCH ${BUILDKITE_JOB_NAME})
+    message(STATUS "  Status: No Group Match")
     continue()
   endif()
 
   set(BUILDKITE_ARTIFACTS_URL https://buildkite.com/organizations/${BUILDKITE_ORGANIZATION_SLUG}/pipelines/${BUILDKITE_PIPELINE_SLUG}/builds/${BUILDKITE_BUILD_UUID}/jobs/${BUILDKITE_JOB_ID}/artifacts)
   set(BUILDKITE_ARTIFACTS_PATH ${BUILDKITE_BUILD_PATH}/artifacts/${BUILDKITE_JOB_ID}.json)
 
+  message(STATUS "  Fetching artifacts from: ${BUILDKITE_ARTIFACTS_URL}")
+  get_timestamp(ARTIFACT_START_TIME)
+  
   file(
     DOWNLOAD ${BUILDKITE_ARTIFACTS_URL}
     HTTPHEADER "Accept: application/json"
@@ -97,15 +160,22 @@ foreach(i RANGE ${BUILDKITE_JOBS_MAX_INDEX})
     ${BUILDKITE_ARTIFACTS_PATH}
   )
 
+  get_timestamp(ARTIFACT_END_TIME)
+  message(STATUS "  Artifact fetch completed at ${ARTIFACT_END_TIME}")
+
   if(NOT BUILDKITE_ARTIFACTS_STATUS EQUAL 0)
     list(APPEND BUILDKITE_JOBS_NOT_FOUND ${BUILDKITE_JOB_NAME})
+    message(STATUS "  Status: Artifacts Not Found")
     continue()
   endif()
   
   file(READ ${BUILDKITE_ARTIFACTS_PATH} BUILDKITE_ARTIFACTS)
   string(JSON BUILDKITE_ARTIFACTS_LENGTH LENGTH ${BUILDKITE_ARTIFACTS})
+  message(STATUS "  Found ${BUILDKITE_ARTIFACTS_LENGTH} artifacts")
+  
   if(NOT BUILDKITE_ARTIFACTS_LENGTH GREATER 0)
     list(APPEND BUILDKITE_JOBS_NO_ARTIFACTS ${BUILDKITE_JOB_NAME})
+    message(STATUS "  Status: No Artifacts")
     continue()
   endif()
 
@@ -114,8 +184,14 @@ foreach(i RANGE ${BUILDKITE_JOBS_MAX_INDEX})
     string(JSON BUILDKITE_ARTIFACT GET ${BUILDKITE_ARTIFACTS} ${i})
     string(JSON BUILDKITE_ARTIFACT_ID GET ${BUILDKITE_ARTIFACT} id)
     string(JSON BUILDKITE_ARTIFACT_PATH GET ${BUILDKITE_ARTIFACT} path)
+    string(JSON BUILDKITE_ARTIFACT_SIZE GET ${BUILDKITE_ARTIFACT} size)
+
+    message(STATUS "  Processing artifact:")
+    message(STATUS "    Path: ${BUILDKITE_ARTIFACT_PATH}")
+    message(STATUS "    Size: ${BUILDKITE_ARTIFACT_SIZE} bytes")
 
     if(NOT BUILDKITE_ARTIFACT_PATH MATCHES "\\.(o|a|lib|zip|tar|gz)")
+      message(STATUS "    Status: Skipped (not a build artifact)")
       continue()
     endif()
 
@@ -130,6 +206,9 @@ foreach(i RANGE ${BUILDKITE_JOBS_MAX_INDEX})
       set(BUILDKITE_DOWNLOAD_COMMAND curl -L -o ${BUILDKITE_ARTIFACT_PATH} ${BUILDKITE_ARTIFACTS_URL}/${BUILDKITE_ARTIFACT_ID})
     endif()
 
+    get_timestamp(DOWNLOAD_START_TIME)
+    message(STATUS "    Download started at ${DOWNLOAD_START_TIME}")
+
     add_custom_command(
       COMMENT
         "Downloading ${BUILDKITE_ARTIFACT_PATH}"
@@ -140,7 +219,14 @@ foreach(i RANGE ${BUILDKITE_JOBS_MAX_INDEX})
       OUTPUT
         ${BUILD_PATH}/${BUILDKITE_ARTIFACT_PATH}
     )
+
+    get_timestamp(DOWNLOAD_END_TIME)
+    message(STATUS "    Download completed at ${DOWNLOAD_END_TIME}")
+
     if(BUILDKITE_ARTIFACT_PATH STREQUAL "libbun-profile.a.gz")
+      get_timestamp(UNPACK_START_TIME)
+      message(STATUS "    Unpacking started at ${UNPACK_START_TIME}")
+      
       add_custom_command(
         COMMENT
           "Unpacking libbun-profile.a.gz"
@@ -153,7 +239,13 @@ foreach(i RANGE ${BUILDKITE_JOBS_MAX_INDEX})
         DEPENDS
           ${BUILD_PATH}/libbun-profile.a.gz
       )
+      
+      get_timestamp(UNPACK_END_TIME)
+      message(STATUS "    Unpacking completed at ${UNPACK_END_TIME}")
     elseif(BUILDKITE_ARTIFACT_PATH STREQUAL "libbun-asan.a.gz")
+      get_timestamp(UNPACK_START_TIME)
+      message(STATUS "    Unpacking started at ${UNPACK_START_TIME}")
+      
       add_custom_command(
         COMMENT
           "Unpacking libbun-asan.a.gz"
@@ -166,12 +258,23 @@ foreach(i RANGE ${BUILDKITE_JOBS_MAX_INDEX})
         DEPENDS
           ${BUILD_PATH}/libbun-asan.a.gz
       )
+      
+      get_timestamp(UNPACK_END_TIME)
+      message(STATUS "    Unpacking completed at ${UNPACK_END_TIME}")
     endif()
   endforeach()
 
   list(APPEND BUILDKITE_JOBS_MATCH ${BUILDKITE_JOB_NAME})
+  get_timestamp(JOB_END_TIME)
+  message(STATUS "Job ${i} completed at ${JOB_END_TIME}")
 endforeach()
 
+get_timestamp(JOBS_END_TIME)
+message(STATUS "All jobs processed at ${JOBS_END_TIME}")
+message(STATUS "=====================")
+
+# Summary of job statuses
+message(STATUS "=== Build Summary ===")
 if(BUILDKITE_JOBS_FAILED)
   list(SORT BUILDKITE_JOBS_FAILED COMPARE STRING)
   list(JOIN BUILDKITE_JOBS_FAILED " " BUILDKITE_JOBS_FAILED)
@@ -205,3 +308,7 @@ endif()
 if(NOT BUILDKITE_JOBS_FAILED AND NOT BUILDKITE_JOBS_NOT_FOUND AND NOT BUILDKITE_JOBS_NO_MATCH AND NOT BUILDKITE_JOBS_NO_ARTIFACTS AND NOT BUILDKITE_JOBS_MATCH)
   message(FATAL_ERROR "Something went wrong with Buildkite?")
 endif()
+
+get_timestamp(FINAL_TIME)
+message(STATUS "Build process completed at ${FINAL_TIME}")
+message(STATUS "===================")
