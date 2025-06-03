@@ -1,5 +1,10 @@
 #!/bin/bash
 
+echo "🚀 ===== REFACTORED SCRIPT STARTING ====="
+echo "📋 Script version: SSH-only (no VirtioFS)"
+echo "🎯 VM: $1"
+echo "⚡ Command: $2"
+
 # Check if VM name is provided
 if [ -z "$1" ]; then
     echo "Usage: $0 <vm-name> [command]"
@@ -8,6 +13,8 @@ fi
 
 VM_NAME="$1"
 COMMAND="${2:-echo 'VM is ready'}"
+
+echo "🔍 ===== WAITING FOR VM ====="
 
 # Function to wait for VM and get IP
 wait_for_vm() {
@@ -54,10 +61,12 @@ VM_IP=$(tart ip "$VM_NAME")
 # SSH options for reliability
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
 
+echo "🌐 VM IP: $VM_IP"
 echo "Running command in VM: $COMMAND"
 
+echo "📝 ===== CREATING ENVIRONMENT FILE ====="
+
 # ===== CREATE ENVIRONMENT FILE =====
-echo "=== CREATING ENVIRONMENT FILE ==="
 ENV_FILE="./buildkite_env.sh"
 
 cat > "$ENV_FILE" << 'EOF'
@@ -97,8 +106,9 @@ done < <(env -0)
 
 echo "✅ Exported $env_count environment variables ($buildkite_count BUILDKITE_* vars)"
 
+echo "📦 ===== COPYING WORKSPACE TO VM ====="
+
 # ===== COPY WORKSPACE TO VM =====
-echo "=== COPYING WORKSPACE TO VM ==="
 echo "Copying workspace to VM..."
 
 # Ensure workspace directory exists on VM
@@ -112,13 +122,14 @@ else
     exit 1
 fi
 
+echo "⚙️  ===== SETTING UP VM ENVIRONMENT ====="
+
 # ===== SETUP VM ENVIRONMENT =====
-echo "=== SETTING UP VM ENVIRONMENT ==="
 
 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -s <<'REMOTE_SETUP'
 set -eo pipefail
 
-echo "Setting up VM environment..."
+echo "🔧 Setting up VM environment..."
 cd ~/workspace
 
 # Source environment variables
@@ -151,7 +162,7 @@ if command -v bun >/dev/null 2>&1; then
 fi
 
 # Debug: Show Rust/Cargo availability
-echo "=== Rust Debug Info ==="
+echo "🦀 === Rust Debug Info ==="
 if command -v cargo >/dev/null 2>&1; then
     echo "✅ Cargo found: $(command -v cargo)"
     echo "✅ Cargo version: $(cargo --version)"
@@ -166,14 +177,15 @@ else
     echo "❌ Rustc not found in PATH"
 fi
 
-echo "Current PATH: $PATH"
+echo "🛤️  Current PATH: $PATH"
 echo "========================"
 
 echo "✅ VM environment setup complete"
 REMOTE_SETUP
 
+echo "🎬 ===== EXECUTING COMMAND ====="
+
 # ===== EXECUTE COMMAND =====
-echo "=== EXECUTING COMMAND ==="
 
 # Execute the user command in the VM
 REMOTE_CMD="
@@ -186,15 +198,16 @@ export VENDOR_PATH=\"\$HOME/workspace/vendor\"
 export TMPDIR=\"/tmp\"
 export LD_SUPPORT_TMPDIR=\"/tmp\"
 
-echo \"Executing: $COMMAND\"
+echo \"🚀 Executing: $COMMAND\"
 $COMMAND
 "
 
 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -lc "$REMOTE_CMD"
 EXIT_CODE=$?
 
+echo "📤 ===== COPYING ARTIFACTS BACK ====="
+
 # ===== COPY ARTIFACTS BACK =====
-echo "=== COPYING ARTIFACTS BACK ==="
 
 if [ -d "./build" ] || [ -d "./artifacts" ] || [ -d "./dist" ]; then
     echo "Copying build artifacts back from VM..."
@@ -212,10 +225,14 @@ else
     echo "No standard artifact directories found, skipping artifact copy"
 fi
 
+echo "🧹 ===== CLEANUP ====="
+
 # ===== CLEANUP =====
-echo "=== CLEANUP ==="
 rm -f "$ENV_FILE" || true
 echo "✅ Cleanup complete"
+
+echo "🏁 ===== REFACTORED SCRIPT COMPLETE ====="
+echo "Exit code: $EXIT_CODE"
 
 # Propagate exit status
 exit $EXIT_CODE 
