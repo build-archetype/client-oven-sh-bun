@@ -200,7 +200,7 @@ echo "=== EXECUTING FINAL COMMAND ==="
 set +e
 # Preserve the user command so the remote shell can see it
 CMD_TO_RUN="$COMMAND"
-sshpass -p admin ssh $SSH_OPTS COMMAND="$CMD_TO_RUN" admin@$VM_IP bash -s <<'REMOTE'
+sshpass -p admin ssh $SSH_OPTS admin@$VM_IP COMMAND="$CMD_TO_RUN" bash -s <<'REMOTE'
 set -eo pipefail
 
 # Resolve workspace again
