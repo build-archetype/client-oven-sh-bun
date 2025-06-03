@@ -157,6 +157,15 @@ source "$WORKSPACE/buildkite_env.sh"
 export TMPDIR="/tmp"
 export LD_SUPPORT_TMPDIR="/tmp"
 
+# Use local scratch directory to avoid Virtio-FS timestamp issues
+SCRATCH_DIR="$HOME/build_ws"
+rm -rf "$SCRATCH_DIR" && mkdir -p "$SCRATCH_DIR"
+echo "Syncing workspace to local scratch dir $SCRATCH_DIR …"
+rsync -a --delete "$WORKSPACE/" "$SCRATCH_DIR/"
+
+# Switch to scratch directory for build
+cd "$SCRATCH_DIR"
+
 REMOTE
 
 echo "=== ENSURING BUILDKITE AGENT AVAILABILITY ==="
@@ -227,9 +236,13 @@ export BUILDKITE_BUILD_PATH="$WORKSPACE/build-workdir"
 cd "$WORKSPACE"
 EOS
 
-# Combine pre-amble and user command
+# Wrap user command to capture exit code and sync back
 REMOTE_CMD="${REMOTE_PREAMBLE}
-${COMMAND}"
+${COMMAND}
+EXITCODE=$?
+echo 'Syncing build results back to Virtio-FS workspace…'
+rsync -a --delete "$SCRATCH_DIR/" "$WORKSPACE/"
+exit $EXITCODE"
 
 # Run everything in a single login bash so PATH is initialised once and retained
 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -lc "$(printf '%q ' "$REMOTE_CMD")"
