@@ -202,57 +202,39 @@ if command -v bun >/dev/null 2>&1; then
 fi
 REMOTE
 
-echo "=== EXECUTING FINAL COMMAND ==="
+echo "=== EXECUTING FINAL COMMAND (single SSH) ==="
 
-# Execute the command and capture the exit code
-# Ensure environment is sourced before running any command
-set +e
-# Pass the plain user command as a single positional argument
-CMD_TO_RUN="$COMMAND"
-sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -s -- "$CMD_TO_RUN" <<'REMOTE'
+# Build remote pre-amble (mount check, env, cd) and append the user command
+read -r -d '' REMOTE_PREAMBLE <<'EOS'
 set -eo pipefail
 
-# Resolve workspace again
+# Determine workspace path
 if [ -d "$HOME/virtiofs/workspace" ]; then
-  WORK_ROOT="$HOME/virtiofs"
+  WORKSPACE="$HOME/virtiofs/workspace"
 else
-  WORK_ROOT="/Volumes/My Shared Files"
+  WORKSPACE="/Volumes/My Shared Files/workspace"
 fi
-WORKSPACE="$WORK_ROOT/workspace"
 
+# Source the environment generated earlier
 source "$WORKSPACE/buildkite_env.sh"
 
+# Export Buildkite build path consistently
 export BUILDKITE_BUILD_PATH="$WORKSPACE/build-workdir"
-echo "✅ BUILDKITE_BUILD_PATH set to: $BUILDKITE_BUILD_PATH"
-
-# Retrieve the original command from the first positional argument
-CMD_TO_RUN="$1"
-
-# Debug bun availability and PATH
-echo "--- DEBUG bun location ---"
-echo "PATH=$PATH"
-for d in ${PATH//:/ }; do [ -x "$d/bun" ] && echo "Found bun at $d/bun"; done
-command -v bun && echo "✅ bun found: $(bun --version)" || echo "❌ bun still not found"
-
 cd "$WORKSPACE"
-eval "$CMD_TO_RUN"
+EOS
 
-# Remove env file after use
-rm -f "$WORKSPACE/buildkite_env.sh"
-REMOTE
+# Combine pre-amble and user command
+REMOTE_CMD="${REMOTE_PREAMBLE}
+${COMMAND}"
+
+# Run everything in a single login bash so PATH is initialised once and retained
+sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -lc "$(printf '%q ' "$REMOTE_CMD")"
 EXIT_CODE=$?
-set -e
 
+# ---- CLEANUP ----
 echo "=== CLEANUP ==="
-echo "Cleaning up environment file from workspace..."
-rm -f "$SHARED_ENV_FILE"
+rm -f "$SHARED_ENV_FILE" || true
 echo "✅ Cleanup complete"
 
-# Exit with the same code as the VM command
-exit $EXIT_CODE 
-
-# additional debug: check PATH inside a fresh non-login zsh instance
-echo "--- DEBUG zsh PATH ---"
-ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP zsh -c 'echo ZSH_PATH="$PATH"'
-
+# Propagate exit status
 exit $EXIT_CODE 
