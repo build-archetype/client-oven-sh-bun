@@ -251,3 +251,9 @@ echo "✅ Cleanup complete"
 
 # Exit with the same code as the VM command
 exit $EXIT_CODE 
+
+# additional debug: check PATH inside a fresh non-login zsh instance
+echo "--- DEBUG zsh PATH ---"
+ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null admin@$VM_IP zsh -c 'echo ZSH_PATH="$PATH"'
+
+exit $EXIT_CODE 
