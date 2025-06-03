@@ -87,11 +87,19 @@ if(NOT BUILDKITE_BUILD MATCHES ".*\"jobs\".*")
   message(FATAL_ERROR "Invalid build.json: Missing 'jobs' field")
 endif()
 
-message(STATUS "Buildkite API Response Content: ${BUILDKITE_BUILD}")
-message(STATUS "Content length: ${BUILDKITE_BUILD_LENGTH} bytes")
+# Add debug logging for build data
+message(STATUS "Build data content: ${BUILDKITE_BUILD}")
 
-string(JSON BUILDKITE_BUILD_UUID GET ${BUILDKITE_BUILD} id)
-string(JSON BUILDKITE_JOBS GET ${BUILDKITE_BUILD} jobs)
+string(JSON BUILDKITE_BUILD_UUID GET ${BUILDKITE_BUILD} id ERROR_VARIABLE BUILD_PARSE_ERROR)
+if(BUILD_PARSE_ERROR)
+  message(FATAL_ERROR "Failed to parse build ID: ${BUILD_PARSE_ERROR}")
+endif()
+
+string(JSON BUILDKITE_JOBS GET ${BUILDKITE_BUILD} jobs ERROR_VARIABLE JOBS_PARSE_ERROR)
+if(JOBS_PARSE_ERROR)
+  message(FATAL_ERROR "Failed to parse jobs array: ${JOBS_PARSE_ERROR}")
+endif()
+
 string(JSON BUILDKITE_JOBS_COUNT LENGTH ${BUILDKITE_JOBS})
 
 if(NOT BUILDKITE_JOBS_COUNT GREATER 0)
@@ -103,6 +111,9 @@ endif()
 if(NOT BUILDKITE_JOBS MATCHES "^\\[.*\\]$")
   message(FATAL_ERROR "Invalid jobs array format in JSON response")
 endif()
+
+# Add debug logging for jobs array
+message(STATUS "Jobs array content: ${BUILDKITE_JOBS}")
 
 # Initialize job tracking with timing
 get_timestamp(JOBS_START_TIME)
@@ -123,7 +134,7 @@ foreach(i RANGE ${BUILDKITE_JOBS_MAX_INDEX})
   
   # Add error handling around JSON parsing
   set(JOB_PARSE_ERROR FALSE)
-  string(JSON BUILDKITE_JOB GET ${BUILDKITE_JOBS} ${i} ERROR_VARIABLE JOB_PARSE_ERROR)
+  string(JSON BUILDKITE_JOB GET ${BUILDKITE_JOBS} [${i}] ERROR_VARIABLE JOB_PARSE_ERROR)
   if(JOB_PARSE_ERROR)
     message(WARNING "Failed to parse job ${i}: ${JOB_PARSE_ERROR}")
     continue()
