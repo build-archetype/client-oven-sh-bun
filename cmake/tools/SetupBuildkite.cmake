@@ -87,33 +87,17 @@ if(NOT BUILDKITE_BUILD MATCHES ".*\"jobs\".*")
   message(FATAL_ERROR "Invalid build.json: Missing 'jobs' field")
 endif()
 
-# Add debug logging for build data
-message(STATUS "Build data content: ${BUILDKITE_BUILD}")
+message(STATUS "Buildkite API Response Content: ${BUILDKITE_BUILD}")
+message(STATUS "Content length: ${BUILDKITE_BUILD_LENGTH} bytes")
 
-string(JSON BUILDKITE_BUILD_UUID GET ${BUILDKITE_BUILD} id ERROR_VARIABLE BUILD_PARSE_ERROR)
-if(BUILD_PARSE_ERROR)
-  message(FATAL_ERROR "Failed to parse build ID: ${BUILD_PARSE_ERROR}")
-endif()
-
-string(JSON BUILDKITE_JOBS GET ${BUILDKITE_BUILD} jobs ERROR_VARIABLE JOBS_PARSE_ERROR)
-if(JOBS_PARSE_ERROR)
-  message(FATAL_ERROR "Failed to parse jobs array: ${JOBS_PARSE_ERROR}")
-endif()
-
+string(JSON BUILDKITE_BUILD_UUID GET ${BUILDKITE_BUILD} id)
+string(JSON BUILDKITE_JOBS GET ${BUILDKITE_BUILD} jobs)
 string(JSON BUILDKITE_JOBS_COUNT LENGTH ${BUILDKITE_JOBS})
 
 if(NOT BUILDKITE_JOBS_COUNT GREATER 0)
   message(FATAL_ERROR "No jobs found: ${BUILDKITE_BUILD_URL}")
   return()
 endif()
-
-# Add JSON validation
-if(NOT BUILDKITE_JOBS MATCHES "^\\[.*\\]$")
-  message(FATAL_ERROR "Invalid jobs array format in JSON response")
-endif()
-
-# Add debug logging for jobs array
-message(STATUS "Jobs array content: ${BUILDKITE_JOBS}")
 
 # Initialize job tracking with timing
 get_timestamp(JOBS_START_TIME)
@@ -132,52 +116,19 @@ foreach(i RANGE ${BUILDKITE_JOBS_MAX_INDEX})
   get_timestamp(JOB_START_TIME)
   message(STATUS "Processing Job ${i}/${BUILDKITE_JOBS_MAX_INDEX} at ${JOB_START_TIME}")
   
-  # Add error handling around JSON parsing
-  set(JOB_PARSE_ERROR FALSE)
-  string(JSON BUILDKITE_JOB GET ${BUILDKITE_JOBS} [${i}] ERROR_VARIABLE JOB_PARSE_ERROR)
-  if(JOB_PARSE_ERROR)
-    message(WARNING "Failed to parse job ${i}: ${JOB_PARSE_ERROR}")
-    continue()
-  endif()
-
-  # Validate job object
-  if(NOT BUILDKITE_JOB MATCHES "^\\{.*\\}$")
-    message(WARNING "Invalid job object format for job ${i}")
-    continue()
-  endif()
-
-  # Parse job fields with error handling
-  string(JSON BUILDKITE_JOB_ID GET ${BUILDKITE_JOB} id ERROR_VARIABLE JOB_PARSE_ERROR)
-  if(JOB_PARSE_ERROR)
-    message(WARNING "Failed to parse job ID for job ${i}: ${JOB_PARSE_ERROR}")
-    continue()
-  endif()
-
-  string(JSON BUILDKITE_JOB_PASSED GET ${BUILDKITE_JOB} passed ERROR_VARIABLE JOB_PARSE_ERROR)
-  if(JOB_PARSE_ERROR)
-    message(WARNING "Failed to parse job passed status for job ${i}: ${JOB_PARSE_ERROR}")
-    continue()
-  endif()
-
-  string(JSON BUILDKITE_JOB_GROUP_ID GET ${BUILDKITE_JOB} group_uuid ERROR_VARIABLE JOB_PARSE_ERROR)
-  if(JOB_PARSE_ERROR)
-    message(WARNING "Failed to parse job group ID for job ${i}: ${JOB_PARSE_ERROR}")
-    continue()
-  endif()
-
-  string(JSON BUILDKITE_JOB_GROUP_KEY GET ${BUILDKITE_JOB} group_identifier ERROR_VARIABLE JOB_PARSE_ERROR)
-  if(JOB_PARSE_ERROR)
-    message(WARNING "Failed to parse job group key for job ${i}: ${JOB_PARSE_ERROR}")
-    continue()
-  endif()
-
-  string(JSON BUILDKITE_JOB_NAME GET ${BUILDKITE_JOB} step_key ERROR_VARIABLE JOB_PARSE_ERROR)
-  if(JOB_PARSE_ERROR)
-    string(JSON BUILDKITE_JOB_NAME GET ${BUILDKITE_JOB} name ERROR_VARIABLE JOB_PARSE_ERROR)
-    if(JOB_PARSE_ERROR)
-      message(WARNING "Failed to parse job name for job ${i}: ${JOB_PARSE_ERROR}")
-      continue()
-    endif()
+  # Add debug logging for the jobs array
+  message(STATUS "Raw jobs array: ${BUILDKITE_JOBS}")
+  
+  string(JSON BUILDKITE_JOB GET ${BUILDKITE_JOBS} ${i})
+  message(STATUS "Raw job data for index ${i}: ${BUILDKITE_JOB}")
+  
+  string(JSON BUILDKITE_JOB_ID GET ${BUILDKITE_JOB} id)
+  string(JSON BUILDKITE_JOB_PASSED GET ${BUILDKITE_JOB} passed)
+  string(JSON BUILDKITE_JOB_GROUP_ID GET ${BUILDKITE_JOB} group_uuid)
+  string(JSON BUILDKITE_JOB_GROUP_KEY GET ${BUILDKITE_JOB} group_identifier)
+  string(JSON BUILDKITE_JOB_NAME GET ${BUILDKITE_JOB} step_key)
+  if(NOT BUILDKITE_JOB_NAME)
+    string(JSON BUILDKITE_JOB_NAME GET ${BUILDKITE_JOB} name)
   endif()
 
   message(STATUS "Job Details:")
