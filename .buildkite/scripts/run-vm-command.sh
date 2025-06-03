@@ -191,6 +191,15 @@ else
 fi
 
 command -v buildkite-agent && echo "✅ Buildkite agent ready: $(buildkite-agent --version)" || echo "⚠️  buildkite-agent not found after install"
+
+# Ensure bun is accessible in /usr/local/bin as well to survive PATH resets by zsh
+if command -v bun >/dev/null 2>&1; then
+  BUN_BIN=$(command -v bun)
+  if [ ! -f "/usr/local/bin/bun" ] || [ "$(readlink /usr/local/bin/bun)" != "$BUN_BIN" ]; then
+    echo "Linking $BUN_BIN -> /usr/local/bin/bun"
+    sudo ln -sf "$BUN_BIN" /usr/local/bin/bun 2>/dev/null || true
+  fi
+fi
 REMOTE
 
 echo "=== EXECUTING FINAL COMMAND ==="
