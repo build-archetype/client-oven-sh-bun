@@ -73,8 +73,8 @@ cat > "$ENV_FILE" << 'EOF'
 #!/bin/bash
 # Environment variables exported from Buildkite host
 
-# Add standard paths (including Rust/Cargo)
-export PATH="$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:$HOME/.cargo/bin:$PATH"
+# Add standard paths (including Rust/Cargo from bootstrap location)
+export PATH="$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:/opt/rust/bin:$PATH"
 
 EOF
 
@@ -164,13 +164,21 @@ fi
 # Debug: Show Rust/Cargo availability
 echo "🦀 === Rust Debug Info ==="
 
-# Check if Rust is installed at all
-echo "🔍 Checking Rust installation..."
+# Check if Rust is installed at the bootstrap location
+echo "🔍 Checking Rust installation in bootstrap location..."
+if [ -d "/opt/rust" ]; then
+    echo "✅ /opt/rust directory exists"
+    ls -la "/opt/rust/bin/" 2>/dev/null || echo "❌ No /opt/rust/bin directory"
+else
+    echo "❌ No /opt/rust directory found"
+fi
+
+# Also check the legacy location just in case
 if [ -d "$HOME/.cargo" ]; then
-    echo "✅ .cargo directory exists"
+    echo "✅ Legacy .cargo directory also exists"
     ls -la "$HOME/.cargo/bin/" 2>/dev/null || echo "❌ No .cargo/bin directory"
 else
-    echo "❌ No .cargo directory found"
+    echo "❌ No legacy .cargo directory found"
 fi
 
 # Try to find Rust anywhere on the system
@@ -188,6 +196,12 @@ if [ -f "./buildkite_env.sh" ]; then
 else
     echo "❌ buildkite_env.sh not found"
 fi
+
+# Use which commands for clarity
+echo "🔍 Using 'which' to locate Rust tools..."
+which cargo && echo "✅ Cargo found at: $(which cargo)" || echo "❌ Cargo not found"
+which rustc && echo "✅ Rustc found at: $(which rustc)" || echo "❌ Rustc not found"
+which rustup && echo "✅ Rustup found at: $(which rustup)" || echo "❌ Rustup not found"
 
 if command -v cargo >/dev/null 2>&1; then
     echo "✅ Cargo found: $(command -v cargo)"
