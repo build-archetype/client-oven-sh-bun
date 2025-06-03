@@ -99,6 +99,11 @@ if(NOT BUILDKITE_JOBS_COUNT GREATER 0)
   return()
 endif()
 
+# Add JSON validation
+if(NOT BUILDKITE_JOBS MATCHES "^\\[.*\\]$")
+  message(FATAL_ERROR "Invalid jobs array format in JSON response")
+endif()
+
 # Initialize job tracking with timing
 get_timestamp(JOBS_START_TIME)
 message(STATUS "=== Processing Jobs ===")
@@ -116,14 +121,52 @@ foreach(i RANGE ${BUILDKITE_JOBS_MAX_INDEX})
   get_timestamp(JOB_START_TIME)
   message(STATUS "Processing Job ${i}/${BUILDKITE_JOBS_MAX_INDEX} at ${JOB_START_TIME}")
   
-  string(JSON BUILDKITE_JOB GET ${BUILDKITE_JOBS} ${i})
-  string(JSON BUILDKITE_JOB_ID GET ${BUILDKITE_JOB} id)
-  string(JSON BUILDKITE_JOB_PASSED GET ${BUILDKITE_JOB} passed)
-  string(JSON BUILDKITE_JOB_GROUP_ID GET ${BUILDKITE_JOB} group_uuid)
-  string(JSON BUILDKITE_JOB_GROUP_KEY GET ${BUILDKITE_JOB} group_identifier)
-  string(JSON BUILDKITE_JOB_NAME GET ${BUILDKITE_JOB} step_key)
-  if(NOT BUILDKITE_JOB_NAME)
-    string(JSON BUILDKITE_JOB_NAME GET ${BUILDKITE_JOB} name)
+  # Add error handling around JSON parsing
+  set(JOB_PARSE_ERROR FALSE)
+  string(JSON BUILDKITE_JOB GET ${BUILDKITE_JOBS} ${i} ERROR_VARIABLE JOB_PARSE_ERROR)
+  if(JOB_PARSE_ERROR)
+    message(WARNING "Failed to parse job ${i}: ${JOB_PARSE_ERROR}")
+    continue()
+  endif()
+
+  # Validate job object
+  if(NOT BUILDKITE_JOB MATCHES "^\\{.*\\}$")
+    message(WARNING "Invalid job object format for job ${i}")
+    continue()
+  endif()
+
+  # Parse job fields with error handling
+  string(JSON BUILDKITE_JOB_ID GET ${BUILDKITE_JOB} id ERROR_VARIABLE JOB_PARSE_ERROR)
+  if(JOB_PARSE_ERROR)
+    message(WARNING "Failed to parse job ID for job ${i}: ${JOB_PARSE_ERROR}")
+    continue()
+  endif()
+
+  string(JSON BUILDKITE_JOB_PASSED GET ${BUILDKITE_JOB} passed ERROR_VARIABLE JOB_PARSE_ERROR)
+  if(JOB_PARSE_ERROR)
+    message(WARNING "Failed to parse job passed status for job ${i}: ${JOB_PARSE_ERROR}")
+    continue()
+  endif()
+
+  string(JSON BUILDKITE_JOB_GROUP_ID GET ${BUILDKITE_JOB} group_uuid ERROR_VARIABLE JOB_PARSE_ERROR)
+  if(JOB_PARSE_ERROR)
+    message(WARNING "Failed to parse job group ID for job ${i}: ${JOB_PARSE_ERROR}")
+    continue()
+  endif()
+
+  string(JSON BUILDKITE_JOB_GROUP_KEY GET ${BUILDKITE_JOB} group_identifier ERROR_VARIABLE JOB_PARSE_ERROR)
+  if(JOB_PARSE_ERROR)
+    message(WARNING "Failed to parse job group key for job ${i}: ${JOB_PARSE_ERROR}")
+    continue()
+  endif()
+
+  string(JSON BUILDKITE_JOB_NAME GET ${BUILDKITE_JOB} step_key ERROR_VARIABLE JOB_PARSE_ERROR)
+  if(JOB_PARSE_ERROR)
+    string(JSON BUILDKITE_JOB_NAME GET ${BUILDKITE_JOB} name ERROR_VARIABLE JOB_PARSE_ERROR)
+    if(JOB_PARSE_ERROR)
+      message(WARNING "Failed to parse job name for job ${i}: ${JOB_PARSE_ERROR}")
+      continue()
+    endif()
   endif()
 
   message(STATUS "Job Details:")
