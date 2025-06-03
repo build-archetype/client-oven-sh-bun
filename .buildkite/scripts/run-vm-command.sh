@@ -92,7 +92,7 @@ while IFS='=' read -r -d '' name value; do
         if [[ "$name" == "BUILDKITE_BUILD_PATH" ]]; then
             value="VM_USER_HOME/workspace/build-workdir"
             echo "  Overriding BUILDKITE_BUILD_PATH to use symlink workspace: $value"
-        elif [[ "$name" == "HOME" || "$name" == "PATH" ]]; then
+        elif [[ "$name" == "HOME" || "$name" == "PATH" || "$name" == "TMPDIR" || "$name" == "LD_SUPPORT_TMPDIR" ]]; then
             # Skip host HOME and PATH to avoid clobbering VM environment
             continue
         fi
@@ -153,8 +153,9 @@ ls -la "$WORKSPACE" || true
 # Source environment
 source "$WORKSPACE/buildkite_env.sh"
 
-# Fix TMPDIR to a valid path inside VM
+# Fix TMPDIR and LD_SUPPORT_TMPDIR to valid paths inside VM
 export TMPDIR="/tmp"
+export LD_SUPPORT_TMPDIR="/tmp"
 
 REMOTE
 
