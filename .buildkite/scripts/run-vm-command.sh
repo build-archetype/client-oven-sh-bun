@@ -73,8 +73,8 @@ cat > "$ENV_FILE" << 'EOF'
 #!/bin/bash
 # Environment variables exported from Buildkite host
 
-# Add standard paths (including Rust/Cargo from bootstrap location)
-export PATH="$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:/opt/rust/bin:$PATH"
+# Add standard paths (including Rust/Cargo from standard location and system-wide symlinks)
+export PATH="$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:$HOME/.cargo/bin:$PATH"
 
 EOF
 
@@ -164,25 +164,31 @@ fi
 # Debug: Show Rust/Cargo availability
 echo "🦀 === Rust Debug Info ==="
 
-# Check if Rust is installed at the bootstrap location
-echo "🔍 Checking Rust installation in bootstrap location..."
-if [ -d "/opt/rust" ]; then
-    echo "✅ /opt/rust directory exists"
-    ls -la "/opt/rust/bin/" 2>/dev/null || echo "❌ No /opt/rust/bin directory"
+# Check standard Rust installation location
+echo "🔍 Checking standard Rust installation..."
+if [ -d "$HOME/.cargo" ]; then
+    echo "✅ ~/.cargo directory exists"
+    if [ -d "$HOME/.cargo/bin" ]; then
+        echo "✅ ~/.cargo/bin directory exists"
+        ls -la "$HOME/.cargo/bin/" | grep -E "(cargo|rustc|rustup)" || echo "❌ No Rust binaries in ~/.cargo/bin"
+    else
+        echo "❌ No ~/.cargo/bin directory"
+    fi
 else
-    echo "❌ No /opt/rust directory found"
+    echo "❌ No ~/.cargo directory found"
 fi
 
-# Also check the legacy location just in case
-if [ -d "$HOME/.cargo" ]; then
-    echo "✅ Legacy .cargo directory also exists"
-    ls -la "$HOME/.cargo/bin/" 2>/dev/null || echo "❌ No .cargo/bin directory"
-else
-    echo "❌ No legacy .cargo directory found"
-fi
+# Check system-wide symlinks
+echo "🔍 Checking system-wide Rust symlinks..."
+for location in "/usr/local/bin" "/opt/homebrew/bin"; do
+    if [ -d "$location" ]; then
+        echo "Checking $location:"
+        ls -la "$location" | grep -E "(cargo|rustc|rustup)" || echo "  No Rust symlinks found"
+    fi
+done
 
 # Try to find Rust anywhere on the system
-echo "🔍 Searching for Rust binaries..."
+echo "🔍 Searching for Rust binaries system-wide..."
 find /usr -name "cargo" 2>/dev/null || echo "No cargo found in /usr"
 find /opt -name "cargo" 2>/dev/null || echo "No cargo found in /opt"
 find "$HOME" -name "cargo" 2>/dev/null || echo "No cargo found in $HOME"

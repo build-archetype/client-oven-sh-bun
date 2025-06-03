@@ -2,7 +2,7 @@
 set -e
 set -x
 
-# Version: 3.0
+# Version: 3.1 - Fixed Rust installation to use standard location with system-wide symlinks
 # A comprehensive bootstrap script for macOS based on the main bootstrap.sh
 
 # Constants
@@ -347,19 +347,55 @@ install_ccache() {
 }
 
 install_rust() {
-    local rust_home="/opt/rust"
-    
     print "Installing Rust..."
-    create_directory "$rust_home"
-    append_to_profile "export RUSTUP_HOME=$rust_home"
-    append_to_profile "export CARGO_HOME=$rust_home"
-
-    local sh="$(require sh)"
-    local rustup_script=$(download_file "https://sh.rustup.rs")
-    execute "$sh" -lc "$rustup_script -y --no-modify-path"
-    append_to_path "$rust_home/bin"
     
-    print "✅ Rust installed successfully"
+    # Use standard Rust installation location (more reliable)
+    local curl="$(require curl)"
+    local sh="$(require sh)"
+    
+    # Download rustup installer
+    local rustup_script=$(download_file "https://sh.rustup.rs")
+    
+    # Install Rust using standard method (installs to ~/.cargo by default)
+    print "Running rustup installer..."
+    execute "$sh" "$rustup_script" -y
+    
+    # Source the cargo env to get the PATH immediately
+    if [ -f "$HOME/.cargo/env" ]; then
+        source "$HOME/.cargo/env"
+    fi
+    
+    # Add cargo bin to PATH in all profile files for persistence
+    append_to_path "$HOME/.cargo/bin"
+    
+    # Also create system-wide symlinks for reliability
+    local bin_dir="/usr/local/bin"
+    if [ "$(uname -m)" = "arm64" ] && [ -d "/opt/homebrew/bin" ]; then
+        bin_dir="/opt/homebrew/bin"
+    fi
+    
+    # Ensure bin directory exists
+    if [ ! -d "$bin_dir" ]; then
+        execute sudo mkdir -p "$bin_dir"
+    fi
+    
+    # Create symlinks for cargo, rustc, and rustup
+    if [ -f "$HOME/.cargo/bin/cargo" ]; then
+        execute sudo ln -sf "$HOME/.cargo/bin/cargo" "$bin_dir/cargo"
+        execute sudo ln -sf "$HOME/.cargo/bin/rustc" "$bin_dir/rustc"
+        execute sudo ln -sf "$HOME/.cargo/bin/rustup" "$bin_dir/rustup"
+        print "✅ Created system-wide Rust symlinks in $bin_dir"
+    else
+        error "Rust installation failed - cargo not found in ~/.cargo/bin"
+    fi
+    
+    # Verify installation
+    if command -v cargo >/dev/null 2>&1; then
+        print "✅ Rust installed successfully: $(cargo --version)"
+        print "✅ Rustc version: $(rustc --version)"
+    else
+        error "Rust installation verification failed"
+    fi
 }
 
 install_buildkite_agent() {

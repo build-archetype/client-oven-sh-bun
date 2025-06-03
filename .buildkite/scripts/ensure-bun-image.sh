@@ -233,7 +233,7 @@ main() {
     log "Detected Bun version: $BUN_VERSION"
     
     # Bootstrap script version - increment this when bootstrap changes to force new images
-    BOOTSTRAP_VERSION="3.0"  # Complete rewrite: follows main bootstrap.sh pattern, removes build-from-source logic
+    BOOTSTRAP_VERSION="3.1"  # Fixed Rust installation: standard location + system-wide symlinks
     
     # Image names (include bootstrap version to force rebuilds when bootstrap changes)
     LOCAL_IMAGE_NAME="bun-build-macos-${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
