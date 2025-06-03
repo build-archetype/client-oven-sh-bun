@@ -226,7 +226,7 @@ echo "=== EXECUTING FINAL COMMAND (single SSH) ==="
 read -r -d '' REMOTE_PREAMBLE <<'EOS'
 set -eo pipefail
 
-# Determine workspace path
+# Determine workspace path for environment sourcing
 if [ -d "$HOME/virtiofs/workspace" ]; then
   WORKSPACE="$HOME/virtiofs/workspace"
 else
@@ -236,9 +236,12 @@ fi
 # Source the environment generated earlier
 source "$WORKSPACE/buildkite_env.sh"
 
-# Export Buildkite build path consistently
-export BUILDKITE_BUILD_PATH="$WORKSPACE/build-workdir"
-cd "$WORKSPACE"
+# Use local scratch directory to avoid VirtioFS timestamp issues
+SCRATCH_DIR="$HOME/build_ws"
+export WORKSPACE="$SCRATCH_DIR"
+export BUILDKITE_BUILD_PATH="$SCRATCH_DIR/build-workdir"
+export VENDOR_PATH="$SCRATCH_DIR/vendor"
+cd "$SCRATCH_DIR"
 EOS
 
 # Wrap user command to capture exit code and sync back
