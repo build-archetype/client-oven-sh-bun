@@ -92,8 +92,8 @@ while IFS='=' read -r -d '' name value; do
         if [[ "$name" == "BUILDKITE_BUILD_PATH" ]]; then
             value="VM_USER_HOME/workspace/build-workdir"
             echo "  Overriding BUILDKITE_BUILD_PATH to use symlink workspace: $value"
-        elif [[ "$name" == "HOME" ]]; then
-            # Skip host HOME to avoid clobbering VM HOME
+        elif [[ "$name" == "HOME" || "$name" == "PATH" ]]; then
+            # Skip host HOME and PATH to avoid clobbering VM environment
             continue
         fi
         
@@ -216,13 +216,16 @@ source "$WORKSPACE/buildkite_env.sh"
 export BUILDKITE_BUILD_PATH="$WORKSPACE/build-workdir"
 echo "✅ BUILDKITE_BUILD_PATH set to: $BUILDKITE_BUILD_PATH"
 
-export PATH="/Users/admin/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
-export TMPDIR="/tmp"
-echo "Verifying buildkite-agent availability…"
-command -v buildkite-agent && echo "✅ buildkite-agent found at $(which buildkite-agent)" || echo "⚠️  buildkite-agent not found in PATH"
-
 # Run command passed from host (from first positional arg)
-CMD_TO_RUN="$1"
+CMD_ENCODED="$1"
+CMD_TO_RUN=$(echo "$CMD_ENCODED" | base64 -d)
+
+# Debug bun availability and PATH
+echo "--- DEBUG bun location ---"
+echo "PATH=$PATH"
+for d in ${PATH//:/ }; do [ -x "$d/bun" ] && echo "Found bun at $d/bun"; done
+command -v bun && echo "✅ bun found: $(bun --version)" || echo "❌ bun still not found"
+
 cd "$WORKSPACE"
 eval "$CMD_TO_RUN"
 
