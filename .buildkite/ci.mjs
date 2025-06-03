@@ -750,32 +750,11 @@ function getTestBunStep(platform, options, testOptions = {}) {
   };
 
   if (os === "darwin") {
-    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
       command: [
-        // Log initial state
-        "echo '=== INITIAL TART STATE (TEST BUN) ==='",
-        "echo 'Available Tart VMs:'",
-        "tart list || echo 'Failed to list VMs'",
-        "echo '====================================='",
-        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
-        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
-        'TART_LOG_PID=$!',
-        `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone ${IMAGE_CONFIG.baseImage.versionedName} ${vmName}`,
-        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
-        'sleep 30',
-        'chmod +x .buildkite/scripts/run-vm-command.sh',
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "./scripts/runner.node.mjs ${args.join(" ")}"`,
-        'buildkite-agent artifact upload vm.log || true',
-        `echo "Checking VM status before cleanup..."`,
-        `if tart list | grep -q "${vmName}"; then echo "VM ${vmName} exists, deleting..."; tart delete ${vmName} || true; else echo "VM ${vmName} not found - may have been cleaned up earlier or crashed"; fi || true`,
-        // Log final state
-        "echo '=== FINAL TART STATE (TEST BUN) ==='",
-        "echo 'Available Tart VMs:'",
-        "tart list || echo 'Failed to list VMs'",
-        "echo '==================================='"
+        "chmod +x scripts/build-macos.sh",
+        `./scripts/build-macos.sh "./scripts/runner.node.mjs ${args.join(" ")}" "${process.cwd()}"`
       ]
     };
   }
