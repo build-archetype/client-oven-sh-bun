@@ -54,211 +54,148 @@ VM_IP=$(tart ip "$VM_NAME")
 # SSH options for reliability
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
 
-# Execute command
 echo "Running command in VM: $COMMAND"
 
-echo "=== RUNNING ACTUAL COMMAND ==="
+# ===== CREATE ENVIRONMENT FILE =====
+echo "=== CREATING ENVIRONMENT FILE ==="
+ENV_FILE="./buildkite_env.sh"
 
-echo "=== CREATING HOST ENVIRONMENT FILE ==="
-# Create environment file directly in workspace directory (gets shared to VM)
-SHARED_ENV_FILE="./buildkite_env.sh"
-
-echo "Creating environment file on host at: $SHARED_ENV_FILE"
-
-# Dump ALL environment variables to the shared file
-cat > "$SHARED_ENV_FILE" << 'EOF'
+cat > "$ENV_FILE" << 'EOF'
 #!/bin/bash
 # Environment variables exported from Buildkite host
 
 # Add standard paths
 export PATH="$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
 
-# Set build paths to use symlink workspace without spaces instead of shared folder with spaces
-# IMPORTANT: Use $HOME/workspace symlink to avoid path quoting issues in compiler flags
-# Note: Will be set to actual VM user's home in the VM environment
-export BUILDKITE_BUILD_PATH="VM_USER_HOME/workspace/build-workdir"
-
 EOF
 
-# Export all current environment variables to the file
-echo "Exporting all environment variables to workspace file..."
+# Export all environment variables to the file
+echo "Exporting environment variables..."
 env_count=0
 buildkite_count=0
 
-# Use a more reliable approach - loop through all environment variables
 while IFS='=' read -r -d '' name value; do
     if [[ -n "$name" && -n "$value" ]]; then
-        # Override build path to use shared workspace for consistency
-        if [[ "$name" == "BUILDKITE_BUILD_PATH" ]]; then
-            value="VM_USER_HOME/workspace/build-workdir"
-            echo "  Overriding BUILDKITE_BUILD_PATH to use symlink workspace: $value"
-        elif [[ "$name" == "HOME" || "$name" == "PATH" || "$name" == "TMPDIR" || "$name" == "LD_SUPPORT_TMPDIR" ]]; then
-            # Skip host HOME and PATH to avoid clobbering VM environment
+        # Skip host-specific variables that shouldn't be copied
+        if [[ "$name" == "HOME" || "$name" == "TMPDIR" || "$name" == "LD_SUPPORT_TMPDIR" ]]; then
             continue
         fi
         
-        # Use printf to properly escape the value
-        printf 'export %s=%q\n' "$name" "$value" >> "$SHARED_ENV_FILE"
+        # Override build path to use VM workspace
+        if [[ "$name" == "BUILDKITE_BUILD_PATH" ]]; then
+            value="/Users/admin/workspace/build-workdir"
+        fi
+        
+        printf 'export %s=%q\n' "$name" "$value" >> "$ENV_FILE"
         env_count=$((env_count + 1))
         
-        # Count BUILDKITE_* variables
         if [[ "$name" == BUILDKITE_* ]]; then
-            echo "  Found BUILDKITE variable: $name"
             buildkite_count=$((buildkite_count + 1))
         fi
     fi
 done < <(env -0)
 
-echo "✅ Exported $env_count total environment variables"
-echo "✅ Found $buildkite_count BUILDKITE_* environment variables"
+echo "✅ Exported $env_count environment variables ($buildkite_count BUILDKITE_* vars)"
 
-# Show file info
-echo "Environment file created:"
-echo "  File: $SHARED_ENV_FILE" 
-echo "  Size: $(wc -l < "$SHARED_ENV_FILE") lines"
-echo "  First 10 BUILDKITE_* variables:"
-grep '^export BUILDKITE_' "$SHARED_ENV_FILE" | head -10
+# ===== COPY WORKSPACE TO VM =====
+echo "=== COPYING WORKSPACE TO VM ==="
+echo "Copying workspace to VM..."
 
-echo "=== SOURCING ENVIRONMENT AND RUNNING COMMAND ==="
-sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -s <<'REMOTE'
-set -eo pipefail
+# Ensure workspace directory exists on VM
+sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "rm -rf ~/workspace && mkdir -p ~/workspace"
 
-echo "===== VM context ====="
-whoami
-pwd
-
-# Attempt to remount the Virtio-FS share without spaces
-echo "Remounting Virtio-FS…"
-sudo umount "/Volumes/My Shared Files" 2>/dev/null || true
-sudo mkdir -p "$HOME/virtiofs"
-if sudo mount_virtiofs com.apple.virtio-fs.automount "$HOME/virtiofs"; then
-  WORK_ROOT="$HOME/virtiofs"
-  echo "✅ Remounted to $WORK_ROOT"
+# Copy entire workspace to VM
+if rsync -av --delete -e "sshpass -p admin ssh $SSH_OPTS" ./ admin@$VM_IP:~/workspace/; then
+    echo "✅ Workspace copied successfully"
 else
-  echo "⚠️  Remount failed, falling back to /Volumes/My Shared Files"
-  WORK_ROOT="/Volumes/My Shared Files"
+    echo "❌ Failed to copy workspace to VM"
+    exit 1
 fi
 
-WORKSPACE="$WORK_ROOT/workspace"
+# ===== SETUP VM ENVIRONMENT =====
+echo "=== SETTING UP VM ENVIRONMENT ==="
 
-echo "--- mount (virtiofs entries) ---"
-mount | grep -E 'virtio|virtiofs' || true
+sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -s <<'REMOTE_SETUP'
+set -eo pipefail
 
-echo "--- ls -la $WORK_ROOT ---"
-ls -la "$WORK_ROOT" || true
+echo "Setting up VM environment..."
+cd ~/workspace
 
-echo "--- ls -la $WORKSPACE ---"
-ls -la "$WORKSPACE" || true
+# Source environment variables
+source ./buildkite_env.sh
 
-# Source environment
-source "$WORKSPACE/buildkite_env.sh"
-
-# Fix TMPDIR and LD_SUPPORT_TMPDIR to valid paths inside VM
+# Set VM-specific paths
+export WORKSPACE="$HOME/workspace"
+export BUILDKITE_BUILD_PATH="$HOME/workspace/build-workdir"
+export VENDOR_PATH="$HOME/workspace/vendor"
 export TMPDIR="/tmp"
 export LD_SUPPORT_TMPDIR="/tmp"
 
-# Use local scratch directory to avoid Virtio-FS timestamp issues
-SCRATCH_DIR="$HOME/build_ws"
-rm -rf "$SCRATCH_DIR" && mkdir -p "$SCRATCH_DIR"
-echo "Syncing workspace to local scratch dir $SCRATCH_DIR …"
-rsync -a --delete "$WORKSPACE/" "$SCRATCH_DIR/"
-
-# Switch to scratch directory for build
-cd "$SCRATCH_DIR"
-
-# Repoint workspace-related environment variables to scratch tree
-export WORKSPACE="$SCRATCH_DIR"
-export BUILDKITE_BUILD_PATH="$SCRATCH_DIR/build-workdir"
-export VENDOR_PATH="$SCRATCH_DIR/vendor"
-
-REMOTE
-
-echo "=== ENSURING BUILDKITE AGENT AVAILABILITY ==="
-sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -s <<'REMOTE'
-set -eo pipefail
-
-# Determine WORK_ROOT again (in case first block failed earlier run)
-if [ -d "$HOME/virtiofs/workspace" ]; then
-  WORK_ROOT="$HOME/virtiofs"
-else
-  WORK_ROOT="/Volumes/My Shared Files"
-fi
-WORKSPACE="$WORK_ROOT/workspace"
-
-source "$WORKSPACE/buildkite_env.sh"
-export BUILDKITE_BUILD_PATH="$WORKSPACE/build-workdir"
-echo "✅ BUILDKITE_BUILD_PATH set to: $BUILDKITE_BUILD_PATH"
-
-# Ensure buildkite-agent binary
-if command -v buildkite-agent >/dev/null 2>&1; then
-  echo "✅ Buildkite agent already available: $(buildkite-agent --version)"
-else
-  echo "Installing buildkite-agent…"
-  AGENT_DIR="/Users/admin/.buildkite-agent"
-  if [ ! -d "$AGENT_DIR" ]; then
-    curl -fsSL https://raw.githubusercontent.com/buildkite/agent/main/install.sh > /tmp/install-buildkite.sh
-    chmod +x /tmp/install-buildkite.sh
-    DESTINATION=$AGENT_DIR bash /tmp/install-buildkite.sh
-    export PATH="$AGENT_DIR/bin:$PATH"
-    sudo ln -sf "$AGENT_DIR/bin/buildkite-agent" /usr/local/bin/buildkite-agent 2>/dev/null || true
-    rm -f /tmp/install-buildkite.sh
-  else
-    export PATH="$AGENT_DIR/bin:$PATH"
-  fi
-  echo "✅ Buildkite agent setup complete"
+# Ensure buildkite-agent is available
+if ! command -v buildkite-agent >/dev/null 2>&1; then
+    echo "Installing buildkite-agent..."
+    AGENT_DIR="$HOME/.buildkite-agent"
+    if [ ! -d "$AGENT_DIR" ]; then
+        curl -fsSL https://raw.githubusercontent.com/buildkite/agent/main/install.sh > /tmp/install-buildkite.sh
+        chmod +x /tmp/install-buildkite.sh
+        DESTINATION=$AGENT_DIR bash /tmp/install-buildkite.sh
+        sudo ln -sf "$AGENT_DIR/bin/buildkite-agent" /usr/local/bin/buildkite-agent 2>/dev/null || true
+        rm -f /tmp/install-buildkite.sh
+    fi
 fi
 
-command -v buildkite-agent && echo "✅ Buildkite agent ready: $(buildkite-agent --version)" || echo "⚠️  buildkite-agent not found after install"
-
-# Ensure bun is accessible in /usr/local/bin as well to survive PATH resets by zsh
+# Ensure bun is accessible
 if command -v bun >/dev/null 2>&1; then
-  BUN_BIN=$(command -v bun)
-  if [ ! -f "/usr/local/bin/bun" ] || [ "$(readlink /usr/local/bin/bun)" != "$BUN_BIN" ]; then
-    echo "Linking $BUN_BIN -> /usr/local/bin/bun"
+    BUN_BIN=$(command -v bun)
     sudo ln -sf "$BUN_BIN" /usr/local/bin/bun 2>/dev/null || true
-  fi
 fi
-REMOTE
 
-echo "=== EXECUTING FINAL COMMAND (single SSH) ==="
+echo "✅ VM environment setup complete"
+REMOTE_SETUP
 
-# Build remote pre-amble (mount check, env, cd) and append the user command
-read -r -d '' REMOTE_PREAMBLE <<'EOS'
+# ===== EXECUTE COMMAND =====
+echo "=== EXECUTING COMMAND ==="
+
+# Execute the user command in the VM
+REMOTE_CMD="
 set -eo pipefail
+cd ~/workspace
+source ./buildkite_env.sh
+export WORKSPACE=\"\$HOME/workspace\"
+export BUILDKITE_BUILD_PATH=\"\$HOME/workspace/build-workdir\"
+export VENDOR_PATH=\"\$HOME/workspace/vendor\"
+export TMPDIR=\"/tmp\"
+export LD_SUPPORT_TMPDIR=\"/tmp\"
 
-# Determine workspace path for environment sourcing
-if [ -d "$HOME/virtiofs/workspace" ]; then
-  WORKSPACE="$HOME/virtiofs/workspace"
-else
-  WORKSPACE="/Volumes/My Shared Files/workspace"
-fi
+echo \"Executing: $COMMAND\"
+$COMMAND
+"
 
-# Source the environment generated earlier
-source "$WORKSPACE/buildkite_env.sh"
-
-# Use local scratch directory to avoid VirtioFS timestamp issues
-SCRATCH_DIR="$HOME/build_ws"
-export WORKSPACE="$SCRATCH_DIR"
-export BUILDKITE_BUILD_PATH="$SCRATCH_DIR/build-workdir"
-export VENDOR_PATH="$SCRATCH_DIR/vendor"
-cd "$SCRATCH_DIR"
-EOS
-
-# Wrap user command to capture exit code and sync back
-REMOTE_CMD="${REMOTE_PREAMBLE}
-${COMMAND}
-EXITCODE=$?
-echo 'Syncing build results back to Virtio-FS workspace…'
-rsync -a --delete "$SCRATCH_DIR/" "$WORKSPACE/"
-exit $EXITCODE"
-
-# Run everything in a single login bash so PATH is initialised once and retained
-sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -lc "$(printf '%q ' "$REMOTE_CMD")"
+sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -lc "$REMOTE_CMD"
 EXIT_CODE=$?
 
-# ---- CLEANUP ----
+# ===== COPY ARTIFACTS BACK =====
+echo "=== COPYING ARTIFACTS BACK ==="
+
+if [ -d "./build" ] || [ -d "./artifacts" ] || [ -d "./dist" ]; then
+    echo "Copying build artifacts back from VM..."
+    
+    # Copy common artifact directories back
+    for dir in build artifacts dist; do
+        if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d ~/workspace/$dir ]"; then
+            echo "Copying $dir/ back..."
+            rsync -av -e "sshpass -p admin ssh $SSH_OPTS" admin@$VM_IP:~/workspace/$dir/ ./$dir/ || true
+        fi
+    done
+    
+    echo "✅ Artifacts copied back"
+else
+    echo "No standard artifact directories found, skipping artifact copy"
+fi
+
+# ===== CLEANUP =====
 echo "=== CLEANUP ==="
-rm -f "$SHARED_ENV_FILE" || true
+rm -f "$ENV_FILE" || true
 echo "✅ Cleanup complete"
 
 # Propagate exit status
