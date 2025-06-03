@@ -166,6 +166,11 @@ rsync -a --delete "$WORKSPACE/" "$SCRATCH_DIR/"
 # Switch to scratch directory for build
 cd "$SCRATCH_DIR"
 
+# Repoint workspace-related environment variables to scratch tree
+export WORKSPACE="$SCRATCH_DIR"
+export BUILDKITE_BUILD_PATH="$SCRATCH_DIR/build-workdir"
+export VENDOR_PATH="$SCRATCH_DIR/vendor"
+
 REMOTE
 
 echo "=== ENSURING BUILDKITE AGENT AVAILABILITY ==="
