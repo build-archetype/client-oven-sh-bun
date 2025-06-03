@@ -124,13 +124,26 @@ sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
     echo \"Working directory: \$(pwd)\"
     
     # Remount the Virtio-FS share to a path without spaces
-    sudo umount "/Volumes/My Shared Files" 2>/dev/null || true
+    echo \"Attempting to remount Virtio-FS without spaces...\"
+    sudo umount \"/Volumes/My Shared Files\" 2>/dev/null || true
     sudo mkdir -p "\$HOME/virtiofs"
-    sudo mount_virtiofs com.apple.virtio-fs.automount "\$HOME/virtiofs"
-    export VM_WORK_ROOT="\$HOME/virtiofs"
+    if sudo mount_virtiofs com.apple.virtio-fs.automount "\$HOME/virtiofs"; then
+        export VM_WORK_ROOT="\$HOME/virtiofs"
+        echo \"✅ Remounted Virtio-FS to: \$VM_WORK_ROOT\"
+    else
+        echo \"⚠️  mount_virtiofs failed (resource busy?), falling back to original path\"
+        export VM_WORK_ROOT="/Volumes/My Shared Files"
+    fi
+
     export VM_WORKSPACE="\$VM_WORK_ROOT/workspace"
-    echo \"✅ Remounted Virtio-FS to: \$VM_WORK_ROOT\"
     echo \"✅ Workspace directory expected at: \$VM_WORKSPACE\"
+
+    echo \"--- DEBUG: mount output (virtiofs entries) ---\"
+    mount | grep -E "virtio|virtiofs" || true
+    echo \"--- DEBUG: ls -la of mount root ---\"
+    ls -la "\$VM_WORK_ROOT" || true
+    echo \"--- DEBUG: ls -la of workspace ---\"
+    ls -la "\$VM_WORKSPACE" || true
     
     # Source the environment file and fix paths
     if [ -f "\$VM_WORKSPACE/buildkite_env.sh" ]; then
