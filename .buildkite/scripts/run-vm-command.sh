@@ -163,6 +163,32 @@ fi
 
 # Debug: Show Rust/Cargo availability
 echo "🦀 === Rust Debug Info ==="
+
+# Check if Rust is installed at all
+echo "🔍 Checking Rust installation..."
+if [ -d "$HOME/.cargo" ]; then
+    echo "✅ .cargo directory exists"
+    ls -la "$HOME/.cargo/bin/" 2>/dev/null || echo "❌ No .cargo/bin directory"
+else
+    echo "❌ No .cargo directory found"
+fi
+
+# Try to find Rust anywhere on the system
+echo "🔍 Searching for Rust binaries..."
+find /usr -name "cargo" 2>/dev/null || echo "No cargo found in /usr"
+find /opt -name "cargo" 2>/dev/null || echo "No cargo found in /opt"
+find "$HOME" -name "cargo" 2>/dev/null || echo "No cargo found in $HOME"
+
+# Check our environment file
+echo "🔍 Checking environment file..."
+if [ -f "./buildkite_env.sh" ]; then
+    echo "✅ buildkite_env.sh exists"
+    echo "PATH line in env file:"
+    grep "^export PATH=" ./buildkite_env.sh || echo "❌ No PATH export found"
+else
+    echo "❌ buildkite_env.sh not found"
+fi
+
 if command -v cargo >/dev/null 2>&1; then
     echo "✅ Cargo found: $(command -v cargo)"
     echo "✅ Cargo version: $(cargo --version)"
