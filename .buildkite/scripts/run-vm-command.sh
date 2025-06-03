@@ -153,6 +153,9 @@ ls -la "$WORKSPACE" || true
 # Source environment
 source "$WORKSPACE/buildkite_env.sh"
 
+# Fix TMPDIR to a valid path inside VM
+export TMPDIR="/tmp"
+
 REMOTE
 
 echo "=== ENSURING BUILDKITE AGENT AVAILABILITY ==="
