@@ -149,11 +149,16 @@ ls -la "$WORKSPACE" || true
 
 # Source environment
 if [ -f "$WORKSPACE/buildkite_env.sh" ]; then
+  ORIGINAL_HOME=$HOME
   source "$WORKSPACE/buildkite_env.sh"
+  export HOME="$ORIGINAL_HOME"
 else
   echo "❌ buildkite_env.sh not found at $WORKSPACE";
   exit 1
 fi
+
+# Reset HOME to actual VM user after host env file may have overridden it
+export HOME="$WORK_ROOT/.."  # parent dir of WORK_ROOT is user home (e.g., /Users/admin)
 
 export BUILDKITE_BUILD_PATH="$WORKSPACE/build-workdir"
 echo "BUILDKITE_BUILD_PATH=$BUILDKITE_BUILD_PATH"
@@ -213,7 +218,10 @@ else
 fi
 WORKSPACE="$WORK_ROOT/workspace"
 
+ORIGINAL_HOME=$HOME
 source "$WORKSPACE/buildkite_env.sh"
+export HOME="$ORIGINAL_HOME"
+
 export BUILDKITE_BUILD_PATH="$WORKSPACE/build-workdir"
 echo "✅ BUILDKITE_BUILD_PATH set to: $BUILDKITE_BUILD_PATH"
 
