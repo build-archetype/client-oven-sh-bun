@@ -207,7 +207,7 @@ echo "=== EXECUTING FINAL COMMAND ==="
 # Execute the command and capture the exit code
 # Ensure environment is sourced before running any command
 set +e
-# Preserve the user command so the remote shell can see it (safely as a positional arg)
+# Pass the plain user command as a single positional argument
 CMD_TO_RUN="$COMMAND"
 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -s -- "$CMD_TO_RUN" <<'REMOTE'
 set -eo pipefail
@@ -225,9 +225,8 @@ source "$WORKSPACE/buildkite_env.sh"
 export BUILDKITE_BUILD_PATH="$WORKSPACE/build-workdir"
 echo "✅ BUILDKITE_BUILD_PATH set to: $BUILDKITE_BUILD_PATH"
 
-# Run command passed from host (from first positional arg)
-CMD_ENCODED="$1"
-CMD_TO_RUN=$(echo "$CMD_ENCODED" | base64 -d)
+# Retrieve the original command from the first positional argument
+CMD_TO_RUN="$1"
 
 # Debug bun availability and PATH
 echo "--- DEBUG bun location ---"
