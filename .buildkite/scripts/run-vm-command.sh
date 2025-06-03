@@ -176,15 +176,16 @@ if command -v buildkite-agent >/dev/null 2>&1; then
   echo "✅ Buildkite agent already available: $(buildkite-agent --version)"
 else
   echo "Installing buildkite-agent…"
-  if [ ! -d "$HOME/.buildkite-agent" ]; then
+  AGENT_DIR="/Users/admin/.buildkite-agent"
+  if [ ! -d "$AGENT_DIR" ]; then
     curl -fsSL https://raw.githubusercontent.com/buildkite/agent/main/install.sh > /tmp/install-buildkite.sh
     chmod +x /tmp/install-buildkite.sh
-    DESTINATION=$HOME/.buildkite-agent bash /tmp/install-buildkite.sh
-    export PATH="$HOME/.buildkite-agent/bin:$PATH"
-    sudo ln -sf "$HOME/.buildkite-agent/bin/buildkite-agent" /usr/local/bin/buildkite-agent 2>/dev/null || true
+    DESTINATION=$AGENT_DIR bash /tmp/install-buildkite.sh
+    export PATH="$AGENT_DIR/bin:$PATH"
+    sudo ln -sf "$AGENT_DIR/bin/buildkite-agent" /usr/local/bin/buildkite-agent 2>/dev/null || true
     rm -f /tmp/install-buildkite.sh
   else
-    export PATH="$HOME/.buildkite-agent/bin:$PATH"
+    export PATH="$AGENT_DIR/bin:$PATH"
   fi
   echo "✅ Buildkite agent setup complete"
 fi
@@ -215,7 +216,7 @@ source "$WORKSPACE/buildkite_env.sh"
 export BUILDKITE_BUILD_PATH="$WORKSPACE/build-workdir"
 echo "✅ BUILDKITE_BUILD_PATH set to: $BUILDKITE_BUILD_PATH"
 
-export PATH="$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+export PATH="/Users/admin/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
 export TMPDIR="/tmp"
 echo "Verifying buildkite-agent availability…"
 command -v buildkite-agent && echo "✅ buildkite-agent found at $(which buildkite-agent)" || echo "⚠️  buildkite-agent not found in PATH"
