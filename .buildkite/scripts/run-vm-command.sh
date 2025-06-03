@@ -161,79 +161,74 @@ echo "BUILDKITE_BUILD_PATH=$BUILDKITE_BUILD_PATH"
 REMOTE
 
 echo "=== ENSURING BUILDKITE AGENT AVAILABILITY ==="
-sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
-    # Source environment and fix the build path
-    source "\$HOME/virtiofs/workspace/buildkite_env.sh"
-    export BUILDKITE_BUILD_PATH="\$HOME/virtiofs/workspace/build-workdir"
-    echo \"✅ BUILDKITE_BUILD_PATH set to: \$BUILDKITE_BUILD_PATH\"
-    
-    # Check if buildkite-agent is already available
-    if command -v buildkite-agent >/dev/null 2>&1; then
-        echo \"✅ Buildkite agent already available: \$(buildkite-agent --version)\"
-    else
-        echo \"Installing buildkite-agent...\"
-        
-        # Try to install in user home first (faster fallback)
-        if [ ! -d \"\$HOME/.buildkite-agent\" ]; then
-            echo \"Downloading buildkite-agent installer...\"
-            curl -fsSL https://raw.githubusercontent.com/buildkite/agent/main/install.sh > /tmp/install-buildkite.sh
-            chmod +x /tmp/install-buildkite.sh
-            
-            # Install to user home directory
-            export DESTINATION=\$HOME/.buildkite-agent
-            bash /tmp/install-buildkite.sh
-            
-            # Add to PATH for this session
-            export PATH=\"\$HOME/.buildkite-agent/bin:\$PATH\"
-            
-            # Create system-wide symlink if possible
-            if sudo -n true 2>/dev/null; then
-                sudo ln -sf \"\$HOME/.buildkite-agent/bin/buildkite-agent\" \"/usr/local/bin/buildkite-agent\" 2>/dev/null || true
-            fi
-            
-            rm -f /tmp/install-buildkite.sh
-        else
-            # Already installed, just add to PATH
-            export PATH=\"\$HOME/.buildkite-agent/bin:\$PATH\"
-        fi
-        
-        echo \"✅ Buildkite agent setup complete\"
-    fi
-    
-    # Verify installation
-    if command -v buildkite-agent >/dev/null 2>&1; then
-        echo \"✅ Buildkite agent ready: \$(buildkite-agent --version)\"
-    else
-        echo \"⚠️  Buildkite agent installation may have failed, but continuing...\"
-    fi
-'"
+sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -s <<'REMOTE'
+set -eo pipefail
+
+# Determine WORK_ROOT again (in case first block failed earlier run)
+if [ -d "$HOME/virtiofs/workspace" ]; then
+  WORK_ROOT="$HOME/virtiofs"
+else
+  WORK_ROOT="/Volumes/My Shared Files"
+fi
+WORKSPACE="$WORK_ROOT/workspace"
+
+source "$WORKSPACE/buildkite_env.sh"
+export BUILDKITE_BUILD_PATH="$WORKSPACE/build-workdir"
+echo "✅ BUILDKITE_BUILD_PATH set to: $BUILDKITE_BUILD_PATH"
+
+# Ensure buildkite-agent binary
+if command -v buildkite-agent >/dev/null 2>&1; then
+  echo "✅ Buildkite agent already available: $(buildkite-agent --version)"
+else
+  echo "Installing buildkite-agent…"
+  if [ ! -d "$HOME/.buildkite-agent" ]; then
+    curl -fsSL https://raw.githubusercontent.com/buildkite/agent/main/install.sh > /tmp/install-buildkite.sh
+    chmod +x /tmp/install-buildkite.sh
+    DESTINATION=$HOME/.buildkite-agent bash /tmp/install-buildkite.sh
+    export PATH="$HOME/.buildkite-agent/bin:$PATH"
+    sudo ln -sf "$HOME/.buildkite-agent/bin/buildkite-agent" /usr/local/bin/buildkite-agent 2>/dev/null || true
+    rm -f /tmp/install-buildkite.sh
+  else
+    export PATH="$HOME/.buildkite-agent/bin:$PATH"
+  fi
+  echo "✅ Buildkite agent setup complete"
+fi
+
+command -v buildkite-agent && echo "✅ Buildkite agent ready: $(buildkite-agent --version)" || echo "⚠️  buildkite-agent not found after install"
+REMOTE
 
 echo "=== EXECUTING FINAL COMMAND ==="
 
 # Execute the command and capture the exit code
 # Ensure environment is sourced before running any command
 set +e
-sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "bash -l -c '
-    # Source environment and ensure buildkite-agent is in PATH
-    source "\$HOME/virtiofs/workspace/buildkite_env.sh"
-    export BUILDKITE_BUILD_PATH="\$HOME/virtiofs/workspace/build-workdir"
-    echo \"✅ BUILDKITE_BUILD_PATH set to: \$BUILDKITE_BUILD_PATH\"
-    
-    # Add buildkite-agent to PATH multiple times to ensure it sticks
-    export PATH="\$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:\$PATH"
-    export TMPDIR="/tmp"
-    echo \"Verifying buildkite-agent availability...\"
-    
-    if command -v buildkite-agent >/dev/null 2>&1; then
-        echo \"✅ buildkite-agent found at: \\$(which buildkite-agent)\"
-    else
-        echo \"⚠️  buildkite-agent not found in PATH, but continuing...\"
-        echo \"PATH: \\$PATH\"
-    fi
-    
-    # Clean up environment file and run command from symlinked workspace
-    rm -f "\$HOME/virtiofs/workspace/buildkite_env.sh" && cd "\$HOME/virtiofs/workspace" && $COMMAND
-'"
+sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -s <<'REMOTE'
+set -eo pipefail
+
+# Resolve workspace again
+if [ -d "$HOME/virtiofs/workspace" ]; then
+  WORK_ROOT="$HOME/virtiofs"
+else
+  WORK_ROOT="/Volumes/My Shared Files"
+fi
+WORKSPACE="$WORK_ROOT/workspace"
+
+source "$WORKSPACE/buildkite_env.sh"
+export BUILDKITE_BUILD_PATH="$WORKSPACE/build-workdir"
+echo "✅ BUILDKITE_BUILD_PATH set to: $BUILDKITE_BUILD_PATH"
+
+export PATH="$HOME/.buildkite-agent/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+export TMPDIR="/tmp"
+echo "Verifying buildkite-agent availability…"
+command -v buildkite-agent && echo "✅ buildkite-agent found at $(which buildkite-agent)" || echo "⚠️  buildkite-agent not found in PATH"
+
+# Run command
+cd "$WORKSPACE"
+eval $COMMAND
+
+# Remove env file after use
+rm -f "$WORKSPACE/buildkite_env.sh"
+REMOTE
 EXIT_CODE=$?
 set -e
 
