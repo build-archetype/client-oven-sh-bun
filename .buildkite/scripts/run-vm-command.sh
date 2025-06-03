@@ -197,7 +197,9 @@ echo "=== EXECUTING FINAL COMMAND ==="
 # Execute the command and capture the exit code
 # Ensure environment is sourced before running any command
 set +e
-sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -s <<'REMOTE'
+# Preserve the user command so the remote shell can see it
+CMD_TO_RUN="$COMMAND"
+sshpass -p admin ssh $SSH_OPTS COMMAND="$CMD_TO_RUN" admin@$VM_IP bash -s <<'REMOTE'
 set -eo pipefail
 
 # Resolve workspace again
@@ -218,9 +220,9 @@ export TMPDIR="/tmp"
 echo "Verifying buildkite-agent availability…"
 command -v buildkite-agent && echo "✅ buildkite-agent found at $(which buildkite-agent)" || echo "⚠️  buildkite-agent not found in PATH"
 
-# Run command
+# Run command passed from host
 cd "$WORKSPACE"
-eval $COMMAND
+eval "$COMMAND"
 
 # Remove env file after use
 rm -f "$WORKSPACE/buildkite_env.sh"
