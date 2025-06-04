@@ -103,16 +103,16 @@ function getTargetLabel(target) {
  */
 const buildPlatforms = [
   { os: "darwin", arch: "aarch64", release: "14" },
-  { os: "darwin", arch: "x64", release: "14" },
-  { os: "linux", arch: "aarch64", distro: "amazonlinux", release: "2023", features: ["docker"] },
-  { os: "linux", arch: "x64", distro: "amazonlinux", release: "2023", features: ["docker"] },
-  { os: "linux", arch: "x64", baseline: true, distro: "amazonlinux", release: "2023", features: ["docker"] },
-  { os: "linux", arch: "x64", profile: "asan", distro: "amazonlinux", release: "2023", features: ["docker"] },
-  { os: "linux", arch: "aarch64", abi: "musl", distro: "alpine", release: "3.21" },
-  { os: "linux", arch: "x64", abi: "musl", distro: "alpine", release: "3.21" },
-  { os: "linux", arch: "x64", abi: "musl", baseline: true, distro: "alpine", release: "3.21" },
-  { os: "windows", arch: "x64", release: "2019" },
-  { os: "windows", arch: "x64", baseline: true, release: "2019" },
+  // { os: "darwin", arch: "x64", release: "14" },
+  // { os: "linux", arch: "aarch64", distro: "amazonlinux", release: "2023", features: ["docker"] },
+  // { os: "linux", arch: "x64", distro: "amazonlinux", release: "2023", features: ["docker"] },
+  // { os: "linux", arch: "x64", baseline: true, distro: "amazonlinux", release: "2023", features: ["docker"] },
+  // { os: "linux", arch: "x64", profile: "asan", distro: "amazonlinux", release: "2023", features: ["docker"] },
+  // { os: "linux", arch: "aarch64", abi: "musl", distro: "alpine", release: "3.21" },
+  // { os: "linux", arch: "x64", abi: "musl", distro: "alpine", release: "3.21" },
+  // { os: "linux", arch: "x64", abi: "musl", baseline: true, distro: "alpine", release: "3.21" },
+  // { os: "windows", arch: "x64", release: "2019" },
+  // { os: "windows", arch: "x64", baseline: true, release: "2019" },
 ];
 
 /**
@@ -121,23 +121,23 @@ const buildPlatforms = [
 const testPlatforms = [
   { os: "darwin", arch: "aarch64", release: "14", tier: "latest" },
   { os: "darwin", arch: "aarch64", release: "13", tier: "previous" },
-  { os: "darwin", arch: "x64", release: "14", tier: "latest" },
-  { os: "darwin", arch: "x64", release: "13", tier: "previous" },
-  { os: "linux", arch: "aarch64", distro: "debian", release: "12", tier: "latest" },
-  { os: "linux", arch: "x64", distro: "debian", release: "12", tier: "latest" },
-  { os: "linux", arch: "x64", baseline: true, distro: "debian", release: "12", tier: "latest" },
-  { os: "linux", arch: "x64", profile: "asan", distro: "debian", release: "12", tier: "latest" },
-  { os: "linux", arch: "aarch64", distro: "ubuntu", release: "24.04", tier: "latest" },
-  { os: "linux", arch: "aarch64", distro: "ubuntu", release: "20.04", tier: "oldest" },
-  { os: "linux", arch: "x64", distro: "ubuntu", release: "24.04", tier: "latest" },
-  { os: "linux", arch: "x64", distro: "ubuntu", release: "20.04", tier: "oldest" },
-  { os: "linux", arch: "x64", baseline: true, distro: "ubuntu", release: "24.04", tier: "latest" },
-  { os: "linux", arch: "x64", baseline: true, distro: "ubuntu", release: "20.04", tier: "oldest" },
-  { os: "linux", arch: "aarch64", abi: "musl", distro: "alpine", release: "3.21", tier: "latest" },
-  { os: "linux", arch: "x64", abi: "musl", distro: "alpine", release: "3.21", tier: "latest" },
-  { os: "linux", arch: "x64", abi: "musl", baseline: true, distro: "alpine", release: "3.21", tier: "latest" },
-  { os: "windows", arch: "x64", release: "2019", tier: "oldest" },
-  { os: "windows", arch: "x64", release: "2019", baseline: true, tier: "oldest" },
+  // { os: "darwin", arch: "x64", release: "14", tier: "latest" },
+  // { os: "darwin", arch: "x64", release: "13", tier: "previous" },
+  // { os: "linux", arch: "aarch64", distro: "debian", release: "12", tier: "latest" },
+  // { os: "linux", arch: "x64", distro: "debian", release: "12", tier: "latest" },
+  // { os: "linux", arch: "x64", baseline: true, distro: "debian", release: "12", tier: "latest" },
+  // { os: "linux", arch: "x64", profile: "asan", distro: "debian", release: "12", tier: "latest" },
+  // { os: "linux", arch: "aarch64", distro: "ubuntu", release: "24.04", tier: "latest" },
+  // { os: "linux", arch: "aarch64", distro: "ubuntu", release: "20.04", tier: "oldest" },
+  // { os: "linux", arch: "x64", distro: "ubuntu", release: "24.04", tier: "latest" },
+  // { os: "linux", arch: "x64", distro: "ubuntu", release: "20.04", tier: "oldest" },
+  // { os: "linux", arch: "x64", baseline: true, distro: "ubuntu", release: "24.04", tier: "latest" },
+  // { os: "linux", arch: "x64", baseline: true, distro: "ubuntu", release: "20.04", tier: "oldest" },
+  // { os: "linux", arch: "aarch64", abi: "musl", distro: "alpine", release: "3.21", tier: "latest" },
+  // { os: "linux", arch: "x64", abi: "musl", distro: "alpine", release: "3.21", tier: "latest" },
+  // { os: "linux", arch: "x64", abi: "musl", baseline: true, distro: "alpine", release: "3.21", tier: "latest" },
+  // { os: "windows", arch: "x64", release: "2019", tier: "oldest" },
+  // { os: "windows", arch: "x64", release: "2019", baseline: true, tier: "oldest" },
 ];
 
 /**
@@ -292,13 +292,14 @@ function getEc2Agent(platform, options, ec2Options) {
  * @returns {string}
  */
 function getCppAgent(platform, options) {
-  const { os, arch, distro } = platform;
+  const { os, arch } = platform;
 
   if (os === "darwin") {
     return {
-      queue: `build-${os}`,
+      queue: "darwin",
       os,
-      arch,
+      arch: arch === "aarch64" ? "arm64" : arch,
+      tart: "true"
     };
   }
 
@@ -328,16 +329,13 @@ function getZigPlatform() {
  * @returns {Agent}
  */
 function getZigAgent(platform, options) {
-  const { arch } = platform;
-
-  // Uncomment to restore to using macOS on-prem for Zig.
-  // return {
-  //   queue: "build-zig",
-  // };
-
-  return getEc2Agent(getZigPlatform(), options, {
-    instanceType: "r8g.large",
-  });
+  // Force all agents to use darwin queue for now
+  return {
+    queue: "darwin",
+    os: "darwin",
+    arch: platform.arch === "aarch64" ? "arm64" : platform.arch,
+    tart: true
+  };
 }
 
 /**
@@ -350,9 +348,10 @@ function getTestAgent(platform, options) {
 
   if (os === "darwin") {
     return {
-      queue: `test-${os}`,
+      queue: "darwin",
       os,
-      arch,
+      arch: arch === "aarch64" ? "arm64" : arch,
+      tart: "true"
     };
   }
 
@@ -422,7 +421,7 @@ function getBuildCommand(target, options) {
  * @returns {Step}
  */
 function getBuildVendorStep(platform, options) {
-  return {
+  const step = {
     key: `${getTargetKey(platform)}-build-vendor`,
     label: `${getTargetLabel(platform)} - build-vendor`,
     agents: getCppAgent(platform, options),
@@ -431,6 +430,13 @@ function getBuildVendorStep(platform, options) {
     env: getBuildEnv(platform, options),
     command: `${getBuildCommand(platform, options)} --target dependencies`,
   };
+  // If macOS, run in VM
+  if (platform.os === "darwin") {
+    step.command = [
+      `./scripts/ci-macos.sh "${getBuildCommand(platform, options)} --target dependencies" "${process.cwd()}"`
+    ];
+  }
+  return step;
 }
 
 /**
@@ -440,7 +446,7 @@ function getBuildVendorStep(platform, options) {
  */
 function getBuildCppStep(platform, options) {
   const command = getBuildCommand(platform, options);
-  return {
+  const step = {
     key: `${getTargetKey(platform)}-build-cpp`,
     label: `${getTargetLabel(platform)} - build-cpp`,
     agents: getCppAgent(platform, options),
@@ -455,6 +461,14 @@ function getBuildCppStep(platform, options) {
     // it's cheaper to run them in the same step. Can be revisited in the future.
     command: [`${command} --target bun`, `${command} --target dependencies`],
   };
+  // If macOS, run in VM
+  if (platform.os === "darwin") {
+    step.command = [
+      `./scripts/ci-macos.sh "${command} --target bun" "${process.cwd()}"`,
+      `./scripts/ci-macos.sh "${command} --target dependencies" "${process.cwd()}"`
+    ];
+  }
+  return step;
 }
 
 /**
@@ -480,7 +494,7 @@ function getBuildToolchain(target) {
  */
 function getBuildZigStep(platform, options) {
   const toolchain = getBuildToolchain(platform);
-  return {
+  const step = {
     key: `${getTargetKey(platform)}-build-zig`,
     label: `${getTargetLabel(platform)} - build-zig`,
     agents: getZigAgent(platform, options),
@@ -490,6 +504,13 @@ function getBuildZigStep(platform, options) {
     command: `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
     timeout_in_minutes: 35,
   };
+  // If macOS, run in VM
+  if (platform.os === "darwin") {
+    step.command = [
+      `./scripts/ci-macos.sh "${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}\" "${process.cwd()}"`
+    ];
+  }
+  return step;
 }
 
 /**
@@ -498,7 +519,7 @@ function getBuildZigStep(platform, options) {
  * @returns {Step}
  */
 function getLinkBunStep(platform, options) {
-  return {
+  const step = {
     key: `${getTargetKey(platform)}-build-bun`,
     label: `${getTargetLabel(platform)} - build-bun`,
     depends_on: [`${getTargetKey(platform)}-build-cpp`, `${getTargetKey(platform)}-build-zig`],
@@ -511,6 +532,13 @@ function getLinkBunStep(platform, options) {
     },
     command: `${getBuildCommand(platform, options)} --target bun`,
   };
+  // If macOS, run in VM
+  if (platform.os === "darwin") {
+    step.command = [
+      `./scripts/ci-macos.sh "${getBuildCommand(platform, options)} --target bun" "${process.cwd()}"`
+    ];
+  }
+  return step;
 }
 
 /**
@@ -606,9 +634,7 @@ function getBuildImageStep(platform, options) {
   return {
     key: `${getImageKey(platform)}-build-image`,
     label: `${getImageLabel(platform)} - build-image`,
-    agents: {
-      queue: "build-image",
-    },
+    agents: { queue: "darwin" },
     env: {
       DEBUG: "1",
     },
@@ -632,7 +658,7 @@ function getReleaseStep(buildPlatforms, options) {
     key: "release",
     label: getBuildkiteEmoji("rocket"),
     agents: {
-      queue: "test-darwin",
+      queue: "darwin",
     },
     depends_on: buildPlatforms.map(platform => `${getTargetKey(platform)}-build-bun`),
     env: {
@@ -646,17 +672,15 @@ function getReleaseStep(buildPlatforms, options) {
  * @param {Platform[]} buildPlatforms
  * @returns {Step}
  */
-function getBenchmarkStep() {
-  return {
-    key: "benchmark",
-    label: "📊",
-    agents: {
-      queue: "build-image",
-    },
-    depends_on: `linux-x64-build-bun`,
-    command: "node .buildkite/scripts/upload-benchmark.mjs",
-  };
-}
+// function getBenchmarkStep() {
+//   return {
+//     key: "benchmark",
+//     label: "📊",
+//     agents: { queue: "darwin" },
+//     depends_on: "linux-x64-build-bun",
+//     command: "node .buildkite/scripts/upload-benchmark.mjs",
+//   };
+// }
 
 /**
  * @typedef {Object} Pipeline
@@ -1075,6 +1099,19 @@ async function getPipeline(options = {}) {
   /** @type {Step[]} */
   const steps = [];
 
+  // Add macOS VM image build step if we have any macOS platforms
+  const hasMacOS = buildPlatforms.some(platform => platform.os === "darwin");
+  if (hasMacOS) {
+    steps.push({
+      key: "build-macos-vm",
+      label: "Build macOS VM image",
+      agents: {
+        queue: "darwin",
+      },
+      command: "./scripts/build-macos-vm.sh",
+    });
+  }
+
   if (imagePlatforms.size) {
     steps.push({
       key: "build-images",
@@ -1113,6 +1150,10 @@ async function getPipeline(options = {}) {
         if (imagePlatforms.has(imageKey)) {
           dependsOn.push(`${imageKey}-build-image`);
         }
+        // Add dependency on macOS VM build if this is a macOS platform
+        if (target.os === "darwin") {
+          dependsOn.push("build-macos-vm");
+        }
 
         return getStepWithDependsOn(
           {
@@ -1144,7 +1185,7 @@ async function getPipeline(options = {}) {
   if (isMainBranch()) {
     steps.push(getReleaseStep(buildPlatforms, options));
   }
-  steps.push(getBenchmarkStep());
+  // steps.push(getBenchmarkStep());
 
   /** @type {Map<string, GroupStep>} */
   const stepsByGroup = new Map();
@@ -1196,6 +1237,8 @@ async function main() {
   if (isBuildkite) {
     startGroup("Uploading pipeline...");
     try {
+      // Set the queue environment variable
+      process.env.BUILDKITE_AGENT_META_DATA_QUEUE = "darwin";
       await spawnSafe(["buildkite-agent", "pipeline", "upload", contentPath], { stdio: "inherit" });
     } finally {
       await uploadArtifact(contentPath);
@@ -1204,3 +1247,5 @@ async function main() {
 }
 
 await main();
+
+

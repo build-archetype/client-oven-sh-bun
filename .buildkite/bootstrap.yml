@@ -11,6 +11,6 @@ steps:
 
   - label: ":pipeline:"
     agents:
-      queue: "build-darwin"
+      queue: "darwin"
     command:
       - "node .buildkite/ci.mjs"
