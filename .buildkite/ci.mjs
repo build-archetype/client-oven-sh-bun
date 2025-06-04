@@ -351,7 +351,7 @@ function getTestAgent(platform, options) {
 
   if (os === "darwin") {
     return {
-      queue: `test-${os}`,
+      queue: `darwin`,
       os,
       arch,
     };
@@ -662,7 +662,7 @@ function getReleaseStep(buildPlatforms, options) {
     key: "release",
     label: getBuildkiteEmoji("rocket"),
     agents: {
-      queue: "test-darwin",
+      queue: "darwin",
     },
     depends_on: buildPlatforms.map(platform => `${getTargetKey(platform)}-build-bun`),
     env: {
