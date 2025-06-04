@@ -290,7 +290,7 @@ export async function spawn(command, options = {}) {
   if (exitCode !== 0 && isWindows) {
     const exitReason = getWindowsExitReason(exitCode);
     if (exitReason) {
-      signalCode = exitReason;
+      exitCode = exitReason;
     }
   }
 
@@ -386,7 +386,7 @@ export function spawnSync(command, options = {}) {
   if (exitCode !== 0 && isWindows) {
     const exitReason = getWindowsExitReason(exitCode);
     if (exitReason) {
-      signalCode = exitReason;
+      exitCode = exitReason;
     }
   }
 
@@ -442,37 +442,9 @@ export function spawnSyncSafe(command, options = {}) {
  * @returns {string | undefined}
  */
 export function getWindowsExitReason(exitCode) {
-  const windowsKitPath = "C:\\Program Files (x86)\\Windows Kits";
-  if (!existsSync(windowsKitPath)) {
-    return;
-  }
-
-  const windowsKitPaths = readdirSync(windowsKitPath)
-    .filter(filename => isFinite(parseInt(filename)))
-    .sort((a, b) => parseInt(b) - parseInt(a));
-
-  let ntStatusPath;
-  for (const windowsKitPath of windowsKitPaths) {
-    const includePath = `${windowsKitPath}\\Include`;
-    if (!existsSync(includePath)) {
-      continue;
-    }
-
-    const windowsSdkPaths = readdirSync(includePath).sort();
-    for (const windowsSdkPath of windowsSdkPaths) {
-      const statusPath = `${includePath}\\${windowsSdkPath}\\shared\\ntstatus.h`;
-      if (existsSync(statusPath)) {
-        ntStatusPath = statusPath;
-        break;
-      }
-    }
-  }
-
-  if (!ntStatusPath) {
-    return;
-  }
-
+  const ntStatusPath = "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.22621.0\\shared\\ntstatus.h";
   const nthStatus = readFile(ntStatusPath, { cache: true });
+
   const match = nthStatus.match(new RegExp(`(STATUS_\\w+).*0x${exitCode?.toString(16)}`, "i"));
   if (match) {
     const [, exitReason] = match;
@@ -2719,17 +2691,45 @@ export function toYaml(obj, indent = 0) {
       continue;
     }
     if (Array.isArray(value)) {
-      result += `${spaces}${key}:\n`;
-      value.forEach(item => {
-        if (typeof item === "object" && item !== null) {
-          result += `${spaces}- \n${toYaml(item, indent + 2)
-            .split("\n")
-            .map(line => `${spaces}  ${line}`)
-            .join("\n")}\n`;
+      if (key === "command") {
+        // Special handling for command arrays in pipeline steps
+        if (value.length === 1) {
+          const lines = value[0].split('\n');
+          if (lines.length === 1) {
+            result += `${spaces}${key}: ${value[0]}\n`;
+          } else {
+            result += `${spaces}${key}: |\n`;
+            lines.forEach(line => {
+              result += `${spaces}  ${line}\n`;
+            });
+          }
         } else {
-          result += `${spaces}- ${item}\n`;
+          result += `${spaces}${key}:\n`;
+          value.forEach(item => {
+            const lines = item.split('\n');
+            if (lines.length === 1) {
+              result += `${spaces}- ${item}\n`;
+            } else {
+              result += `${spaces}- |\n`;
+              lines.forEach(line => {
+                result += `${spaces}  ${line}\n`;
+              });
+            }
+          });
         }
-      });
+      } else {
+        result += `${spaces}${key}:\n`;
+        value.forEach(item => {
+          if (typeof item === "object" && item !== null) {
+            result += `${spaces}- \n${toYaml(item, indent + 2)
+              .split("\n")
+              .map(line => `${spaces}  ${line}`)
+              .join("\n")}\n`;
+          } else {
+            result += `${spaces}- ${item}\n`;
+          }
+        });
+      }
       continue;
     }
     if (typeof value === "object") {
@@ -2739,11 +2739,24 @@ export function toYaml(obj, indent = 0) {
     if (
       typeof value === "string" &&
       (value.includes(":") ||
+        value.includes("{") ||
+        value.includes("}") ||
+        value.includes("[") ||
+        value.includes("]") ||
+        value.includes(",") ||
+        value.includes("&") ||
+        value.includes("*") ||
         value.includes("#") ||
-        value.includes("'") ||
-        value.includes('"') ||
-        value.includes("\n") ||
-        value.includes("*"))
+        value.includes("?") ||
+        value.includes("|") ||
+        value.includes("-") ||
+        value.includes("<") ||
+        value.includes(">") ||
+        value.includes("=") ||
+        value.includes("!") ||
+        value.includes("%") ||
+        value.includes("@") ||
+        value.includes("`"))
     ) {
       result += `${spaces}${key}: "${value.replace(/"/g, '\\"')}"\n`;
       continue;

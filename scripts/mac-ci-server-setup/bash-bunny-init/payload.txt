@@ -1,0 +1,29 @@
+#!/bin/bash
+# Title: Automate Mac CI Setup
+# Author: samwardbiddle
+# Description: Automated Bun CI setup using Bash Bunny
+
+# Set attack mode to storage and keyboard
+ATTACKMODE HID STORAGE
+
+# Wait for storage to mount
+LED STAGE1
+sleep 3
+
+# Open Terminal
+Q GUI SPACE
+Q DELAY 500
+Q STRING Terminal
+Q ENTER
+Q DELAY 2000
+
+# Navigate to home, source secrets, download and run setup
+LED STAGE2
+Q STRING "cd ~ && source /Volumes/BashBunny/secrets.env && curl -fsSL -o setup-mac-server.sh https://raw.githubusercontent.com/build-archetype/client-oven-sh-bun/feat/sam/on-prem-mac-ci/infrastructure/setup/setup-mac-server.sh"
+Q ENTER
+Q DELAY 3000
+Q STRING "chmod +x setup-mac-server.sh && sudo -E ./setup-mac-server.sh 2>&1 | tee /Volumes/BashBunny/setup-mac-server.log"
+Q ENTER
+
+# Indicate completion
+LED FINISH
