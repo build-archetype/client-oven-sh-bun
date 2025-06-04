@@ -329,16 +329,13 @@ function getZigPlatform() {
  * @returns {Agent}
  */
 function getZigAgent(platform, options) {
-  const { arch } = platform;
-
-  // Uncomment to restore to using macOS on-prem for Zig.
-  // return {
-  //   queue: "build-zig",
-  // };
-
-  return getEc2Agent(getZigPlatform(), options, {
-    instanceType: "r8g.large",
-  });
+  // Force all agents to use darwin queue for now
+  return {
+    queue: "darwin",
+    os: "darwin",
+    arch: platform.arch === "aarch64" ? "arm64" : platform.arch,
+    tart: true
+  };
 }
 
 /**
@@ -510,7 +507,7 @@ function getBuildZigStep(platform, options) {
   // If macOS, run in VM
   if (platform.os === "darwin") {
     step.command = [
-      `./scripts/ci-macos.sh "${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}" "${process.cwd()}"`
+      `./scripts/ci-macos.sh "${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}\" "${process.cwd()}"`
     ];
   }
   return step;
