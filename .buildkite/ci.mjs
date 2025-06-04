@@ -434,7 +434,7 @@ function getBuildVendorStep(platform, options) {
   // If macOS, run in VM
   if (platform.os === "darwin") {
     step.command = [
-      `./scripts/ci-macos.sh \"${getBuildCommand(platform, options)} --target dependencies\" \"${process.cwd()}\"`
+      `./scripts/ci-macos.sh "${getBuildCommand(platform, options)} --target dependencies" "${process.cwd()}"`
     ];
   }
   return step;
@@ -465,8 +465,8 @@ function getBuildCppStep(platform, options) {
   // If macOS, run in VM
   if (platform.os === "darwin") {
     step.command = [
-      `./scripts/ci-macos.sh \"${command} --target bun\" \"${process.cwd()}\"`,
-      `./scripts/ci-macos.sh \"${command} --target dependencies\" \"${process.cwd()}\"`
+      `./scripts/ci-"${command} --target bun" "${process.cwd()}"`,
+      `./scripts/ci-macos.sh "${command} --target dependencies" "${process.cwd()}"`
     ];
   }
   return step;
@@ -508,7 +508,7 @@ function getBuildZigStep(platform, options) {
   // If macOS, run in VM
   if (platform.os === "darwin") {
     step.command = [
-      `./scripts/ci-macos.sh \"${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}\" \"${process.cwd()}\"`
+      `./scripts/ci-macos.sh "${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}" "${process.cwd()}"`
     ];
   }
   return step;
@@ -536,7 +536,7 @@ function getLinkBunStep(platform, options) {
   // If macOS, run in VM
   if (platform.os === "darwin") {
     step.command = [
-      `./scripts/ci-macos.sh \"${getBuildCommand(platform, options)} --target bun\" \"${process.cwd()}\"`
+      `./scripts/ci-macos.sh "${getBuildCommand(platform, options)} --target bun" "${process.cwd()}"`
     ];
   }
   return step;
@@ -966,9 +966,7 @@ function getOptionsStep() {
       },
     ],
   };
-}
-
-/**
+}/**
  * @returns {Step}
  */
 function getOptionsApplyStep() {
@@ -1250,3 +1248,5 @@ async function main() {
 }
 
 await main();
+
+
