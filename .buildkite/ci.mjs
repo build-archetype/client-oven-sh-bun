@@ -1109,7 +1109,7 @@ async function getPipeline(options = {}) {
   if (hasMacOS) {
     steps.push({
       key: "build-macos-vm",
-      label: "🖥️  Build macOS VM image",
+      label: "Build macOS VM image",
       agents: {
         queue: "build-darwin",
       },
