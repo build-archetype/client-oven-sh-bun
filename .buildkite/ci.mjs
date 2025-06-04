@@ -1242,6 +1242,8 @@ async function main() {
   if (isBuildkite) {
     startGroup("Uploading pipeline...");
     try {
+      // Set the queue environment variable
+      process.env.BUILDKITE_AGENT_META_DATA_QUEUE = "darwin";
       await spawnSafe(["buildkite-agent", "pipeline", "upload", contentPath], { stdio: "inherit" });
     } finally {
       await uploadArtifact(contentPath);
