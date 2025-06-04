@@ -351,9 +351,10 @@ function getTestAgent(platform, options) {
 
   if (os === "darwin") {
     return {
-      queue: `darwin`,
+      queue: "darwin",
       os,
-      arch,
+      arch: arch === "aarch64" ? "arm64" : arch,
+      tart: "true"
     };
   }
 
