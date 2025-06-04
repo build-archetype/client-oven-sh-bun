@@ -1328,64 +1328,135 @@ function getBuildBaseImageStep() {
  */
 async function getPipeline(options = {}) {
   const priority = getPriority();
+
+  if (isBuildManual() && !Object.keys(options).length) {
+    return {
+      priority,
+      steps: [getOptionsStep(), getOptionsApplyStep()],
+    };
+  }
+
+  const { skipEverything } = options;
+  if (skipEverything) {
+    return;
+  }
+
+  const { buildPlatforms = [], testPlatforms = [], buildImages, publishImages } = options;
+  const imagePlatforms = new Map(
+    buildImages || publishImages
+      ? [...buildPlatforms, ...testPlatforms]
+          .filter(({ os }) => os === "linux" || os === "windows")
+          .map(platform => [getImageKey(platform), platform])
+      : [],
+  );
+
+  /** @type {Step[]} */
   const steps = [];
 
-  // Add options step for manual builds
-  if (isBuildManual()) {
-    steps.push(getOptionsStep());
-    steps.push(getOptionsApplyStep());
+  if (imagePlatforms.size) {
+    steps.push({
+      key: "build-images",
+      group: getBuildkiteEmoji("aws"),
+      steps: [...imagePlatforms.values()].map(platform => getBuildImageStep(platform, options)),
+    });
   }
 
-  // Get filtered platforms based on options
-  const { buildPlatforms: filteredBuildPlatforms = buildPlatforms, testPlatforms: filteredTestPlatforms = testPlatforms } = options;
+  let { skipBuilds, forceBuilds, unifiedBuilds, dryRun } = options;
+  dryRun = dryRun || !!buildImages;
 
-  // Add the base image build step for macOS platforms
-  const hasMacOSBuilds = filteredBuildPlatforms.some(platform => platform.os === "darwin");
-  if (hasMacOSBuilds) {
-    steps.push(getBuildBaseImageStep());
-  }
-
-  // Add build steps for each platform
-  for (const platform of filteredBuildPlatforms) {
-    const { os } = platform;
-    if (os === "darwin") {
-      // Add the build steps with dependency on build-base-image
-      steps.push(getStepWithDependsOn(getBuildVendorStep(platform, options), "build-base-image"));
-      steps.push(getStepWithDependsOn(getBuildCppStep(platform, options), "build-base-image"));
-      steps.push(getStepWithDependsOn(getBuildZigStep(platform, options), "build-base-image"));
-      steps.push(getStepWithDependsOn(getLinkBunStep(platform, options), "build-base-image"));
+  /** @type {string | undefined} */
+  let buildId;
+  if (skipBuilds && !forceBuilds) {
+    const lastBuild = await getLastSuccessfulBuild();
+    if (lastBuild) {
+      const { id } = lastBuild;
+      buildId = id;
     } else {
-      // Original steps for non-macOS platforms
-      steps.push(getBuildVendorStep(platform, options));
-      steps.push(getBuildCppStep(platform, options));
-      steps.push(getBuildZigStep(platform, options));
-      steps.push(getLinkBunStep(platform, options));
+      console.warn("No last successful build found, must force builds...");
     }
   }
 
-  // Add test steps for each platform
-  for (const platform of filteredTestPlatforms) {
-    const { os } = platform;
-    if (os === "darwin") {
-      // Add test step with dependency on build-base-image
-      steps.push(getStepWithDependsOn(getTestBunStep(platform, options), "build-base-image"));
-    } else {
-      // Original test steps for non-macOS platforms
-      steps.push(getTestBunStep(platform, options));
+  const includeASAN = !isMainBranch();
+
+  if (!buildId) {
+    const relevantBuildPlatforms = includeASAN
+      ? buildPlatforms
+      : buildPlatforms.filter(({ profile }) => profile !== "asan");
+
+    // Group build steps by platform
+    for (const platform of relevantBuildPlatforms) {
+      const imageKey = getImageKey(platform);
+      const zigImageKey = getImageKey(getZigPlatform());
+      const dependsOn = imagePlatforms.has(zigImageKey) ? [`${zigImageKey}-build-image`] : [];
+      if (imagePlatforms.has(imageKey)) {
+        dependsOn.push(`${imageKey}-build-image`);
+      }
+
+      const buildSteps = unifiedBuilds
+        ? [getBuildBunStep(platform, options)]
+        : [
+            getBuildVendorStep(platform, options),
+            getBuildCppStep(platform, options),
+            getBuildZigStep(platform, options),
+            getLinkBunStep(platform, options),
+          ];
+
+      steps.push(
+        getStepWithDependsOn(
+          {
+            key: getTargetKey(platform),
+            group: getTargetLabel(platform),
+            steps: buildSteps,
+          },
+          ...dependsOn,
+        ),
+      );
     }
   }
 
-  // Add release step if needed
-  if (!options.skipBuilds) {
-    steps.push(getReleaseStep(filteredBuildPlatforms, options));
+  if (!isMainBranch()) {
+    const { skipTests, forceTests, unifiedTests, testFiles } = options;
+    if (!skipTests || forceTests) {
+      // Group test steps by platform
+      for (const platform of testPlatforms) {
+        steps.push({
+          key: getTargetKey(platform),
+          group: getTargetLabel(platform),
+          steps: [getTestBunStep(platform, options, { unifiedTests, testFiles, buildId })],
+        });
+      }
+    }
   }
 
-  // Add benchmark step
-  steps.push(getBenchmarkStep(filteredBuildPlatforms));
+  // Add release and benchmark steps
+  if (isMainBranch()) {
+    steps.push(getReleaseStep(buildPlatforms, options));
+  }
+  steps.push(getBenchmarkStep());
+
+  /** @type {Map<string, GroupStep>} */
+  const stepsByGroup = new Map();
+
+  // Merge steps with the same group
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+    if (!("group" in step)) {
+      continue;
+    }
+
+    const { group, steps: groupSteps } = step;
+    if (stepsByGroup.has(group)) {
+      stepsByGroup.get(group).steps.push(...groupSteps);
+    } else {
+      stepsByGroup.set(group, step);
+    }
+
+    steps[i] = undefined;
+  }
 
   return {
     priority,
-    steps,
+    steps: [...steps.filter(step => typeof step !== "undefined"), ...Array.from(stepsByGroup.values())],
   };
 }
 
