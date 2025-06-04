@@ -1112,7 +1112,7 @@ async function getPipeline(options = {}) {
       key: "build-macos-vm",
       label: "Build macOS VM image",
       agents: {
-        queue: "build-darwin",
+        queue: "darwin",
       },
       command: "./scripts/build-macos-vm.sh",
     });
