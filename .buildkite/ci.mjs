@@ -465,7 +465,7 @@ function getBuildCppStep(platform, options) {
   // If macOS, run in VM
   if (platform.os === "darwin") {
     step.command = [
-      `./scripts/ci-"${command} --target bun" "${process.cwd()}"`,
+      `./scripts/ci-macos.sh "${command} --target bun" "${process.cwd()}"`,
       `./scripts/ci-macos.sh "${command} --target dependencies" "${process.cwd()}"`
     ];
   }
@@ -966,7 +966,9 @@ function getOptionsStep() {
       },
     ],
   };
-}/**
+}
+
+/**
  * @returns {Step}
  */
 function getOptionsApplyStep() {
