@@ -672,17 +672,15 @@ function getReleaseStep(buildPlatforms, options) {
  * @param {Platform[]} buildPlatforms
  * @returns {Step}
  */
-function getBenchmarkStep() {
-  return {
-    key: "benchmark",
-    label: "📊",
-    agents: {
-      queue: "darwin",
-    },
-    depends_on: `linux-x64-build-bun`,
-    command: "node .buildkite/scripts/upload-benchmark.mjs",
-  };
-}
+// function getBenchmarkStep() {
+//   return {
+//     key: "benchmark",
+//     label: "📊",
+//     agents: { queue: "darwin" },
+//     depends_on: "linux-x64-build-bun",
+//     command: "node .buildkite/scripts/upload-benchmark.mjs",
+//   };
+// }
 
 /**
  * @typedef {Object} Pipeline
@@ -1187,7 +1185,7 @@ async function getPipeline(options = {}) {
   if (isMainBranch()) {
     steps.push(getReleaseStep(buildPlatforms, options));
   }
-  steps.push(getBenchmarkStep());
+  // steps.push(getBenchmarkStep());
 
   /** @type {Map<string, GroupStep>} */
   const stepsByGroup = new Map();
