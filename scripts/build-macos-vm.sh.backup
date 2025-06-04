@@ -167,215 +167,62 @@ version_compare() {
     return 0  # Equal
 }
 
-# Parse image name to extract version and bootstrap info
-parse_image_name() {
-    local image_name="$1"
-    local bun_version=""
-    local bootstrap_version=""
-    
-    # Extract Bun version and bootstrap version from image name
-    # Format: bun-build-macos-X.Y.Z-bootstrap-N.M
-    if [[ "$image_name" =~ bun-build-macos-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
-        bun_version="${BASH_REMATCH[1]}"
-        bootstrap_version="${BASH_REMATCH[2]}"
-    fi
-    
-    echo "$bun_version|$bootstrap_version"
-}
-
-# Check local images and categorize them
-check_local_image_version() {
-    local target_bun_version="$1"
-    local target_bootstrap_version="$2"
-    local target_image_name="$3"
-    
-    log "🔍 Analyzing local images for Bun $target_bun_version, Bootstrap $target_bootstrap_version"
-    
-    # Get all local images
-    local tart_output=$(tart list 2>&1)
-    
-    # Results
-    local exact_match=""
-    local usable_images=()
-    local all_bun_images=()
-    
-    # Parse each line for bun-build-macos images
-    while IFS= read -r line; do
-        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+) ]]; then
-            local image_name="${BASH_REMATCH[1]}"
-            
-            # Only consider bun-build-macos images
-            if [[ "$image_name" =~ ^bun-build-macos- ]]; then
-                all_bun_images+=("$image_name")
-                
-                # Parse version info
-                local version_info=$(parse_image_name "$image_name")
-                local bun_ver="${version_info%|*}"
-                local bootstrap_ver="${version_info#*|}"
-                
-                log "  Found: $image_name (Bun: $bun_ver, Bootstrap: $bootstrap_ver)"
-                
-                # Check for exact match
-                if [ "$image_name" = "$target_image_name" ]; then
-                    exact_match="$image_name"
-                    log "    ✅ Exact match found!"
-                # Check for usable match (same Bun version, different bootstrap)
-                elif [ "$bun_ver" = "$target_bun_version" ] && [ "$bootstrap_ver" != "$target_bootstrap_version" ]; then
-                    usable_images+=("$image_name")
-                    log "    🔄 Usable match (different bootstrap)"
-                fi
-            fi
-        fi
-    done <<< "$tart_output"
-    
-    # Return results (format: exact|usable1,usable2|all1,all2)
-    local usable_list=$(IFS=','; echo "${usable_images[*]}")
-    local all_list=$(IFS=','; echo "${all_bun_images[*]}")
-    echo "$exact_match|$usable_list|$all_list"
-}
-
-# Check if remote image exists
-check_remote_image() {
-    local remote_url="$1"
-    log "🌐 Checking remote image: $remote_url"
-    
-    # Fix permissions before trying to use tart
-    fix_tart_permissions
-    
-    # Try to pull the image (this will fail if it doesn't exist)
-    if tart pull "$remote_url" 2>/dev/null; then
-        log "✅ Remote image found and pulled"
-        return 0
-    else
-        log "❌ Remote image not found"
-        return 1
-    fi
-}
-
-# Make smart caching decision
-make_caching_decision() {
-    local target_bun_version="$1"
-    local target_bootstrap_version="$2"
-    local target_image_name="$3"
-    local remote_image_url="$4"
-    local force_refresh="$5"
-    
-    log "🧠 Making smart caching decision..."
-    log "  Target: Bun $target_bun_version, Bootstrap $target_bootstrap_version"
-    log "  Force refresh: $force_refresh"
-    
-    # If force refresh, skip all local checks
-    if [ "$force_refresh" = true ]; then
-        log "🔄 Force refresh requested - will check remote then build"
-        if check_remote_image "$remote_image_url"; then
-            echo "use_remote"
-        else
-            echo "build_new"
-        fi
-        return
-    fi
-    
-    # Check local images
-    local local_analysis=$(check_local_image_version "$target_bun_version" "$target_bootstrap_version" "$target_image_name")
-    local exact_match="${local_analysis%%|*}"
-    local usable_images="${local_analysis%|*}"
-    usable_images="${usable_images#*|}"
-    
-    # Priority 1: Exact local match
-    if [ -n "$exact_match" ]; then
-        log "🎯 Decision: Use exact local match ($exact_match)"
-        echo "use_local_exact|$exact_match"
-        return
-    fi
-    
-    # Priority 2: Check remote for perfect match
-    log "🌐 No exact local match, checking remote..."
-    if check_remote_image "$remote_image_url"; then
-        log "🎯 Decision: Use remote perfect match"
-        echo "use_remote|$remote_image_url"
-        return
-    fi
-    
-    # Priority 3: Use local usable image (same Bun version, different bootstrap)
-    if [ -n "$usable_images" ]; then
-        # Pick the first usable image (could be enhanced to pick the "best" one)
-        local chosen_usable="${usable_images%%,*}"
-        log "🎯 Decision: Use local usable image ($chosen_usable)"
-        echo "use_local_usable|$chosen_usable"
-        return
-    fi
-    
-    # Priority 4: Build new image
-    log "🎯 Decision: Build new image (no suitable local or remote found)"
-    echo "build_new"
-}
-
-# Execute the caching decision
-execute_caching_decision() {
-    local decision="$1"
-    local target_image_name="$2"
-    local remote_image_url="$3"
-    
-    local action="${decision%%|*}"
-    local target="${decision#*|}"
-    
-    log "⚡ Executing decision: $action"
-    
-    case "$action" in
-        "use_local_exact")
-            log "✅ Using exact local match: $target"
-            log "Image ready: $target_image_name"
-            return 0
-            ;;
-            
-        "use_remote")
-            log "📥 Using remote image: $remote_image_url"
-            # Clean up any existing local image to avoid conflicts
-            tart delete "$target_image_name" 2>/dev/null || log "No existing local image to delete"
-            # Clone from remote (already pulled in check_remote_image)
-            tart clone "$remote_image_url" "$target_image_name"
-            log "✅ Remote image cloned locally as: $target_image_name"
-            return 0
-            ;;
-            
-        "use_local_usable")
-            log "🔄 Using local usable image: $target"
-            log "Note: This image has the same Bun version but different bootstrap version"
-            log "If bootstrap changes are critical, consider using --force-refresh"
-            # Clone the usable image to our target name
-            tart delete "$target_image_name" 2>/dev/null || log "No existing local image to delete"
-            tart clone "$target" "$target_image_name"
-            log "✅ Usable image cloned as: $target_image_name"
-            return 0
-            ;;
-            
-        "build_new")
-            log "🏗️  Building new image: $target_image_name"
-            return 1  # Signal that we need to build
-            ;;
-            
-        *)
-            log "❌ Unknown decision: $decision"
-            return 1
-            ;;
-    esac
-}
-
-# Check if local image exists and get its creation time (legacy function, kept for compatibility)
+# Check if local image exists and get its creation time
 get_local_image_info() {
     local image_name="$1"
     
     log "🔍 Checking for local image: $image_name"
+    log "Running: tart list"
     
-    # Get the full tart list output
+    # Get the full tart list output for debugging
     local tart_output=$(tart list 2>&1)
+    log "Tart list output:"
+    echo "$tart_output" | while IFS= read -r line; do
+        log "  $line"
+    done
     
-    # Check if our specific image exists
+    # Debug: Show the exact pattern we're looking for
+    local pattern="^local[[:space:]]\+${image_name}[[:space:]]"
+    log "Looking for pattern: $pattern"
+    
+    # Debug: Test a few different patterns
+    log "Testing different patterns:"
     if echo "$tart_output" | grep -q "^local.*${image_name}"; then
-        log "✅ Found local image: $image_name"
+        log "  ✅ Pattern '^local.*${image_name}' matches"
+    else
+        log "  ❌ Pattern '^local.*${image_name}' does not match"
+    fi
+    
+    if echo "$tart_output" | grep -q "^local[[:space:]]\+${image_name}"; then
+        log "  ✅ Pattern '^local[[:space:]]\+${image_name}' matches"
+    else
+        log "  ❌ Pattern '^local[[:space:]]\+${image_name}' does not match"
+    fi
+    
+    if echo "$tart_output" | grep -q "${image_name}"; then
+        log "  ✅ Simple pattern '${image_name}' matches"
+    else
+        log "  ❌ Simple pattern '${image_name}' does not match"
+    fi
+    
+    # Check if our specific image exists - use a simpler pattern
+    if echo "$tart_output" | grep -q "^local.*${image_name}"; then
+        log "✅ Found exact match for: $image_name"
         echo "exists"
     else
-        log "❌ No local image found: $image_name"
+        log "❌ No exact match found for: $image_name"
+        
+        # Show similar images for debugging
+        local similar=$(echo "$tart_output" | grep -i "bun\|macos" || echo "none")
+        if [ "$similar" != "none" ]; then
+            log "Similar images found:"
+            echo "$similar" | while IFS= read -r line; do
+                log "  $line"
+            done
+        else
+            log "No Bun or macOS related images found"
+        fi
+        
         echo "missing"
     fi
 }
@@ -433,24 +280,46 @@ main() {
     log "  Bootstrap version: $BOOTSTRAP_VERSION"
     log "  Force refresh: $force_refresh"
     
-    # SMART CACHING LOGIC
-    log "=== SMART CACHING ANALYSIS ==="
+    # NEW LOGIC: Check local first, then remote, with version comparison
+    log "=== CHECKING IMAGE AVAILABILITY ==="
     
-    # Make intelligent caching decision
-    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh")
-    
-    log "Caching decision: $caching_decision"
-    
-    # Execute the decision
-    if execute_caching_decision "$caching_decision" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL"; then
-        log "✅ Image ready via smart caching!"
-        log "Final image name: $LOCAL_IMAGE_NAME"
-        log "Available images:"
-        tart list | grep -E "(NAME|bun-build-macos)" || tart list
+    # Step 1: Check if we should use local image
+    local use_local=false
+    if [ "$force_refresh" != true ]; then
+        local local_status=$(get_local_image_info "$LOCAL_IMAGE_NAME")
+        if [ "$local_status" = "exists" ]; then
+            log "✅ Local image exists: $LOCAL_IMAGE_NAME"
+            use_local=true
+        else
+            log "❌ No local image found"
+        fi
+    else
+        log "🔄 Force refresh requested - skipping local check"
+    fi
+
+    # Step 2: Check remote for same version
+    local remote_available=false
+    log "Checking registry for exact version match..."
+    if image_exists_in_registry "$REMOTE_IMAGE_URL"; then
+        log "✅ Remote image found for exact version: $BUN_VERSION"
+        remote_available=true
+        log "📋 Using remote image (cloning locally)"
+        # Delete local if it exists to avoid conflicts
+        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "No existing local image to delete"
+        tart clone "$REMOTE_IMAGE_URL" "$LOCAL_IMAGE_NAME"
+        log "✅ Cloned successfully from registry"
+        exit 0
+    else
+        log "❌ No remote image found for version $BUN_VERSION"
+    fi
+
+    # Step 3: If only local exists and no remote, use local
+    if [ "$use_local" = true ] && [ "$remote_available" != true ]; then
+        log "📋 Using local image (no remote available)"
         exit 0
     fi
-    
-    # If we reach here, we need to build a new image
+
+    # Step 4: Need to build new image
     log "=== BUILDING NEW BASE IMAGE ==="
     log "Building new base image for Bun ${BUN_VERSION}..."
     
