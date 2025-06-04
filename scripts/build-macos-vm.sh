@@ -189,7 +189,7 @@ check_local_image_version() {
     local target_bootstrap_version="$2"
     local target_image_name="$3"
     
-    log "🔍 Analyzing local images for Bun $target_bun_version, Bootstrap $target_bootstrap_version"
+    log "🔍 Analyzing local images for Bun $target_bun_version, Bootstrap $target_bootstrap_version" >&2
     
     # Get all local images
     local tart_output=$(tart list 2>&1)
@@ -213,41 +213,50 @@ check_local_image_version() {
                 local bun_ver="${version_info%|*}"
                 local bootstrap_ver="${version_info#*|}"
                 
-                log "  Found: $image_name (Bun: $bun_ver, Bootstrap: $bootstrap_ver)"
+                log "  Found: $image_name (Bun: $bun_ver, Bootstrap: $bootstrap_ver)" >&2
                 
                 # Check for exact match
                 if [ "$image_name" = "$target_image_name" ]; then
                     exact_match="$image_name"
-                    log "    ✅ Exact match found!"
+                    log "    ✅ Exact match found!" >&2
                 # Check for usable match (same Bun version, different bootstrap)
                 elif [ "$bun_ver" = "$target_bun_version" ] && [ "$bootstrap_ver" != "$target_bootstrap_version" ]; then
                     usable_images+=("$image_name")
-                    log "    🔄 Usable match (different bootstrap)"
+                    log "    🔄 Usable match (different bootstrap)" >&2
                 fi
             fi
         fi
     done <<< "$tart_output"
     
     # Return results (format: exact|usable1,usable2|all1,all2)
-    local usable_list=$(IFS=','; echo "${usable_images[*]}")
-    local all_list=$(IFS=','; echo "${all_bun_images[*]}")
+    # Handle empty arrays properly
+    local usable_list=""
+    if [ ${#usable_images[@]} -gt 0 ]; then
+        usable_list=$(IFS=','; echo "${usable_images[*]}")
+    fi
+    
+    local all_list=""
+    if [ ${#all_bun_images[@]} -gt 0 ]; then
+        all_list=$(IFS=','; echo "${all_bun_images[*]}")
+    fi
+    
     echo "$exact_match|$usable_list|$all_list"
 }
 
 # Check if remote image exists
 check_remote_image() {
     local remote_url="$1"
-    log "🌐 Checking remote image: $remote_url"
+    log "🌐 Checking remote image: $remote_url" >&2
     
     # Fix permissions before trying to use tart
-    fix_tart_permissions
+    fix_tart_permissions >&2
     
     # Try to pull the image (this will fail if it doesn't exist)
-    if tart pull "$remote_url" 2>/dev/null; then
-        log "✅ Remote image found and pulled"
+    if tart pull "$remote_url" >/dev/null 2>&1; then
+        log "✅ Remote image found and pulled" >&2
         return 0
     else
-        log "❌ Remote image not found"
+        log "❌ Remote image not found" >&2
         return 1
     fi
 }
@@ -260,13 +269,13 @@ make_caching_decision() {
     local remote_image_url="$4"
     local force_refresh="$5"
     
-    log "🧠 Making smart caching decision..."
-    log "  Target: Bun $target_bun_version, Bootstrap $target_bootstrap_version"
-    log "  Force refresh: $force_refresh"
+    log "🧠 Making smart caching decision..." >&2
+    log "  Target: Bun $target_bun_version, Bootstrap $target_bootstrap_version" >&2
+    log "  Force refresh: $force_refresh" >&2
     
     # If force refresh, skip all local checks
     if [ "$force_refresh" = true ]; then
-        log "🔄 Force refresh requested - will check remote then build"
+        log "🔄 Force refresh requested - will check remote then build" >&2
         if check_remote_image "$remote_image_url"; then
             echo "use_remote"
         else
@@ -283,15 +292,15 @@ make_caching_decision() {
     
     # Priority 1: Exact local match
     if [ -n "$exact_match" ]; then
-        log "🎯 Decision: Use exact local match ($exact_match)"
+        log "🎯 Decision: Use exact local match ($exact_match)" >&2
         echo "use_local_exact|$exact_match"
         return
     fi
     
     # Priority 2: Check remote for perfect match
-    log "🌐 No exact local match, checking remote..."
+    log "🌐 No exact local match, checking remote..." >&2
     if check_remote_image "$remote_image_url"; then
-        log "🎯 Decision: Use remote perfect match"
+        log "🎯 Decision: Use remote perfect match" >&2
         echo "use_remote|$remote_image_url"
         return
     fi
@@ -300,13 +309,13 @@ make_caching_decision() {
     if [ -n "$usable_images" ]; then
         # Pick the first usable image (could be enhanced to pick the "best" one)
         local chosen_usable="${usable_images%%,*}"
-        log "🎯 Decision: Use local usable image ($chosen_usable)"
+        log "🎯 Decision: Use local usable image ($chosen_usable)" >&2
         echo "use_local_usable|$chosen_usable"
         return
     fi
     
     # Priority 4: Build new image
-    log "🎯 Decision: Build new image (no suitable local or remote found)"
+    log "🎯 Decision: Build new image (no suitable local or remote found)" >&2
     echo "build_new"
 }
 
@@ -316,46 +325,53 @@ execute_caching_decision() {
     local target_image_name="$2"
     local remote_image_url="$3"
     
+    # Debug the decision string
+    log "⚡ Executing decision: '$decision'" >&2
+    
     local action="${decision%%|*}"
     local target="${decision#*|}"
     
-    log "⚡ Executing decision: $action"
+    log "  Action: '$action'" >&2
+    log "  Target: '$target'" >&2
     
     case "$action" in
         "use_local_exact")
-            log "✅ Using exact local match: $target"
-            log "Image ready: $target_image_name"
+            log "✅ Using exact local match: $target" >&2
+            log "Image ready: $target_image_name" >&2
             return 0
             ;;
             
         "use_remote")
-            log "📥 Using remote image: $remote_image_url"
+            log "📥 Using remote image: $remote_image_url" >&2
             # Clean up any existing local image to avoid conflicts
-            tart delete "$target_image_name" 2>/dev/null || log "No existing local image to delete"
+            tart delete "$target_image_name" 2>/dev/null || log "No existing local image to delete" >&2
             # Clone from remote (already pulled in check_remote_image)
             tart clone "$remote_image_url" "$target_image_name"
-            log "✅ Remote image cloned locally as: $target_image_name"
+            log "✅ Remote image cloned locally as: $target_image_name" >&2
             return 0
             ;;
             
         "use_local_usable")
-            log "🔄 Using local usable image: $target"
-            log "Note: This image has the same Bun version but different bootstrap version"
-            log "If bootstrap changes are critical, consider using --force-refresh"
+            log "🔄 Using local usable image: $target" >&2
+            log "Note: This image has the same Bun version but different bootstrap version" >&2
+            log "If bootstrap changes are critical, consider using --force-refresh" >&2
             # Clone the usable image to our target name
-            tart delete "$target_image_name" 2>/dev/null || log "No existing local image to delete"
+            tart delete "$target_image_name" 2>/dev/null || log "No existing local image to delete" >&2
             tart clone "$target" "$target_image_name"
-            log "✅ Usable image cloned as: $target_image_name"
+            log "✅ Usable image cloned as: $target_image_name" >&2
             return 0
             ;;
             
         "build_new")
-            log "🏗️  Building new image: $target_image_name"
+            log "🏗️  Building new image: $target_image_name" >&2
             return 1  # Signal that we need to build
             ;;
             
         *)
-            log "❌ Unknown decision: $decision"
+            log "❌ Unknown decision: '$decision'" >&2
+            log "❌ Action was: '$action'" >&2
+            log "❌ Target was: '$target'" >&2
+            log "❌ This suggests a parsing error in the decision string" >&2
             return 1
             ;;
     esac
@@ -507,13 +523,13 @@ VM_PID=$!
             
             # Check initial state before bootstrap
             log "Checking VM state before bootstrap..."
-            sshpass -p "admin" ssh -o StrictHostKeyChecking=no admin@"$VM_IP" "
-                echo 'Current user: $(whoami)'
-                echo 'Current directory: $(pwd)'
-                echo 'PATH: $PATH'
-                echo 'Available in /usr/local/bin: $(ls -la /usr/local/bin/ 2>/dev/null || echo none)'
-                echo 'Available in /opt/homebrew/bin: $(ls -la /opt/homebrew/bin/ 2>/dev/null | head -5 || echo none)'
-            "
+            sshpass -p "admin" ssh -o StrictHostKeyChecking=no admin@"$VM_IP" '
+                echo "Current user: $(whoami)"
+                echo "Current directory: $(pwd)"
+                echo "PATH: $PATH"
+                echo "Available in /usr/local/bin: $(ls -la /usr/local/bin/ 2>/dev/null || echo none)"
+                echo "Available in /opt/homebrew/bin: $(ls -la /opt/homebrew/bin/ 2>/dev/null | head -5 || echo none)"
+            '
             
             # Run the bootstrap script
             if sshpass -p "admin" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 admin@"$VM_IP" "cd '/Volumes/My Shared Files/workspace' && ./scripts/bootstrap-macos.sh"; then
