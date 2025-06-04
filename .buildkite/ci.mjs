@@ -636,9 +636,7 @@ function getBuildImageStep(platform, options) {
   return {
     key: `${getImageKey(platform)}-build-image`,
     label: `${getImageLabel(platform)} - build-image`,
-    agents: {
-      queue: "build-image",
-    },
+    agents: {},
     env: {
       DEBUG: "1",
     },
