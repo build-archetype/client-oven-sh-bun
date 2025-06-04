@@ -464,17 +464,19 @@ async function checkTartAvailability() {
  * @returns {Step}
  */
 function getBuildVendorStep(platform, options) {
-  const { os } = platform;
+  const env = platform.os === "darwin"
+    ? { ...getBuildEnv(platform, options), BUILDKITE_GROUP_KEY: getTargetKey(platform) }
+    : getBuildEnv(platform, options);
   const baseStep = {
     key: `${getTargetKey(platform)}-build-vendor`,
     label: `${getTargetLabel(platform)} - build-vendor`,
     agents: getCppAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
-    env: getBuildEnv(platform, options)
+    env,
   };
 
-  if (os === "darwin") {
+  if (platform.os === "darwin") {
     const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
@@ -517,21 +519,20 @@ function getBuildVendorStep(platform, options) {
  * @returns {Step}
  */
 function getBuildCppStep(platform, options) {
-  const { os } = platform;
   const command = getBuildCommand(platform, options);
+  const env = platform.os === "darwin"
+    ? { BUN_CPP_ONLY: "ON", ...getBuildEnv(platform, options), BUILDKITE_GROUP_KEY: getTargetKey(platform) }
+    : { BUN_CPP_ONLY: "ON", ...getBuildEnv(platform, options) };
   const baseStep = {
     key: `${getTargetKey(platform)}-build-cpp`,
     label: `${getTargetLabel(platform)} - build-cpp`,
     agents: getCppAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
-    env: {
-      BUN_CPP_ONLY: "ON",
-      ...getBuildEnv(platform, options)
-    }
+    env,
   };
 
-  if (os === "darwin") {
+  if (platform.os === "darwin") {
     const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
@@ -591,19 +592,21 @@ function getBuildToolchain(target) {
  * @returns {Step}
  */
 function getBuildZigStep(platform, options) {
-  const { os } = platform;
   const toolchain = getBuildToolchain(platform);
+  const env = platform.os === "darwin"
+    ? { ...getBuildEnv(platform, options), BUILDKITE_GROUP_KEY: getTargetKey(platform) }
+    : getBuildEnv(platform, options);
   const baseStep = {
     key: `${getTargetKey(platform)}-build-zig`,
     label: `${getTargetLabel(platform)} - build-zig`,
     agents: getZigAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
-    env: getBuildEnv(platform, options),
+    env,
     timeout_in_minutes: 35,
   };
 
-  if (os === "darwin") {
+  if (platform.os === "darwin") {
     const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
@@ -646,7 +649,9 @@ function getBuildZigStep(platform, options) {
  * @returns {Step}
  */
 function getLinkBunStep(platform, options) {
-  const { os } = platform;
+  const env = platform.os === "darwin"
+    ? { BUN_LINK_ONLY: "ON", ...getBuildEnv(platform, options), BUILDKITE_GROUP_KEY: getTargetKey(platform) }
+    : { BUN_LINK_ONLY: "ON", ...getBuildEnv(platform, options) };
   const baseStep = {
     key: `${getTargetKey(platform)}-build-bun`,
     label: `${getTargetLabel(platform)} - build-bun`,
@@ -654,13 +659,10 @@ function getLinkBunStep(platform, options) {
     agents: getCppAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
-    env: {
-      BUN_LINK_ONLY: "ON",
-      ...getBuildEnv(platform, options),
-    },
+    env,
   };
 
-  if (os === "darwin") {
+  if (platform.os === "darwin") {
     const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
     return {
       ...baseStep,
@@ -703,13 +705,16 @@ function getLinkBunStep(platform, options) {
  * @returns {Step}
  */
 function getBuildBunStep(platform, options) {
+  const env = platform.os === "darwin"
+    ? { ...getBuildEnv(platform, options), BUILDKITE_GROUP_KEY: getTargetKey(platform) }
+    : getBuildEnv(platform, options);
   return {
     key: `${getTargetKey(platform)}-build-bun`,
     label: `${getTargetLabel(platform)} - build-bun`,
     agents: getCppAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
-    env: getBuildEnv(platform, options),
+    env,
     command: getBuildCommand(platform, options),
   };
 }
@@ -732,11 +737,22 @@ function getTestBunStep(platform, options, testOptions = {}) {
   const { os, profile } = platform;
   const { buildId, unifiedTests, testFiles } = testOptions;
 
-  const args = getTestArgs(platform, options);
+  const args = [`--step=${getTargetKey(platform)}-build-bun`];
+  if (buildId) {
+    args.push(`--build-id=${buildId}`);
+  }
+  if (testFiles) {
+    args.push(...testFiles.map(testFile => `--include=${testFile}`));
+  }
+
   const depends = [];
   if (!buildId) {
     depends.push(`${getTargetKey(platform)}-build-bun`);
   }
+
+  const env = os === "darwin"
+    ? { ...getBuildEnv(platform, options), BUILDKITE_GROUP_KEY: getTargetKey(platform) }
+    : getBuildEnv(platform, options);
 
   const baseStep = {
     key: `${getPlatformKey(platform)}-test-bun`,
@@ -746,7 +762,8 @@ function getTestBunStep(platform, options, testOptions = {}) {
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
     parallelism: unifiedTests ? undefined : os === "darwin" ? 2 : 10,
-    timeout_in_minutes: profile === "asan" ? 90 : 30,
+    timeout_in_minutes: profile === "asan" ? 45 : 30,
+    env,
   };
 
   if (os === "darwin") {
