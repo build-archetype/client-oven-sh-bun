@@ -4,34 +4,18 @@ if(NOT BUILDKITE_CACHE OR NOT BUN_LINK_ONLY)
   return()
 endif()
 
-# Check for jq in both Homebrew locations
-set(JQ_PATHS 
-    "/opt/homebrew/bin/jq"  # Apple Silicon Homebrew
-    "/usr/local/bin/jq"     # Intel Homebrew
-)
-
-set(JQ_EXECUTABLE)
-foreach(path ${JQ_PATHS})
-    if(EXISTS "${path}")
-        set(JQ_EXECUTABLE "${path}")
-        break()
-    endif()
-endforeach()
-
-if(NOT JQ_EXECUTABLE)
-    message(FATAL_ERROR "jq is required but was not found in any of the expected locations:\n  - /opt/homebrew/bin/jq\n  - /usr/local/bin/jq\n\nPlease ensure jq is installed via Homebrew:\n  brew install jq")
-endif()
-
-# Test jq functionality
+# Simple jq check
 execute_process(
-    COMMAND echo "{\"test\":\"working\"}" | ${JQ_EXECUTABLE} -r ".test"
-    OUTPUT_VARIABLE JQ_TEST_OUTPUT
-    RESULT_VARIABLE JQ_TEST_RESULT
+    COMMAND which jq
+    OUTPUT_VARIABLE JQ_PATH
 )
+message(STATUS "Found jq at: ${JQ_PATH}")
 
-if(NOT JQ_TEST_RESULT EQUAL 0 OR NOT JQ_TEST_OUTPUT STREQUAL "working")
-    message(FATAL_ERROR "jq installation at ${JQ_EXECUTABLE} is not working correctly. Please reinstall jq:\n  brew reinstall jq")
-endif()
+execute_process(
+    COMMAND jq --version
+    OUTPUT_VARIABLE JQ_VERSION
+)
+message(STATUS "jq version: ${JQ_VERSION}")
 
 # Add timing function
 function(get_timestamp VAR)
@@ -46,7 +30,7 @@ message(STATUS "Architecture: ${ARCH}")
 message(STATUS "Build Type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Build Path: ${BUILD_PATH}")
 message(STATUS "CMake Version: ${CMAKE_VERSION}")
-message(STATUS "jq Path: ${JQ_EXECUTABLE}")
+message(STATUS "jq Path: ${JQ_PATH}")
 message(STATUS "=======================")
 
 optionx(BUILDKITE_ORGANIZATION_SLUG STRING "The organization slug to use on Buildkite" DEFAULT "bun")
@@ -113,7 +97,7 @@ file(WRITE ${BUILDKITE_BUILD_PATH}/build.json.debug "${BUILDKITE_BUILD}")
 
 # Get build UUID using jq
 execute_process(
-    COMMAND ${JQ_EXECUTABLE} -r ".id" ${BUILDKITE_BUILD_PATH}/build.json
+    COMMAND jq -r ".id" ${BUILDKITE_BUILD_PATH}/build.json
     OUTPUT_VARIABLE BUILDKITE_BUILD_UUID
     RESULT_VARIABLE JQ_RESULT
 )
@@ -124,7 +108,7 @@ endif()
 
 # Get job count using jq
 execute_process(
-    COMMAND ${JQ_EXECUTABLE} -r ".jobs | length" ${BUILDKITE_BUILD_PATH}/build.json
+    COMMAND jq -r ".jobs | length" ${BUILDKITE_BUILD_PATH}/build.json
     OUTPUT_VARIABLE BUILDKITE_JOBS_COUNT
     RESULT_VARIABLE JQ_RESULT
 )
@@ -157,7 +141,7 @@ foreach(i RANGE ${BUILDKITE_JOBS_MAX_INDEX})
     
     # Extract job fields using jq
     execute_process(
-        COMMAND ${JQ_EXECUTABLE} -r ".jobs[${i}] | {id: .id, passed: .passed, group_id: .group_uuid, group_key: .group_identifier, name: (.step_key // .name)}" ${BUILDKITE_BUILD_PATH}/build.json
+        COMMAND jq -r ".jobs[${i}] | {id: .id, passed: .passed, group_id: .group_uuid, group_key: .group_identifier, name: (.step_key // .name)}" ${BUILDKITE_BUILD_PATH}/build.json
         OUTPUT_VARIABLE JOB_JSON
         RESULT_VARIABLE JQ_RESULT
     )
@@ -221,7 +205,7 @@ foreach(i RANGE ${BUILDKITE_JOBS_MAX_INDEX})
     
     # Get artifacts count using jq
     execute_process(
-        COMMAND ${JQ_EXECUTABLE} -r "length" ${BUILDKITE_ARTIFACTS_PATH}
+        COMMAND jq -r "length" ${BUILDKITE_ARTIFACTS_PATH}
         OUTPUT_VARIABLE BUILDKITE_ARTIFACTS_LENGTH
         RESULT_VARIABLE JQ_RESULT
     )
@@ -243,7 +227,7 @@ foreach(i RANGE ${BUILDKITE_JOBS_MAX_INDEX})
     foreach(i RANGE 0 ${BUILDKITE_ARTIFACTS_MAX_INDEX})
         # Extract artifact fields using jq
         execute_process(
-            COMMAND ${JQ_EXECUTABLE} -r ".[${i}] | {id: .id, path: .path, size: .size}" ${BUILDKITE_ARTIFACTS_PATH}
+            COMMAND jq -r ".[${i}] | {id: .id, path: .path, size: .size}" ${BUILDKITE_ARTIFACTS_PATH}
             OUTPUT_VARIABLE ARTIFACT_JSON
             RESULT_VARIABLE JQ_RESULT
         )
