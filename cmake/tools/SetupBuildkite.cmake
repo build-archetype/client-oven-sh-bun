@@ -24,7 +24,7 @@ endif()
 
 # Test jq functionality
 execute_process(
-    COMMAND ${JQ_EXECUTABLE} -r ".test" "{\"test\":\"working\"}"
+    COMMAND echo "{\"test\":\"working\"}" | ${JQ_EXECUTABLE} -r ".test"
     OUTPUT_VARIABLE JQ_TEST_OUTPUT
     RESULT_VARIABLE JQ_TEST_RESULT
 )
