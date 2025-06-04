@@ -49,11 +49,11 @@ create_and_run_vm() {
     sleep 30
 
     # Make run-vm-command.sh executable
-    chmod +x ./run-vm-command.sh
+    chmod +x ./scripts/run-vm-command.sh
 
     # Execute the command
     log "Executing command in VM: $command"
-    ./run-vm-command.sh "$vm_name" "$command"
+    ./scripts/run-vm-command.sh "$vm_name" "$command"
 
     # Upload logs
     buildkite-agent artifact upload vm.log || true

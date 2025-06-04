@@ -307,8 +307,8 @@ main() {
             log "📋 Using local image (same version as remote, faster)"
             # Check jq in local image
             log "Checking for jq in local image..."
-            chmod +x ./run-vm-command.sh
-            if ./run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
+            chmod +x ./scripts/run-vm-command.sh
+            if ./scripts/run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
                 log "✅ jq is available in local VM"
                 exit 0
             else
@@ -324,8 +324,8 @@ main() {
             
             # Check jq in cloned remote image
             log "Checking for jq in cloned remote image..."
-            chmod +x ./run-vm-command.sh
-            if ./run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
+            chmod +x ./scripts/run-vm-command.sh
+            if ./scripts/run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
                 log "✅ jq is available in cloned VM"
                 exit 0
             else
@@ -344,8 +344,8 @@ main() {
         log "📋 Using local image (no remote available)"
         # Check jq in existing image
         log "Checking for jq in existing image..."
-        chmod +x ./run-vm-command.sh
-        if ./run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
+        chmod +x ./scripts/run-vm-command.sh
+        if ./scripts/run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
             log "✅ jq is available in VM"
             exit 0
         else
@@ -451,8 +451,8 @@ VM_PID=$!
     
     # Check jq after bootstrap
     log "Verifying jq installation after bootstrap..."
-    chmod +x ./run-vm-command.sh
-    if ./run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
+    chmod +x ./scripts/run-vm-command.sh
+    if ./scripts/run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
         log "✅ jq is available in VM"
     else
         log "❌ jq is not available in VM after bootstrap"
