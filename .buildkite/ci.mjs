@@ -296,7 +296,7 @@ function getCppAgent(platform, options) {
 
   if (os === "darwin") {
     return {
-      queue: `build-${os}`,
+      queue: "darwin",
       os,
       arch: arch === "aarch64" ? "arm64" : arch,
       tart: "true"
