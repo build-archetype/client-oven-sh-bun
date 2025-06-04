@@ -290,7 +290,16 @@ main() {
     # Step 3: If only local exists and no remote, use local
     if [ "$use_local" = true ] && [ "$remote_available" != true ]; then
         log "📋 Using local image (no remote available)"
-        exit 0
+        # Check jq in existing image
+        log "Checking for jq in existing image..."
+        chmod +x .buildkite/scripts/run-vm-command.sh
+        if .buildkite/scripts/run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
+            log "✅ jq is available in VM"
+            exit 0
+        else
+            log "❌ jq is not available in VM, will run bootstrap"
+            use_local=false
+        fi
     fi
     
     # Step 4: Need to build new image
@@ -337,13 +346,7 @@ VM_PID=$!
         kill $VM_PID 2>/dev/null || true
         exit 1
     fi
-    
-    # Install sshpass if not available
-    if ! command -v sshpass >/dev/null 2>&1; then
-        log "Installing sshpass..."
-        brew install sshpass
-    fi
-    
+
     # Wait for SSH to be available and run bootstrap
     log "Waiting for SSH to be available and running bootstrap..."
     SSH_SUCCESS=false
@@ -394,6 +397,16 @@ VM_PID=$!
     
     log "✅ Bootstrap completed successfully"
     
+    # Check jq after bootstrap
+    log "Verifying jq installation after bootstrap..."
+    chmod +x .buildkite/scripts/run-vm-command.sh
+    if .buildkite/scripts/run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
+        log "✅ jq is available in VM"
+    else
+        log "❌ jq is not available in VM after bootstrap"
+        exit 1
+    fi
+
     # Step 5: Try to push to registry (but don't fail if this doesn't work)
     log "=== REGISTRY PUSH ATTEMPT ==="
     set +e  # Disable error handling for entire registry section
