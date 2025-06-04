@@ -274,14 +274,35 @@ main() {
         # If we have both local and remote with same version, prefer local (faster)
         if [ "$use_local" = true ] && [ "$force_refresh" != true ]; then
             log "📋 Using local image (same version as remote, faster)"
-            exit 0
+            # Check jq in local image
+            log "Checking for jq in local image..."
+            chmod +x .buildkite/scripts/run-vm-command.sh
+            if .buildkite/scripts/run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
+                log "✅ jq is available in local VM"
+                exit 0
+            else
+                log "❌ jq is not available in local VM, will use remote"
+                use_local=false
+            fi
         else
             log "📋 Using remote image (cloning locally)"
             # Delete local if it exists to avoid conflicts
             tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "No existing local image to delete"
             tart clone "$REMOTE_IMAGE_URL" "$LOCAL_IMAGE_NAME"
             log "✅ Cloned successfully from registry"
-            exit 0
+            
+            # Check jq in cloned remote image
+            log "Checking for jq in cloned remote image..."
+            chmod +x .buildkite/scripts/run-vm-command.sh
+            if .buildkite/scripts/run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
+                log "✅ jq is available in cloned VM"
+                exit 0
+            else
+                log "❌ jq is not available in cloned VM, will run bootstrap"
+                tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "No existing image to delete"
+                use_local=false
+                remote_available=false
+            fi
         fi
     else
         log "❌ No remote image found for version $BUN_VERSION"
