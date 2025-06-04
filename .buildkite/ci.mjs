@@ -679,7 +679,7 @@ function getBenchmarkStep() {
     key: "benchmark",
     label: "📊",
     agents: {
-      queue: "build-image",
+      queue: "darwin",
     },
     depends_on: `linux-x64-build-bun`,
     command: "node .buildkite/scripts/upload-benchmark.mjs",
