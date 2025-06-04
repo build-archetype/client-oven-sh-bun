@@ -1,7 +1,5 @@
 #!/bin/bash
 
-echo "🚀 ===== REFACTORED SCRIPT STARTING ====="
-echo "📋 Script version: SSH-only (no VirtioFS)"
 echo "🎯 VM: $1"
 echo "⚡ Command: $2"
 

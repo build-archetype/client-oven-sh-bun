@@ -1,6 +1,37 @@
 #!/bin/bash
 set -euo pipefail
 
+# =====================
+# CONFIGURATION SECTION
+# =====================
+# You can override these via environment variables before running the script.
+
+# Registry for images (default: GitHub Container Registry)
+REGISTRY="${REGISTRY:-ghcr.io}"
+# Organization/user for image (default: build-archetype or from GITHUB_REPOSITORY_OWNER)
+ORGANIZATION="${GITHUB_REPOSITORY_OWNER:-${ORGANIZATION:-build-archetype}}"
+# Repository name (default: client-oven-sh-bun or from GITHUB_REPOSITORY)
+if [ -n "${GITHUB_REPOSITORY:-}" ]; then
+  REPOSITORY="${GITHUB_REPOSITORY##*/}"
+else
+  REPOSITORY="${REPOSITORY:-client-oven-sh-bun}"
+fi
+# Base image to clone for new VM images
+BASE_IMAGE="${BASE_IMAGE:-ghcr.io/cirruslabs/macos-sequoia-base:latest}"
+# Bootstrap script version (bump to force new images)
+BOOTSTRAP_VERSION="${BOOTSTRAP_VERSION:-3.1}"
+# Bun version (auto-detected, can override)
+BUN_VERSION="${BUN_VERSION:-}"
+# If not set, will be detected later in the script
+
+# GitHub credentials for pushing images (optional)
+GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+GITHUB_USERNAME="${GITHUB_USERNAME:-}"
+
+# =====================
+# END CONFIGURATION SECTION
+# =====================
+
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
@@ -276,8 +307,8 @@ main() {
             log "📋 Using local image (same version as remote, faster)"
             # Check jq in local image
             log "Checking for jq in local image..."
-            chmod +x .buildkite/scripts/run-vm-command.sh
-            if .buildkite/scripts/run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
+            chmod +x ./run-vm-command.sh
+            if ./run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
                 log "✅ jq is available in local VM"
                 exit 0
             else
@@ -293,8 +324,8 @@ main() {
             
             # Check jq in cloned remote image
             log "Checking for jq in cloned remote image..."
-            chmod +x .buildkite/scripts/run-vm-command.sh
-            if .buildkite/scripts/run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
+            chmod +x ./run-vm-command.sh
+            if ./run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
                 log "✅ jq is available in cloned VM"
                 exit 0
             else
@@ -313,8 +344,8 @@ main() {
         log "📋 Using local image (no remote available)"
         # Check jq in existing image
         log "Checking for jq in existing image..."
-        chmod +x .buildkite/scripts/run-vm-command.sh
-        if .buildkite/scripts/run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
+        chmod +x ./run-vm-command.sh
+        if ./run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
             log "✅ jq is available in VM"
             exit 0
         else
@@ -420,8 +451,8 @@ VM_PID=$!
     
     # Check jq after bootstrap
     log "Verifying jq installation after bootstrap..."
-    chmod +x .buildkite/scripts/run-vm-command.sh
-    if .buildkite/scripts/run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
+    chmod +x ./run-vm-command.sh
+    if ./run-vm-command.sh "$LOCAL_IMAGE_NAME" "which jq && jq --version"; then
         log "✅ jq is available in VM"
     else
         log "❌ jq is not available in VM after bootstrap"

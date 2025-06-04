@@ -28,8 +28,6 @@ import {
   uploadArtifact,
   writeFile,
 } from "../scripts/utils.mjs";
-import { randomUUID } from "node:crypto";
-import { IMAGE_CONFIG } from "./config.mjs";
 
 /**
  * @typedef {"linux" | "darwin" | "windows"} Os
@@ -106,16 +104,15 @@ function getTargetLabel(target) {
 const buildPlatforms = [
   { os: "darwin", arch: "aarch64", release: "14" },
   { os: "darwin", arch: "x64", release: "14" },
-  // Temporarily disabled non-macOS platforms
-  // { os: "linux", arch: "aarch64", distro: "amazonlinux", release: "2023", features: ["docker"] },
-  // { os: "linux", arch: "x64", distro: "amazonlinux", release: "2023", features: ["docker"] },
-  // { os: "linux", arch: "x64", baseline: true, distro: "amazonlinux", release: "2023", features: ["docker"] },
-  // { os: "linux", arch: "x64", profile: "asan", distro: "amazonlinux", release: "2023", features: ["docker"] },
-  // { os: "linux", arch: "aarch64", abi: "musl", distro: "alpine", release: "3.21" },
-  // { os: "linux", arch: "x64", abi: "musl", distro: "alpine", release: "3.21" },
-  // { os: "linux", arch: "x64", abi: "musl", baseline: true, distro: "alpine", release: "3.21" },
-  // { os: "windows", arch: "x64", release: "2019" },
-  // { os: "windows", arch: "x64", baseline: true, release: "2019" },
+  { os: "linux", arch: "aarch64", distro: "amazonlinux", release: "2023", features: ["docker"] },
+  { os: "linux", arch: "x64", distro: "amazonlinux", release: "2023", features: ["docker"] },
+  { os: "linux", arch: "x64", baseline: true, distro: "amazonlinux", release: "2023", features: ["docker"] },
+  { os: "linux", arch: "x64", profile: "asan", distro: "amazonlinux", release: "2023", features: ["docker"] },
+  { os: "linux", arch: "aarch64", abi: "musl", distro: "alpine", release: "3.21" },
+  { os: "linux", arch: "x64", abi: "musl", distro: "alpine", release: "3.21" },
+  { os: "linux", arch: "x64", abi: "musl", baseline: true, distro: "alpine", release: "3.21" },
+  { os: "windows", arch: "x64", release: "2019" },
+  { os: "windows", arch: "x64", baseline: true, release: "2019" },
 ];
 
 /**
@@ -126,22 +123,21 @@ const testPlatforms = [
   { os: "darwin", arch: "aarch64", release: "13", tier: "previous" },
   { os: "darwin", arch: "x64", release: "14", tier: "latest" },
   { os: "darwin", arch: "x64", release: "13", tier: "previous" },
-  // Temporarily disabled non-macOS platforms
-  // { os: "linux", arch: "aarch64", distro: "debian", release: "12", tier: "latest" },
-  // { os: "linux", arch: "x64", distro: "debian", release: "12", tier: "latest" },
-  // { os: "linux", arch: "x64", baseline: true, distro: "debian", release: "12", tier: "latest" },
-  // { os: "linux", arch: "x64", profile: "asan", distro: "debian", release: "12", tier: "latest" },
-  // { os: "linux", arch: "aarch64", distro: "ubuntu", release: "24.04", tier: "latest" },
-  // { os: "linux", arch: "aarch64", distro: "ubuntu", release: "20.04", tier: "oldest" },
-  // { os: "linux", arch: "x64", distro: "ubuntu", release: "24.04", tier: "latest" },
-  // { os: "linux", arch: "x64", distro: "ubuntu", release: "20.04", tier: "oldest" },
-  // { os: "linux", arch: "x64", baseline: true, distro: "ubuntu", release: "24.04", tier: "latest" },
-  // { os: "linux", arch: "x64", baseline: true, distro: "ubuntu", release: "20.04", tier: "oldest" },
-  // { os: "linux", arch: "aarch64", abi: "musl", distro: "alpine", release: "3.21", tier: "latest" },
-  // { os: "linux", arch: "x64", abi: "musl", distro: "alpine", release: "3.21", tier: "latest" },
-  // { os: "linux", arch: "x64", abi: "musl", baseline: true, distro: "alpine", release: "3.21", tier: "latest" },
-  // { os: "windows", arch: "x64", release: "2019", tier: "oldest" },
-  // { os: "windows", arch: "x64", release: "2019", baseline: true, tier: "oldest" },
+  { os: "linux", arch: "aarch64", distro: "debian", release: "12", tier: "latest" },
+  { os: "linux", arch: "x64", distro: "debian", release: "12", tier: "latest" },
+  { os: "linux", arch: "x64", baseline: true, distro: "debian", release: "12", tier: "latest" },
+  { os: "linux", arch: "x64", profile: "asan", distro: "debian", release: "12", tier: "latest" },
+  { os: "linux", arch: "aarch64", distro: "ubuntu", release: "24.04", tier: "latest" },
+  { os: "linux", arch: "aarch64", distro: "ubuntu", release: "20.04", tier: "oldest" },
+  { os: "linux", arch: "x64", distro: "ubuntu", release: "24.04", tier: "latest" },
+  { os: "linux", arch: "x64", distro: "ubuntu", release: "20.04", tier: "oldest" },
+  { os: "linux", arch: "x64", baseline: true, distro: "ubuntu", release: "24.04", tier: "latest" },
+  { os: "linux", arch: "x64", baseline: true, distro: "ubuntu", release: "20.04", tier: "oldest" },
+  { os: "linux", arch: "aarch64", abi: "musl", distro: "alpine", release: "3.21", tier: "latest" },
+  { os: "linux", arch: "x64", abi: "musl", distro: "alpine", release: "3.21", tier: "latest" },
+  { os: "linux", arch: "x64", abi: "musl", baseline: true, distro: "alpine", release: "3.21", tier: "latest" },
+  { os: "windows", arch: "x64", release: "2019", tier: "oldest" },
+  { os: "windows", arch: "x64", release: "2019", baseline: true, tier: "oldest" },
 ];
 
 /**
@@ -232,13 +228,7 @@ function getRetry(limit = 0) {
     manual: {
       permit_on_passed: true,
     },
-    automatic: [
-      { exit_status: 1, limit },
-      { exit_status: -1, limit: 1 },
-      { exit_status: 255, limit: 1 },
-      { signal_reason: "cancel", limit: 1 },
-      { signal_reason: "agent_stop", limit: 1 },
-    ],
+    automatic: false,
   };
 }
 
@@ -306,10 +296,9 @@ function getCppAgent(platform, options) {
 
   if (os === "darwin") {
     return {
-      queue: "darwin",
-      os: "darwin",
-      arch: arch === "aarch64" ? "arm64" : arch,
-      tart: true,
+      queue: `build-${os}`,
+      os,
+      arch,
     };
   }
 
@@ -321,39 +310,34 @@ function getCppAgent(platform, options) {
 }
 
 /**
+ * @returns {Platform}
+ */
+function getZigPlatform() {
+  return {
+    os: "linux",
+    arch: "aarch64",
+    abi: "musl",
+    distro: "alpine",
+    release: "3.21",
+  };
+}
+
+/**
  * @param {Platform} platform
  * @param {PipelineOptions} options
  * @returns {Agent}
  */
 function getZigAgent(platform, options) {
-  const { os, arch } = platform;
+  const { arch } = platform;
 
-  // Use macOS agents for darwin platforms since they need to run Tart commands
-  if (os === "darwin") {
-    return {
-      queue: "darwin",
-      os: "darwin",
-      arch: arch === "aarch64" ? "arm64" : arch,
-      tart: true,
-    };
-  }
+  // Uncomment to restore to using macOS on-prem for Zig.
+  // return {
+  //   queue: "build-zig",
+  // };
 
-  // Use Linux EC2 agents for non-macOS platforms
-  return getEc2Agent(
-    {
-      os: "linux",
-      arch: "x64",
-      abi: "musl",
-      distro: "alpine",
-      release: "3.21",
-    },
-    options,
-    {
-      instanceType: "c7i.2xlarge",
-      cpuCount: 4,
-      threadsPerCore: 1,
-    },
-  );
+  return getEc2Agent(getZigPlatform(), options, {
+    instanceType: "r8g.large",
+  });
 }
 
 /**
@@ -366,10 +350,9 @@ function getTestAgent(platform, options) {
 
   if (os === "darwin") {
     return {
-      queue: "darwin",
-      os: "darwin",
-      arch: arch === "aarch64" ? "arm64" : arch,
-      tart: true,
+      queue: `test-${os}`,
+      os,
+      arch,
     };
   }
 
@@ -434,83 +417,27 @@ function getBuildCommand(target, options) {
 }
 
 /**
- * @returns {Promise<boolean>}
- */
-async function checkTartAvailability() {
-  try {
-    // Check if tart is installed
-    await spawnSafe(["which", "tart"]);
-    
-    // Check if we can list VMs
-    const { stdout } = await spawnSafe(["tart", "list"], { stdio: "pipe" });
-    
-    // Check if we have the base image
-    const { stdout: images } = await spawnSafe(["tart", "list", "images"], { stdio: "pipe" });
-    if (!images.includes("ghcr.io/cirruslabs/macos-sequoia-base:latest")) {
-      console.log("Base image not found, attempting to pull...");
-      await spawnSafe(["tart", "pull", "ghcr.io/cirruslabs/macos-sequoia-base:latest"]);
-    }
-    
-    return true;
-  } catch (error) {
-    console.error("Tart environment check failed:", error);
-    return false;
-  }
-}
-
-/**
  * @param {Platform} platform
  * @param {PipelineOptions} options
  * @returns {Step}
  */
 function getBuildVendorStep(platform, options) {
-  const env = platform.os === "darwin"
-    ? { ...getBuildEnv(platform, options), BUILDKITE_GROUP_KEY: getTargetKey(platform) }
-    : getBuildEnv(platform, options);
-  const baseStep = {
+  const step = {
     key: `${getTargetKey(platform)}-build-vendor`,
     label: `${getTargetLabel(platform)} - build-vendor`,
     agents: getCppAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
-    env,
-  };
-
-  if (platform.os === "darwin") {
-    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
-    return {
-      ...baseStep,
-      command: [
-        // Log initial state
-        "echo '=== INITIAL TART STATE (BUILD VENDOR) ==='",
-        "echo 'Available Tart VMs:'",
-        "tart list || echo 'Failed to list VMs'",
-        "echo '========================================='",
-        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
-        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
-        'TART_LOG_PID=$!',
-        `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone ${IMAGE_CONFIG.baseImage.versionedName} ${vmName}`,
-        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
-        'sleep 30',
-        'chmod +x .buildkite/scripts/run-vm-command.sh',
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "ls -la && ${getBuildCommand(platform, options)} --target dependencies"`,
-        'buildkite-agent artifact upload vm.log || true',
-        `echo "Checking VM status before cleanup..."`,
-        `if tart list | grep -q "${vmName}"; then echo "VM ${vmName} exists, deleting..."; tart delete ${vmName} || true; else echo "VM ${vmName} not found - may have been cleaned up earlier or crashed"; fi || true`,
-        // Log final state
-        "echo '=== FINAL TART STATE (BUILD VENDOR) ==='",
-        "echo 'Available Tart VMs:'",
-        "tart list || echo 'Failed to list VMs'",
-        "echo '======================================'"
-      ]
-    };
-  }
-
-  return {
-    ...baseStep,
+    env: getBuildEnv(platform, options),
     command: `${getBuildCommand(platform, options)} --target dependencies`,
   };
+  // If macOS, run in VM
+  if (platform.os === "darwin") {
+    step.command = [
+      `./scripts/ci-macos.sh \"${getBuildCommand(platform, options)} --target dependencies\" \"${process.cwd()}\"`
+    ];
+  }
+  return step;
 }
 
 /**
@@ -520,54 +447,29 @@ function getBuildVendorStep(platform, options) {
  */
 function getBuildCppStep(platform, options) {
   const command = getBuildCommand(platform, options);
-  const env = platform.os === "darwin"
-    ? { BUN_CPP_ONLY: "ON", ...getBuildEnv(platform, options), BUILDKITE_GROUP_KEY: getTargetKey(platform) }
-    : { BUN_CPP_ONLY: "ON", ...getBuildEnv(platform, options) };
-  const baseStep = {
+  const step = {
     key: `${getTargetKey(platform)}-build-cpp`,
     label: `${getTargetLabel(platform)} - build-cpp`,
     agents: getCppAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
-    env,
+    env: {
+      BUN_CPP_ONLY: "ON",
+      ...getBuildEnv(platform, options),
+    },
+    // We used to build the C++ dependencies and bun in separate steps.
+    // However, as long as the zig build takes longer than both sequentially,
+    // it's cheaper to run them in the same step. Can be revisited in the future.
+    command: [`${command} --target bun`, `${command} --target dependencies`],
   };
-
+  // If macOS, run in VM
   if (platform.os === "darwin") {
-    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
-    return {
-      ...baseStep,
-      command: [
-        // Log initial state
-        "echo '=== INITIAL TART STATE (BUILD CPP) ==='",
-        "echo 'Available Tart VMs:'",
-        "tart list || echo 'Failed to list VMs'",
-        "echo '======================================'",
-        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
-        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
-        'TART_LOG_PID=$!',
-        `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone ${IMAGE_CONFIG.baseImage.versionedName} ${vmName}`,
-        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
-        'sleep 30',
-        'chmod +x .buildkite/scripts/run-vm-command.sh',
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "ls -la && ${command} --target bun"`,
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "ls -la && ${command} --target dependencies"`,
-        'buildkite-agent artifact upload vm.log || true',
-        `echo "Checking VM status before cleanup..."`,
-        `if tart list | grep -q "${vmName}"; then echo "VM ${vmName} exists, deleting..."; tart delete ${vmName} || true; else echo "VM ${vmName} not found - may have been cleaned up earlier or crashed"; fi || true`,
-        // Log final state
-        "echo '=== FINAL TART STATE (BUILD CPP) ==='",
-        "echo 'Available Tart VMs:'",
-        "tart list || echo 'Failed to list VMs'",
-        "echo '====================================='",
-      ]
-    };
+    step.command = [
+      `./scripts/ci-macos.sh \"${command} --target bun\" \"${process.cwd()}\"`,
+      `./scripts/ci-macos.sh \"${command} --target dependencies\" \"${process.cwd()}\"`
+    ];
   }
-
-  return {
-    ...baseStep,
-    command: [`${command} --target bun`, `${command} --target dependencies`]
-  };
+  return step;
 }
 
 /**
@@ -593,54 +495,23 @@ function getBuildToolchain(target) {
  */
 function getBuildZigStep(platform, options) {
   const toolchain = getBuildToolchain(platform);
-  const env = platform.os === "darwin"
-    ? { ...getBuildEnv(platform, options), BUILDKITE_GROUP_KEY: getTargetKey(platform) }
-    : getBuildEnv(platform, options);
-  const baseStep = {
+  const step = {
     key: `${getTargetKey(platform)}-build-zig`,
     label: `${getTargetLabel(platform)} - build-zig`,
     agents: getZigAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
-    env,
+    env: getBuildEnv(platform, options),
+    command: `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
     timeout_in_minutes: 35,
   };
-
+  // If macOS, run in VM
   if (platform.os === "darwin") {
-    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
-    return {
-      ...baseStep,
-      command: [
-        // Log initial state
-        "echo '=== INITIAL TART STATE (BUILD ZIG) ==='",
-        "echo 'Available Tart VMs:'",
-        "tart list || echo 'Failed to list VMs'",
-        "echo '======================================'",
-        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
-        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
-        'TART_LOG_PID=$!',
-        `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone ${IMAGE_CONFIG.baseImage.versionedName} ${vmName}`,
-        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
-        'sleep 30',
-        'chmod +x .buildkite/scripts/run-vm-command.sh',
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "ls -la && ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}"`,
-        'buildkite-agent artifact upload vm.log || true',
-        `echo "Checking VM status before cleanup..."`,
-        `if tart list | grep -q "${vmName}"; then echo "VM ${vmName} exists, deleting..."; tart delete ${vmName} || true; else echo "VM ${vmName} not found - may have been cleaned up earlier or crashed"; fi || true`,
-        // Log final state
-        "echo '=== FINAL TART STATE (BUILD ZIG) ==='",
-        "echo 'Available Tart VMs:'",
-        "tart list || echo 'Failed to list VMs'",
-        "echo '==================================='"
-      ]
-    };
+    step.command = [
+      `./scripts/ci-macos.sh \"${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}\" \"${process.cwd()}\"`
+    ];
   }
-
-  return {
-    ...baseStep,
-    command: `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
-  };
+  return step;
 }
 
 /**
@@ -649,54 +520,26 @@ function getBuildZigStep(platform, options) {
  * @returns {Step}
  */
 function getLinkBunStep(platform, options) {
-  const env = platform.os === "darwin"
-    ? { BUN_LINK_ONLY: "ON", ...getBuildEnv(platform, options), BUILDKITE_GROUP_KEY: getTargetKey(platform) }
-    : { BUN_LINK_ONLY: "ON", ...getBuildEnv(platform, options) };
-  const baseStep = {
+  const step = {
     key: `${getTargetKey(platform)}-build-bun`,
     label: `${getTargetLabel(platform)} - build-bun`,
     depends_on: [`${getTargetKey(platform)}-build-cpp`, `${getTargetKey(platform)}-build-zig`],
     agents: getCppAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
-    env,
+    env: {
+      BUN_LINK_ONLY: "ON",
+      ...getBuildEnv(platform, options),
+    },
+    command: `${getBuildCommand(platform, options)} --target bun`,
   };
-
+  // If macOS, run in VM
   if (platform.os === "darwin") {
-    const vmName = `bun-build-${Date.now()}-${randomUUID()}`;
-    return {
-      ...baseStep,
-      command: [
-        // Log initial state
-        "echo '=== INITIAL TART STATE (LINK BUN) ==='",
-        "echo 'Available Tart VMs:'",
-        "tart list || echo 'Failed to list VMs'",
-        "echo '====================================='",
-        'tart list | awk \'/stopped/ && $1 == "local" && $2 ~ /^bun-build-[0-9]+-[0-9a-f-]+$/ {print $2}\' | xargs -n1 tart delete || true',
-        'log stream --predicate \'process == "tart" OR process CONTAINS "Virtualization"\' > tart.log 2>&1 &',
-        'TART_LOG_PID=$!',
-        `trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT`,
-        `tart clone ${IMAGE_CONFIG.baseImage.versionedName} ${vmName}`,
-        `tart run ${vmName} --no-graphics --dir=workspace:$PWD > vm.log 2>&1 &`,
-        'sleep 30',
-        'chmod +x .buildkite/scripts/run-vm-command.sh',
-        `.buildkite/scripts/run-vm-command.sh ${vmName} "ls -la && ${getBuildCommand(platform, options)} --target bun"`,
-        'buildkite-agent artifact upload vm.log || true',
-        `echo "Checking VM status before cleanup..."`,
-        `if tart list | grep -q "${vmName}"; then echo "VM ${vmName} exists, deleting..."; tart delete ${vmName} || true; else echo "VM ${vmName} not found - may have been cleaned up earlier or crashed"; fi || true`,
-        // Log final state
-        "echo '=== FINAL TART STATE (LINK BUN) ==='",
-        "echo 'Available Tart VMs:'",
-        "tart list || echo 'Failed to list VMs'",
-        "echo '=================================='"
-      ]
-    };
+    step.command = [
+      `./scripts/ci-macos.sh \"${getBuildCommand(platform, options)} --target bun\" \"${process.cwd()}\"`
+    ];
   }
-
-  return {
-    ...baseStep,
-    command: `${getBuildCommand(platform, options)} --target bun`
-  };
+  return step;
 }
 
 /**
@@ -705,16 +548,13 @@ function getLinkBunStep(platform, options) {
  * @returns {Step}
  */
 function getBuildBunStep(platform, options) {
-  const env = platform.os === "darwin"
-    ? { ...getBuildEnv(platform, options), BUILDKITE_GROUP_KEY: getTargetKey(platform) }
-    : getBuildEnv(platform, options);
   return {
     key: `${getTargetKey(platform)}-build-bun`,
     label: `${getTargetLabel(platform)} - build-bun`,
     agents: getCppAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
-    env,
+    env: getBuildEnv(platform, options),
     command: getBuildCommand(platform, options),
   };
 }
@@ -750,11 +590,7 @@ function getTestBunStep(platform, options, testOptions = {}) {
     depends.push(`${getTargetKey(platform)}-build-bun`);
   }
 
-  const env = os === "darwin"
-    ? { ...getBuildEnv(platform, options), BUILDKITE_GROUP_KEY: getTargetKey(platform) }
-    : getBuildEnv(platform, options);
-
-  const baseStep = {
+  return {
     key: `${getPlatformKey(platform)}-test-bun`,
     label: `${getPlatformLabel(platform)} - test-bun`,
     depends_on: depends,
@@ -763,25 +599,10 @@ function getTestBunStep(platform, options, testOptions = {}) {
     cancel_on_build_failing: isMergeQueue(),
     parallelism: unifiedTests ? undefined : os === "darwin" ? 2 : 10,
     timeout_in_minutes: profile === "asan" ? 45 : 30,
-    env,
-  };
-
-  if (os === "darwin") {
-    return {
-      ...baseStep,
-      command: [
-        "chmod +x scripts/build-macos.sh",
-        `./scripts/build-macos.sh "./scripts/runner.node.mjs ${args.join(" ")}" "${process.cwd()}"`
-      ]
-    };
-  }
-
-  return {
-    ...baseStep,
     command:
       os === "windows"
         ? `node .\\scripts\\runner.node.mjs ${args.join(" ")}`
-        : `./scripts/runner.node.mjs ${args.join(" ")}`
+        : `./scripts/runner.node.mjs ${args.join(" ")}`,
   };
 }
 
@@ -815,9 +636,7 @@ function getBuildImageStep(platform, options) {
     key: `${getImageKey(platform)}-build-image`,
     label: `${getImageLabel(platform)} - build-image`,
     agents: {
-      os: "darwin",
-      arch: "arm64",
-      tart: true,
+      queue: "build-image",
     },
     env: {
       DEBUG: "1",
@@ -842,10 +661,7 @@ function getReleaseStep(buildPlatforms, options) {
     key: "release",
     label: getBuildkiteEmoji("rocket"),
     agents: {
-      queue: "darwin",
-      os: "darwin",
-      arch: "arm64",
-      tart: true,
+      queue: "test-darwin",
     },
     depends_on: buildPlatforms.map(platform => `${getTargetKey(platform)}-build-bun`),
     env: {
@@ -859,21 +675,14 @@ function getReleaseStep(buildPlatforms, options) {
  * @param {Platform[]} buildPlatforms
  * @returns {Step}
  */
-function getBenchmarkStep(buildPlatforms) {
-  // Find the first available build platform to depend on
-  const firstPlatform = buildPlatforms[0];
-  const dependsOn = firstPlatform ? `${getTargetKey(firstPlatform)}-build-bun` : undefined;
-  
+function getBenchmarkStep() {
   return {
     key: "benchmark",
     label: "📊",
     agents: {
-      queue: "darwin",
-      os: "darwin",
-      arch: "arm64",
-      tart: true,
+      queue: "build-image",
     },
-    depends_on: dependsOn,
+    depends_on: `linux-x64-build-bun`,
     command: "node .buildkite/scripts/upload-benchmark.mjs",
   };
 }
@@ -1142,7 +951,7 @@ function getOptionsStep() {
       {
         key: "unified-builds",
         select: "Do you want to build each platform in a single step?",
-        hint: "If true, builds will not be split into seperate steps (this will likely slow down the build)",
+        hint: "If true, builds will not be split into separate steps (this will likely slow down the build)",
         required: false,
         default: "false",
         options: booleanOptions,
@@ -1150,7 +959,7 @@ function getOptionsStep() {
       {
         key: "unified-tests",
         select: "Do you want to run tests in a single step?",
-        hint: "If true, tests will not be split into seperate steps (this will be very slow)",
+        hint: "If true, tests will not be split into separate steps (this will be very slow)",
         required: false,
         default: "false",
         options: booleanOptions,
@@ -1170,10 +979,7 @@ function getOptionsApplyStep() {
     command: `${command} --apply`,
     depends_on: ["options"],
     agents: {
-      queue: "darwin",
-      os: "darwin",
-      arch: "arm64", 
-      tart: true,
+      queue: getEnv("BUILDKITE_AGENT_META_DATA_QUEUE", false),
     },
   };
 }
@@ -1268,61 +1074,6 @@ async function getPipelineOptions() {
 }
 
 /**
- * @returns {Step}
- */
-function getBuildBaseImageStep() {
-  return {
-    label: "Build Base Image",
-    key: "build-base-image",
-    agents: {
-      queue: "darwin",
-      os: "darwin",
-      arch: "arm64",
-      tart: true
-    },
-    command: [
-      // Log initial state
-      "echo '=== INITIAL TART STATE ==='",
-      "echo 'Available Tart VMs:'",
-      "tart list || echo 'Failed to list VMs'",
-      "echo '=========================='",
-      // Set up Docker config for authentication
-      "mkdir -p $HOME/.docker",
-      "cat > $HOME/.docker/config.json << EOF",
-      "{\n  \"auths\": {\n    \"ghcr.io\": {\n      \"auth\": \"$(echo -n \"$GITHUB_USERNAME:$GITHUB_TOKEN\" | base64)\"\n    }\n  }\n}",
-      "EOF",
-      "chmod 600 $HOME/.docker/config.json",
-      // Store credentials for the script
-      "echo \"$GITHUB_TOKEN\" > /tmp/github-token.txt",
-      "echo \"$GITHUB_USERNAME\" > /tmp/github-username.txt",
-      // Run the build script (it handles its own registry push)
-      "chmod +x .buildkite/scripts/ensure-bun-image.sh",
-      "set -x",
-      ".buildkite/scripts/ensure-bun-image.sh 2>&1 | tee -a base-image-build.log",
-      // Clean up credentials
-      "rm -f /tmp/github-token.txt /tmp/github-username.txt",
-      // Log final state
-      "echo '=== FINAL TART STATE ==='",
-      "echo 'Available Tart VMs:'",
-      "tart list || echo 'Failed to list VMs'",
-      "echo '========================'"
-    ],
-    retry: {
-      automatic: [
-        { exit_status: 1, limit: 2 },
-        { exit_status: -1, limit: 1 },
-        { exit_status: 255, limit: 1 }
-      ]
-    },
-    artifact_paths: [
-      "base-image-build.log"
-    ],
-    soft_fail: false,
-    timeout_in_minutes: 180
-  };
-}
-
-/**
  * @param {PipelineOptions} [options]
  * @returns {Promise<Pipeline | undefined>}
  */
@@ -1352,6 +1103,19 @@ async function getPipeline(options = {}) {
 
   /** @type {Step[]} */
   const steps = [];
+
+  // Add macOS VM image build step if we have any macOS platforms
+  const hasMacOS = buildPlatforms.some(platform => platform.os === "darwin");
+  if (hasMacOS) {
+    steps.push({
+      key: "build-macos-vm",
+      label: "🖥️  Build macOS VM image",
+      agents: {
+        queue: "build-darwin",
+      },
+      command: "./scripts/build-macos-vm.sh",
+    });
+  }
 
   if (imagePlatforms.size) {
     steps.push({
@@ -1383,52 +1147,46 @@ async function getPipeline(options = {}) {
       ? buildPlatforms
       : buildPlatforms.filter(({ profile }) => profile !== "asan");
 
-    // Group build steps by platform
-    for (const platform of relevantBuildPlatforms) {
-      const imageKey = getImageKey(platform);
-      const zigImageKey = getImageKey(getZigPlatform());
-      const dependsOn = imagePlatforms.has(zigImageKey) ? [`${zigImageKey}-build-image`] : [];
-      if (imagePlatforms.has(imageKey)) {
-        dependsOn.push(`${imageKey}-build-image`);
-      }
+    steps.push(
+      ...relevantBuildPlatforms.map(target => {
+        const imageKey = getImageKey(target);
+        const zigImageKey = getImageKey(getZigPlatform());
+        const dependsOn = imagePlatforms.has(zigImageKey) ? [`${zigImageKey}-build-image`] : [];
+        if (imagePlatforms.has(imageKey)) {
+          dependsOn.push(`${imageKey}-build-image`);
+        }
+        // Add dependency on macOS VM build if this is a macOS platform
+        if (target.os === "darwin") {
+          dependsOn.push("build-macos-vm");
+        }
 
-      const buildSteps = unifiedBuilds
-        ? [getBuildBunStep(platform, options)]
-        : [
-            getBuildVendorStep(platform, options),
-            getBuildCppStep(platform, options),
-            getBuildZigStep(platform, options),
-            getLinkBunStep(platform, options),
-          ];
-
-      steps.push(
-        getStepWithDependsOn(
+        return getStepWithDependsOn(
           {
-            key: getTargetKey(platform),
-            group: getTargetLabel(platform),
-            steps: buildSteps,
+            key: getTargetKey(target),
+            group: getTargetLabel(target),
+            steps: unifiedBuilds
+              ? [getBuildBunStep(target, options)]
+              : [getBuildCppStep(target, options), getBuildZigStep(target, options), getLinkBunStep(target, options)],
           },
           ...dependsOn,
-        ),
-      );
-    }
+        );
+      }),
+    );
   }
 
   if (!isMainBranch()) {
     const { skipTests, forceTests, unifiedTests, testFiles } = options;
     if (!skipTests || forceTests) {
-      // Group test steps by platform
-      for (const platform of testPlatforms) {
-        steps.push({
-          key: getTargetKey(platform),
-          group: getTargetLabel(platform),
-          steps: [getTestBunStep(platform, options, { unifiedTests, testFiles, buildId })],
-        });
-      }
+      steps.push(
+        ...testPlatforms.map(target => ({
+          key: getTargetKey(target),
+          group: getTargetLabel(target),
+          steps: [getTestBunStep(target, options, { unifiedTests, testFiles, buildId })],
+        })),
+      );
     }
   }
 
-  // Add release and benchmark steps
   if (isMainBranch()) {
     steps.push(getReleaseStep(buildPlatforms, options));
   }
@@ -1437,7 +1195,6 @@ async function getPipeline(options = {}) {
   /** @type {Map<string, GroupStep>} */
   const stepsByGroup = new Map();
 
-  // Merge steps with the same group
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
     if (!("group" in step)) {
@@ -1458,25 +1215,6 @@ async function getPipeline(options = {}) {
     priority,
     steps: [...steps.filter(step => typeof step !== "undefined"), ...Array.from(stepsByGroup.values())],
   };
-}
-
-/**
- * @param {Platform} platform
- * @param {PipelineOptions} options
- * @returns {string[]}
- */
-function getTestArgs(platform, options) {
-  const { buildId, unifiedTests, testFiles } = options;
-  const args = [`--step=${getTargetKey(platform)}-build-bun`];
-  
-  if (buildId) {
-    args.push(`--build-id=${buildId}`);
-  }
-  if (testFiles) {
-    args.push(...testFiles.map(testFile => `--include=${testFile}`));
-  }
-  
-  return args;
 }
 
 async function main() {
