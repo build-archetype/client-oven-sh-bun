@@ -275,8 +275,8 @@ echo "🧹 ===== CLEANUP ====="
 rm -f "$ENV_FILE" || true
 echo "✅ Cleanup complete"
 
-echo "🏁 ===== REFACTORED SCRIPT COMPLETE ====="
+echo "===== RUN VM COMMAND COMPLETE ====="
 echo "Exit code: $EXIT_CODE"
 
 # Propagate exit status
-exit $EXIT_CODE 
+exit $EXIT_CODE
