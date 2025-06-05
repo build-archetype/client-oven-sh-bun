@@ -19,7 +19,7 @@ fi
 # Base image to clone for new VM images
 BASE_IMAGE="${BASE_IMAGE:-ghcr.io/cirruslabs/macos-sequoia-base:latest}"
 # Bootstrap script version (bump to force new images)
-BOOTSTRAP_VERSION="${BOOTSTRAP_VERSION:-3.1}"
+BOOTSTRAP_VERSION="${BOOTSTRAP_VERSION:-3.2}"
 # Bun version (auto-detected, can override)
 BUN_VERSION="${BUN_VERSION:-}"
 # If not set, will be detected later in the script
@@ -435,7 +435,7 @@ main() {
     log "Detected Bun version: $BUN_VERSION"
     
     # Bootstrap script version - increment this when bootstrap changes to force new images
-    BOOTSTRAP_VERSION="3.1"  # Fixed Rust installation: standard location + system-wide symlinks
+    BOOTSTRAP_VERSION="3.2"  # Added Xcode Command Line Tools installation for native module compilation
     
     # Image names (include bootstrap version to force rebuilds when bootstrap changes)
     LOCAL_IMAGE_NAME="bun-build-macos-${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"

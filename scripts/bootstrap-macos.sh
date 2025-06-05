@@ -2,7 +2,7 @@
 set -e
 set -x
 
-# Version: 3.1 - Fixed Rust installation to use standard location with system-wide symlinks
+# Version: 3.2 - Added Xcode Command Line Tools installation for native module compilation
 # A comprehensive bootstrap script for macOS based on the main bootstrap.sh
 
 # Constants
@@ -479,6 +479,13 @@ install_docker() {
     fi
 }
 
+install_xcode_tools() {
+    if ! command -v gcc >/dev/null 2>&1; then
+        print "Installing Xcode Command Line Tools..."
+        execute xcode-select --install
+    fi
+}
+
 # Verification function
 verify_installations() {
     print "Verifying installations..."
@@ -572,6 +579,7 @@ main() {
     install_common_software
     install_build_essentials
     install_docker
+    install_xcode_tools
     
     # Verify installations
     verify_installations
