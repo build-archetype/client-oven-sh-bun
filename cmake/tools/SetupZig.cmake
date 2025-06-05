@@ -55,13 +55,21 @@ optionx(ZIG_OBJECT_FORMAT "obj|bc" "Output file format for Zig object files" DEF
 optionx(ZIG_LOCAL_CACHE_DIR FILEPATH "The path to local the zig cache directory" DEFAULT ${CACHE_PATH}/zig/local)
 optionx(ZIG_GLOBAL_CACHE_DIR FILEPATH "The path to the global zig cache directory" DEFAULT ${CACHE_PATH}/zig/global)
 
-if(CI AND CMAKE_HOST_APPLE)
-  set(ZIG_COMPILER_SAFE_DEFAULT ON)
-else()
-  set(ZIG_COMPILER_SAFE_DEFAULT OFF)
-endif()
+# TEMPORARY FIX: Commented out to avoid Zig compiler crash in Response.zig
+# The ReleaseSafe build of the Zig compiler has a known issue analyzing Response.zig
+# with "inline else" patterns. Re-enable this once upstream fixes the compiler crash.
+# Related to upstream commit 773484a62 (uWS refactoring).
+#
+# if(CI AND CMAKE_HOST_APPLE)
+#   set(ZIG_COMPILER_SAFE_DEFAULT ON)
+# else()
+#   set(ZIG_COMPILER_SAFE_DEFAULT OFF)
+# endif()
+#
+# optionx(ZIG_COMPILER_SAFE BOOL "Download a ReleaseSafe build of the Zig compiler. Only availble on macos aarch64." DEFAULT ${ZIG_COMPILER_SAFE_DEFAULT})
 
-optionx(ZIG_COMPILER_SAFE BOOL "Download a ReleaseSafe build of the Zig compiler. Only availble on macos aarch64." DEFAULT ${ZIG_COMPILER_SAFE_DEFAULT})
+# Temporary: Always use regular Zig compiler build (not ReleaseSafe)
+optionx(ZIG_COMPILER_SAFE BOOL "Download a ReleaseSafe build of the Zig compiler. Only availble on macos aarch64." DEFAULT OFF)
 
 setenv(ZIG_LOCAL_CACHE_DIR ${ZIG_LOCAL_CACHE_DIR})
 setenv(ZIG_GLOBAL_CACHE_DIR ${ZIG_GLOBAL_CACHE_DIR})
