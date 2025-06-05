@@ -19,7 +19,7 @@ fi
 # Base image to clone for new VM images
 BASE_IMAGE="${BASE_IMAGE:-ghcr.io/cirruslabs/macos-sequoia-base:latest}"
 # Bootstrap script version (bump to force new images)
-BOOTSTRAP_VERSION="${BOOTSTRAP_VERSION:-3.2}"
+BOOTSTRAP_VERSION="${BOOTSTRAP_VERSION:-3.3}"
 # Bun version (auto-detected, can override)
 BUN_VERSION="${BUN_VERSION:-}"
 # If not set, will be detected later in the script
@@ -305,14 +305,9 @@ make_caching_decision() {
         return
     fi
     
-    # Priority 3: Use local usable image (same Bun version, different bootstrap)
-    if [ -n "$usable_images" ]; then
-        # Pick the first usable image (could be enhanced to pick the "best" one)
-        local chosen_usable="${usable_images%%,*}"
-        log "🎯 Decision: Use local usable image ($chosen_usable)" >&2
-        echo "use_local_usable|$chosen_usable"
-        return
-    fi
+    # Priority 3: Check for newer bootstrap versions only (removed old fallback)
+    # Bootstrap version changes are critical - always build new if version doesn't match
+    # Old logic that used different bootstrap versions removed for safety
     
     # Priority 4: Build new image
     log "🎯 Decision: Build new image (no suitable local or remote found)" >&2
@@ -348,17 +343,6 @@ execute_caching_decision() {
             # Clone from remote (already pulled in check_remote_image)
             tart clone "$remote_image_url" "$target_image_name"
             log "✅ Remote image cloned locally as: $target_image_name" >&2
-            return 0
-            ;;
-            
-        "use_local_usable")
-            log "🔄 Using local usable image: $target" >&2
-            log "Note: This image has the same Bun version but different bootstrap version" >&2
-            log "If bootstrap changes are critical, consider using --force-refresh" >&2
-            # Clone the usable image to our target name
-            tart delete "$target_image_name" 2>/dev/null || log "No existing local image to delete" >&2
-            tart clone "$target" "$target_image_name"
-            log "✅ Usable image cloned as: $target_image_name" >&2
             return 0
             ;;
             
@@ -435,7 +419,7 @@ main() {
     log "Detected Bun version: $BUN_VERSION"
     
     # Bootstrap script version - increment this when bootstrap changes to force new images
-    BOOTSTRAP_VERSION="3.2"  # Added Xcode Command Line Tools installation for native module compilation
+    BOOTSTRAP_VERSION="3.3"  # Added Xcode Command Line Tools + fixed smart caching for bootstrap changes
     
     # Image names (include bootstrap version to force rebuilds when bootstrap changes)
     LOCAL_IMAGE_NAME="bun-build-macos-${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
