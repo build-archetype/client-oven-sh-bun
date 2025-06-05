@@ -2,7 +2,7 @@
 set -e
 set -x
 
-# Version: 3.2 - Added Xcode Command Line Tools installation for native module compilation
+# Version: 3.3 - Fixed smart caching to force rebuilds when bootstrap version changes
 # A comprehensive bootstrap script for macOS based on the main bootstrap.sh
 
 # Constants
