@@ -17,9 +17,9 @@ else
   REPOSITORY="${REPOSITORY:-client-oven-sh-bun}"
 fi
 # Base image to clone for new VM images
-BASE_IMAGE="${BASE_IMAGE:-ghcr.io/cirruslabs/macos-sequoia-base:latest}"
+BASE_IMAGE="${BASE_IMAGE:-ghcr.io/cirruslabs/macos-sonoma-xcode:latest}"
 # Bootstrap script version (bump to force new images)
-BOOTSTRAP_VERSION="${BOOTSTRAP_VERSION:-3.3}"
+BOOTSTRAP_VERSION="${BOOTSTRAP_VERSION:-3.5}"
 # Bun version (auto-detected, can override)
 BUN_VERSION="${BUN_VERSION:-}"
 # If not set, will be detected later in the script
@@ -397,7 +397,7 @@ main() {
     fix_tart_permissions
     
     # Configuration
-    BASE_IMAGE="ghcr.io/cirruslabs/macos-sequoia-base:latest"
+    BASE_IMAGE="ghcr.io/cirruslabs/macos-sonoma-xcode:latest"
     REGISTRY="ghcr.io"
     ORGANIZATION="${GITHUB_REPOSITORY_OWNER:-build-archetype}"
     
@@ -419,7 +419,7 @@ main() {
     log "Detected Bun version: $BUN_VERSION"
     
     # Bootstrap script version - increment this when bootstrap changes to force new images
-    BOOTSTRAP_VERSION="3.3"  # Added Xcode Command Line Tools + fixed smart caching for bootstrap changes
+    BOOTSTRAP_VERSION="3.5"  # Full parity with bootstrap.sh: Sonoma Xcode + Buildkite + Chromium + smart caching
     
     # Image names (include bootstrap version to force rebuilds when bootstrap changes)
     LOCAL_IMAGE_NAME="bun-build-macos-${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
