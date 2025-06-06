@@ -661,26 +661,6 @@ function getBuildImageStep(platform, options) {
 }
 
 /**
- * @param {Platform} platform
- * @param {PipelineOptions} options
- * @returns {Step}
- */
-function getMacOSVMBuildStep(platform, options) {
-  const { release } = platform;
-  return {
-    key: `build-macos-vm-${release}`,
-    label: `🍎 Build macOS ${release} VM image`,
-    agents: {
-      queue: "darwin",
-      // TODO: In future, use different tag for base image builds
-      // macos_vm_builder: "true"
-    },
-    command: `./scripts/build-macos-vm.sh --release=${release}`,
-    timeout_in_minutes: 60,
-  };
-}
-
-/**
  * @param {Platform[]} buildPlatforms
  * @param {PipelineOptions} options
  * @returns {Step}
