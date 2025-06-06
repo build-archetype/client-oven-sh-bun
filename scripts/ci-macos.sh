@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Configuration - can be overridden via environment variables
-BASE_VM_IMAGE="${BASE_VM_IMAGE:-bun-build-macos-1.2.16-bootstrap-3.6}"
+BASE_VM_IMAGE="${BASE_VM_IMAGE:-}"  # Will be determined based on platform
 EMERGENCY_CLEANUP="${EMERGENCY_CLEANUP:-false}"
 MAX_VM_AGE_HOURS="${MAX_VM_AGE_HOURS:-1}"
 DISK_USAGE_THRESHOLD="${DISK_USAGE_THRESHOLD:-80}"
@@ -11,6 +11,14 @@ FORCE_BASE_IMAGE_REBUILD="${FORCE_BASE_IMAGE_REBUILD:-false}"
 # Function to log messages with timestamps
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+# Function to get base VM image name for a specific macOS release
+get_base_vm_image() {
+    local release="${1:-14}"
+    local bun_version="${2:-1.2.16}"
+    local bootstrap_version="${3:-3.6}"
+    echo "bun-build-macos-${release}-${bun_version}-bootstrap-${bootstrap_version}"
 }
 
 # SSH options for VM connectivity
@@ -107,6 +115,17 @@ create_and_run_vm() {
     local vm_name="$1"
     local command="$2"
     local workspace_dir="$3"
+    local release="${4:-14}"  # Default to macOS 14 if not specified
+
+    # Determine the correct base VM image for this release
+    local base_vm_image
+    if [ -n "$BASE_VM_IMAGE" ]; then
+        base_vm_image="$BASE_VM_IMAGE"
+        log "Using explicit base VM image: $base_vm_image"
+    else
+        base_vm_image=$(get_base_vm_image "$release")
+        log "Using release-specific base VM image: $base_vm_image"
+    fi
 
     log "=== INITIAL TART STATE ==="
     log "Available Tart VMs:"
@@ -121,24 +140,26 @@ create_and_run_vm() {
 
     # Create and run VM
     log "Creating VM: $vm_name"
-    log "Using base image: $BASE_VM_IMAGE"
+    log "Using base image: $base_vm_image"
+    log "For macOS release: $release"
     
     # Check if forced rebuild is requested
     if [ "$FORCE_BASE_IMAGE_REBUILD" = "true" ]; then
         log "🔄 Force rebuild requested - please run image prep step manually"
-        log "Run: ./scripts/build-macos-vm.sh --force-refresh"
+        log "Run: ./scripts/build-macos-vm.sh --release=$release --force-refresh"
         exit 1
     fi
     
     # Check if base image exists (simple check - no validation)
-    if ! tart list | grep -q "^local.*$BASE_VM_IMAGE"; then
-        log "❌ Base image '$BASE_VM_IMAGE' not found!"
+    if ! tart list | grep -q "^local.*$base_vm_image"; then
+        log "❌ Base image '$base_vm_image' not found!"
         log "Please run the prep step to create base image first"
+        log "Run: ./scripts/build-macos-vm.sh --release=$release"
         exit 1
     fi
     
     log "✅ Base image found - cloning VM"
-    tart clone "$BASE_VM_IMAGE" "$vm_name"
+    tart clone "$base_vm_image" "$vm_name"
     
     log "Starting VM with workspace: $workspace_dir"
     tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" > vm.log 2>&1 &
@@ -181,20 +202,22 @@ show_usage() {
     echo "  --cleanup-only            Only perform VM cleanup, don't run build"
     echo "  --emergency-cleanup       Force emergency cleanup (same as EMERGENCY_CLEANUP=true)"
     echo "  --force-base-rebuild      Force rebuild of base image before use"
+    echo "  --release=VERSION         macOS release version (13, 14) [default: 14]"
     echo ""
     echo "Environment Variables:"
-    echo "  BASE_VM_IMAGE             Base VM image to clone (default: bun-build-macos-1.2.16-bootstrap-3.6)"
+    echo "  BASE_VM_IMAGE             Base VM image to clone (auto-determined if not set)"
     echo "  EMERGENCY_CLEANUP         Set to 'true' to force emergency cleanup (default: false)"
     echo "  MAX_VM_AGE_HOURS          Maximum age of VMs before cleanup (default: 1)"
     echo "  DISK_USAGE_THRESHOLD      Disk usage % to trigger emergency cleanup (default: 80)"
     echo "  FORCE_BASE_IMAGE_REBUILD  Set to 'true' to force base image rebuild (default: false)"
     echo ""
     echo "Examples:"
-    echo "  $0                                           # Run default build"
+    echo "  $0                                           # Run default build on macOS 14"
+    echo "  $0 --release=13                              # Run default build on macOS 13"
     echo "  $0 'bun run build:release'                  # Run custom command"
     echo "  $0 --cleanup-only                           # Only cleanup VMs"
     echo "  EMERGENCY_CLEANUP=true $0 --cleanup-only    # Emergency cleanup"
-    echo "  $0 --force-base-rebuild                     # Force rebuild base image"
+    echo "  $0 --force-base-rebuild --release=13        # Force rebuild base image for macOS 13"
     echo "  BASE_VM_IMAGE=my-custom-image $0            # Use custom base image"
 }
 
@@ -203,6 +226,7 @@ main() {
     # Parse arguments
     local cleanup_only=false
     local show_help=false
+    local release="14"  # Default to macOS 14
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -221,6 +245,10 @@ main() {
             --emergency-cleanup)
                 EMERGENCY_CLEANUP=true
                 cleanup_only=true
+                shift
+                ;;
+            --release=*)
+                release="${1#*=}"
                 shift
                 ;;
             *)
@@ -258,7 +286,8 @@ main() {
 
     log "Starting build process..."
     log "Configuration:"
-    log "  BASE_VM_IMAGE: $BASE_VM_IMAGE"
+    log "  macOS Release: $release"
+    log "  BASE_VM_IMAGE override: ${BASE_VM_IMAGE:-<auto-determined>}"
     log "  EMERGENCY_CLEANUP: $EMERGENCY_CLEANUP"
     log "  MAX_VM_AGE_HOURS: $MAX_VM_AGE_HOURS"
     log "  DISK_USAGE_THRESHOLD: $DISK_USAGE_THRESHOLD"
@@ -266,7 +295,7 @@ main() {
     log "Command: $command"
     log "Workspace: $workspace_dir"
 
-    create_and_run_vm "$vm_name" "$command" "$workspace_dir"
+    create_and_run_vm "$vm_name" "$command" "$workspace_dir" "$release"
 }
 
 # Run main if script is executed directly

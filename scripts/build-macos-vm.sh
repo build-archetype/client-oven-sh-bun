@@ -9,6 +9,8 @@ SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalK
 # =====================
 # You can override these via environment variables before running the script.
 
+# macOS release version (can be overridden by --release flag)
+MACOS_RELEASE="${MACOS_RELEASE:-14}"
 # Registry for images (default: GitHub Container Registry)
 REGISTRY="${REGISTRY:-ghcr.io}"
 # Organization/user for image (default: build-archetype or from GITHUB_REPOSITORY_OWNER)
@@ -37,6 +39,23 @@ GITHUB_USERNAME="${GITHUB_USERNAME:-}"
 
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
+
+# Get base image based on macOS release
+get_base_image() {
+    local release="$1"
+    case "$release" in
+        "14")
+            echo "ghcr.io/cirruslabs/macos-sonoma-xcode:latest"
+            ;;
+        "13")
+            echo "ghcr.io/cirruslabs/macos-ventura-xcode:latest"
+            ;;
+        *)
+            log "⚠️  Unknown macOS release: $release, defaulting to Sonoma (14)"
+            echo "ghcr.io/cirruslabs/macos-sonoma-xcode:latest"
+            ;;
+    esac
 }
 
 # Debug: Show who is running this script
@@ -393,14 +412,40 @@ main() {
                 force_refresh=true
                 shift
                 ;;
+            --release=*)
+                MACOS_RELEASE="${arg#*=}"
+                shift
+                ;;
+            --help|-h)
+                echo "Usage: $0 [OPTIONS]"
+                echo ""
+                echo "Options:"
+                echo "  --force-refresh     Force refresh of base image"
+                echo "  --release=VERSION   macOS release version (13, 14) [default: 14]"
+                echo "  --help, -h          Show this help message"
+                echo ""
+                echo "Environment Variables:"
+                echo "  MACOS_RELEASE       macOS release version (default: 14)"
+                echo "  BOOTSTRAP_VERSION   Bootstrap script version (default: 3.6)"
+                echo "  BUN_VERSION         Bun version (auto-detected if not set)"
+                echo "  REGISTRY            Container registry (default: ghcr.io)"
+                echo "  ORGANIZATION        Organization name (default: build-archetype)"
+                echo "  REPOSITORY          Repository name (default: client-oven-sh-bun)"
+                echo ""
+                echo "Examples:"
+                echo "  $0                    # Build macOS 14 base image"
+                echo "  $0 --release=13       # Build macOS 13 base image"
+                echo "  $0 --force-refresh    # Force rebuild of base image"
+                exit 0
+                ;;
         esac
     done
     
     # Fix Tart permissions first thing
     fix_tart_permissions
     
-    # Configuration
-    BASE_IMAGE="ghcr.io/cirruslabs/macos-sonoma-xcode:latest"
+    # Configuration - now uses the release parameter
+    BASE_IMAGE=$(get_base_image "$MACOS_RELEASE")
     REGISTRY="ghcr.io"
     ORGANIZATION="${GITHUB_REPOSITORY_OWNER:-build-archetype}"
     
@@ -424,12 +469,13 @@ main() {
     # Bootstrap script version - increment this when bootstrap changes to force new images
     BOOTSTRAP_VERSION="3.6"  # Updated: Fixed SSH_OPTS and improved base image validation
     
-    # Image names (include bootstrap version to force rebuilds when bootstrap changes)
-    LOCAL_IMAGE_NAME="bun-build-macos-${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
-    REMOTE_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos:${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
-    LATEST_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos:latest"
+    # Image names (include release and bootstrap version to force rebuilds when bootstrap changes)
+    LOCAL_IMAGE_NAME="bun-build-macos-${MACOS_RELEASE}-${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
+    REMOTE_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}:${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
+    LATEST_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}:latest"
     
     log "Configuration:"
+    log "  macOS Release: $MACOS_RELEASE"
     log "  Base image: $BASE_IMAGE"
     log "  Local name: $LOCAL_IMAGE_NAME"
     log "  Remote URL: $REMOTE_IMAGE_URL"
