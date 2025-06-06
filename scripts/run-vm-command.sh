@@ -160,6 +160,24 @@ if command -v bun >/dev/null 2>&1; then
     sudo ln -sf "$BUN_BIN" /usr/local/bin/bun 2>/dev/null || true
 fi
 
+# Emergency Rust installation if missing from base image
+if [ ! -d "$HOME/.cargo" ] || ! command -v cargo >/dev/null 2>&1; then
+    echo "⚠️  Rust not found in base image - installing emergency fallback..."
+    
+    # Quick Rust installation
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    
+    # Source cargo env
+    source "$HOME/.cargo/env" 2>/dev/null || true
+    
+    # Create system symlinks
+    sudo ln -sf "$HOME/.cargo/bin/cargo" /usr/local/bin/cargo 2>/dev/null || true
+    sudo ln -sf "$HOME/.cargo/bin/rustc" /usr/local/bin/rustc 2>/dev/null || true
+    sudo ln -sf "$HOME/.cargo/bin/rustup" /usr/local/bin/rustup 2>/dev/null || true
+    
+    echo "✅ Emergency Rust installation complete"
+fi
+
 # Debug: Show Rust/Cargo availability
 echo "🦀 === Rust Debug Info ==="
 
@@ -232,22 +250,20 @@ echo "🎬 ===== EXECUTING COMMAND ====="
 
 # ===== EXECUTE COMMAND =====
 
-# Execute the user command in the VM
-REMOTE_CMD="
+# Execute the user command in the VM - using heredoc for better escaping
+sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -s <<REMOTE_EXEC
 set -eo pipefail
 cd ~/workspace
 source ./buildkite_env.sh
-export WORKSPACE=\"\$HOME/workspace\"
-export BUILDKITE_BUILD_PATH=\"\$HOME/workspace/build-workdir\"
-export VENDOR_PATH=\"\$HOME/workspace/vendor\"
-export TMPDIR=\"/tmp\"
-export LD_SUPPORT_TMPDIR=\"/tmp\"
+export WORKSPACE="\$HOME/workspace"
+export BUILDKITE_BUILD_PATH="\$HOME/workspace/build-workdir"
+export VENDOR_PATH="\$HOME/workspace/vendor"
+export TMPDIR="/tmp"
+export LD_SUPPORT_TMPDIR="/tmp"
 
-echo \"🚀 Executing: $COMMAND\"
+echo "🚀 Executing: $COMMAND"
 $COMMAND
-"
-
-sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -lc "$REMOTE_CMD"
+REMOTE_EXEC
 EXIT_CODE=$?
 
 echo "📤 ===== COPYING ARTIFACTS BACK ====="
