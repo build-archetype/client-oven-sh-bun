@@ -158,25 +158,26 @@ fi
 if command -v bun >/dev/null 2>&1; then
     BUN_BIN=$(command -v bun)
     sudo ln -sf "$BUN_BIN" /usr/local/bin/bun 2>/dev/null || true
+    echo "✅ Bun found: $(bun --version)"
+else
+    echo "❌ Bun not found - base image may be corrupted"
+    exit 1
 fi
 
-# Emergency Rust installation if missing from base image
-if [ ! -d "$HOME/.cargo" ] || ! command -v cargo >/dev/null 2>&1; then
-    echo "⚠️  Rust not found in base image - installing emergency fallback..."
-    
-    # Quick Rust installation
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    
-    # Source cargo env
-    source "$HOME/.cargo/env" 2>/dev/null || true
-    
-    # Create system symlinks
-    sudo ln -sf "$HOME/.cargo/bin/cargo" /usr/local/bin/cargo 2>/dev/null || true
-    sudo ln -sf "$HOME/.cargo/bin/rustc" /usr/local/bin/rustc 2>/dev/null || true
-    sudo ln -sf "$HOME/.cargo/bin/rustup" /usr/local/bin/rustup 2>/dev/null || true
-    
-    echo "✅ Emergency Rust installation complete"
+# Verify Rust is available
+if command -v cargo >/dev/null 2>&1; then
+    echo "✅ Cargo found: $(cargo --version)"
+else
+    echo "❌ Cargo not found - base image may be corrupted"
+    exit 1
 fi
+
+echo "🔧 === Tool Verification ==="
+echo "Bun: $(command -v bun || echo 'NOT FOUND')"
+echo "Cargo: $(command -v cargo || echo 'NOT FOUND')" 
+echo "CMake: $(command -v cmake || echo 'NOT FOUND')"
+echo "Node: $(command -v node || echo 'NOT FOUND')"
+echo "============================="
 
 # Debug: Show Rust/Cargo availability
 echo "🦀 === Rust Debug Info ==="
