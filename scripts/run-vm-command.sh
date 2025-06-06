@@ -85,7 +85,7 @@ buildkite_count=0
 while IFS='=' read -r -d '' name value; do
     if [[ -n "$name" && -n "$value" ]]; then
         # Skip host-specific variables that shouldn't be copied
-        if [[ "$name" == "HOME" || "$name" == "TMPDIR" || "$name" == "LD_SUPPORT_TMPDIR" ]]; then
+        if [[ "$name" == "HOME" || "$name" == "TMPDIR" || "$name" == "LD_SUPPORT_TMPDIR" || "$name" == "PATH" ]]; then
             continue
         fi
         
