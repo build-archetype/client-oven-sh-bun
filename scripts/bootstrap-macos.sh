@@ -2,7 +2,7 @@
 set -e
 set -x
 
-# Version: 3.5 - Full parity with bootstrap.sh: Added Buildkite + Chromium for complete CI/testing support
+# Version: 3.6 - Fixed SSH connectivity and improved base image validation
 # A comprehensive bootstrap script for macOS based on the main bootstrap.sh
 
 # Constants

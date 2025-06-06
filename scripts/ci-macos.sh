@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Configuration - can be overridden via environment variables
-BASE_VM_IMAGE="${BASE_VM_IMAGE:-bun-build-macos-1.2.16-bootstrap-3.5}"
+BASE_VM_IMAGE="${BASE_VM_IMAGE:-bun-build-macos-1.2.16-bootstrap-3.6}"
 EMERGENCY_CLEANUP="${EMERGENCY_CLEANUP:-false}"
 MAX_VM_AGE_HOURS="${MAX_VM_AGE_HOURS:-1}"
 DISK_USAGE_THRESHOLD="${DISK_USAGE_THRESHOLD:-80}"
@@ -12,6 +12,9 @@ FORCE_BASE_IMAGE_REBUILD="${FORCE_BASE_IMAGE_REBUILD:-false}"
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
+
+# SSH options for VM connectivity
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
 
 # Function to get disk usage percentage
 get_disk_usage() {
@@ -122,32 +125,19 @@ create_and_run_vm() {
     
     # Check if forced rebuild is requested
     if [ "$FORCE_BASE_IMAGE_REBUILD" = "true" ]; then
-        log "🔄 Force rebuild requested for base image"
-        if ! rebuild_base_image "$BASE_VM_IMAGE"; then
-            log "❌ Failed to rebuild base image"
-            exit 1
-        fi
+        log "🔄 Force rebuild requested - please run image prep step manually"
+        log "Run: ./scripts/build-macos-vm.sh --force-refresh"
+        exit 1
     fi
     
-    # Check if base image exists
+    # Check if base image exists (simple check - no validation)
     if ! tart list | grep -q "^local.*$BASE_VM_IMAGE"; then
-        log "❌ Base image '$BASE_VM_IMAGE' not found - will rebuild"
-        if ! rebuild_base_image "$BASE_VM_IMAGE"; then
-            log "❌ Failed to rebuild missing base image"
-            exit 1
-        fi
-    else
-        # Validate base image has required tools
-        log "✅ Base image exists - validating tools..."
-        if ! validate_base_image "$BASE_VM_IMAGE"; then
-            log "❌ Base image validation failed - rebuilding"
-            if ! rebuild_base_image "$BASE_VM_IMAGE"; then
-                log "❌ Failed to rebuild broken base image"
-                exit 1
-            fi
-        fi
+        log "❌ Base image '$BASE_VM_IMAGE' not found!"
+        log "Please run the prep step to create base image first"
+        exit 1
     fi
     
+    log "✅ Base image found - cloning VM"
     tart clone "$BASE_VM_IMAGE" "$vm_name"
     
     log "Starting VM with workspace: $workspace_dir"
@@ -193,7 +183,7 @@ show_usage() {
     echo "  --force-base-rebuild      Force rebuild of base image before use"
     echo ""
     echo "Environment Variables:"
-    echo "  BASE_VM_IMAGE             Base VM image to clone (default: bun-build-macos-1.2.16-bootstrap-3.5)"
+    echo "  BASE_VM_IMAGE             Base VM image to clone (default: bun-build-macos-1.2.16-bootstrap-3.6)"
     echo "  EMERGENCY_CLEANUP         Set to 'true' to force emergency cleanup (default: false)"
     echo "  MAX_VM_AGE_HOURS          Maximum age of VMs before cleanup (default: 1)"
     echo "  DISK_USAGE_THRESHOLD      Disk usage % to trigger emergency cleanup (default: 80)"
@@ -206,92 +196,6 @@ show_usage() {
     echo "  EMERGENCY_CLEANUP=true $0 --cleanup-only    # Emergency cleanup"
     echo "  $0 --force-base-rebuild                     # Force rebuild base image"
     echo "  BASE_VM_IMAGE=my-custom-image $0            # Use custom base image"
-}
-
-# Function to validate base image has required tools
-validate_base_image() {
-    local base_image="$1"
-    log "🔍 Validating base image: $base_image"
-    
-    # Create a temporary test VM
-    local test_vm="test-base-$(date +%s)"
-    
-    log "Creating test VM to validate base image..."
-    if ! tart clone "$base_image" "$test_vm"; then
-        log "❌ Failed to clone base image for validation"
-        return 1
-    fi
-    
-    # Start test VM
-    tart run "$test_vm" --no-graphics &
-    local test_vm_pid=$!
-    sleep 30
-    
-    # Get test VM IP
-    local test_ip=$(tart ip "$test_vm" 2>/dev/null || echo "")
-    if [ -z "$test_ip" ]; then
-        log "❌ Could not get test VM IP"
-        kill $test_vm_pid 2>/dev/null || true
-        tart delete "$test_vm" 2>/dev/null || true
-        return 1
-    fi
-    
-    # Test required tools
-    local tools_check="
-        command -v bun && echo 'Bun: OK' || echo 'Bun: MISSING'
-        command -v cargo && echo 'Cargo: OK' || echo 'Cargo: MISSING'  
-        command -v cmake && echo 'CMake: OK' || echo 'CMake: MISSING'
-        command -v node && echo 'Node: OK' || echo 'Node: MISSING'
-        command -v clang && echo 'Clang: OK' || echo 'Clang: MISSING'
-        command -v ninja && echo 'Ninja: OK' || echo 'Ninja: MISSING'
-    "
-    
-    log "Testing tools in base image..."
-    local validation_result
-    if validation_result=$(sshpass -p admin ssh $SSH_OPTS admin@"$test_ip" "$tools_check" 2>/dev/null); then
-        log "Base image validation results:"
-        echo "$validation_result" | while read line; do
-            log "  $line"
-        done
-        
-        # Check if any tools are missing
-        if echo "$validation_result" | grep -q "MISSING"; then
-            log "❌ Base image is missing required tools"
-            kill $test_vm_pid 2>/dev/null || true
-            tart delete "$test_vm" 2>/dev/null || true
-            return 1
-        else
-            log "✅ Base image validation passed - all tools present"
-            kill $test_vm_pid 2>/dev/null || true
-            tart delete "$test_vm" 2>/dev/null || true
-            return 0
-        fi
-    else
-        log "❌ Failed to connect to test VM for validation"
-        kill $test_vm_pid 2>/dev/null || true
-        tart delete "$test_vm" 2>/dev/null || true
-        return 1
-    fi
-}
-
-# Function to rebuild base image
-rebuild_base_image() {
-    local base_image="$1"
-    log "🏗️  Rebuilding base image: $base_image"
-    
-    # Delete existing broken image
-    log "Deleting existing broken base image..."
-    tart delete "$base_image" 2>/dev/null || log "Base image didn't exist"
-    
-    # Use build-macos-vm.sh to rebuild
-    log "Running base image rebuild..."
-    if ! ./scripts/build-macos-vm.sh; then
-        log "❌ Base image rebuild failed"
-        return 1
-    fi
-    
-    log "✅ Base image rebuilt successfully"
-    return 0
 }
 
 # Main execution
