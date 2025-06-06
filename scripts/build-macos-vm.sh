@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+# SSH options for VM connectivity
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
+
 # =====================
 # CONFIGURATION SECTION
 # =====================
@@ -19,7 +22,7 @@ fi
 # Base image to clone for new VM images
 BASE_IMAGE="${BASE_IMAGE:-ghcr.io/cirruslabs/macos-sonoma-xcode:latest}"
 # Bootstrap script version (bump to force new images)
-BOOTSTRAP_VERSION="${BOOTSTRAP_VERSION:-3.5}"
+BOOTSTRAP_VERSION="${BOOTSTRAP_VERSION:-3.6}"
 # Bun version (auto-detected, can override)
 BUN_VERSION="${BUN_VERSION:-}"
 # If not set, will be detected later in the script
@@ -419,7 +422,7 @@ main() {
     log "Detected Bun version: $BUN_VERSION"
     
     # Bootstrap script version - increment this when bootstrap changes to force new images
-    BOOTSTRAP_VERSION="3.5"  # Full parity with bootstrap.sh: Sonoma Xcode + Buildkite + Chromium + smart caching
+    BOOTSTRAP_VERSION="3.6"  # Updated: Fixed SSH_OPTS and improved base image validation
     
     # Image names (include bootstrap version to force rebuilds when bootstrap changes)
     LOCAL_IMAGE_NAME="bun-build-macos-${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
@@ -499,9 +502,6 @@ VM_PID=$!
     log "Waiting for SSH to be available and running bootstrap..."
     SSH_SUCCESS=false
     
-    # SSH options to bypass all host key checking and known_hosts conflicts
-    SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
-    
     for i in {1..30}; do
         log "SSH attempt $i/30..."
         
@@ -539,7 +539,67 @@ VM_PID=$!
     exit 1
     fi
 
-# Stop the VM gracefully
+    # Validate that all required tools are installed
+    log "=== VALIDATING BASE IMAGE ==="
+    log "Testing that all required tools are available..."
+    
+    # Wait for VM to be ready for validation
+    log "Waiting for VM to be ready for validation..."
+    sleep 10
+    
+    # Get VM IP for validation
+    VM_IP=""
+    for i in {1..10}; do
+        VM_IP=$(tart ip "$LOCAL_IMAGE_NAME" 2>/dev/null || echo "")
+        if [ -n "$VM_IP" ]; then
+            log "VM IP for validation: $VM_IP"
+            break
+        fi
+        log "Attempt $i: waiting for VM IP..."
+        sleep 10
+    done
+    
+    if [ -z "$VM_IP" ]; then
+        log "❌ Could not get VM IP for validation"
+        kill $VM_PID 2>/dev/null || true
+        exit 1
+    fi
+
+    # Test required tools
+    local tools_check="
+        echo '=== Tool Validation ==='
+        command -v bun && echo 'Bun: ✅ '$(bun --version) || echo 'Bun: ❌ MISSING'
+        command -v cargo && echo 'Cargo: ✅ '$(cargo --version) || echo 'Cargo: ❌ MISSING'  
+        command -v cmake && echo 'CMake: ✅ '$(cmake --version | head -1) || echo 'CMake: ❌ MISSING'
+        command -v node && echo 'Node: ✅ '$(node --version) || echo 'Node: ❌ MISSING'
+        command -v clang && echo 'Clang: ✅ '$(clang --version | head -1) || echo 'Clang: ❌ MISSING'
+        command -v ninja && echo 'Ninja: ✅ '$(ninja --version) || echo 'Ninja: ❌ MISSING'
+        echo '======================='
+    "
+    
+    log "Validating tools in base image..."
+    local validation_result
+    if validation_result=$(sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "$tools_check" 2>/dev/null); then
+        echo "$validation_result" | while read line; do
+            log "$line"
+        done
+        
+        # Check if any tools are missing
+        if echo "$validation_result" | grep -q "❌ MISSING"; then
+            log "❌ Base image validation FAILED - missing required tools"
+            log "Bootstrap did not install all required tools properly"
+            kill $VM_PID 2>/dev/null || true
+            exit 1
+        else
+            log "✅ Base image validation PASSED - all required tools present"
+        fi
+    else
+        log "❌ Failed to connect to VM for validation"
+        kill $VM_PID 2>/dev/null || true
+        exit 1
+    fi
+
+    # Stop the VM gracefully
     log "Shutting down VM..."
     sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "sudo shutdown -h now" || true
     
