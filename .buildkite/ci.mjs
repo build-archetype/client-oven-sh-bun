@@ -1099,7 +1099,7 @@ function getMacOSVMBuildStep(platform, options) {
       // macos_vm_builder: "true"
     },
     command: `./scripts/build-macos-vm.sh --release=${release}`,
-    timeout_in_minutes: 60,
+    timeout_in_minutes: 120,
   };
 }
 
