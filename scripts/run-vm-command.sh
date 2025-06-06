@@ -12,6 +12,9 @@ fi
 VM_NAME="$1"
 COMMAND="${2:-echo 'VM is ready'}"
 
+# SSH options for reliability - comprehensive host key bypass
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
+
 echo "🔍 ===== WAITING FOR VM ====="
 
 # Function to wait for VM and get IP
@@ -32,8 +35,8 @@ wait_for_vm() {
         # Try to get IP
         VM_IP=$(tart ip "$vm_name" 2>/dev/null || echo "")
         if [ -n "$VM_IP" ]; then
-            # Test SSH connectivity
-            if sshpass -p admin ssh -o StrictHostKeyChecking=no -o ConnectTimeout=2 "admin@$VM_IP" echo "test" &>/dev/null; then
+            # Test SSH connectivity with comprehensive options
+            if sshpass -p admin ssh $SSH_OPTS -o ConnectTimeout=2 "admin@$VM_IP" echo "test" &>/dev/null; then
                 echo "VM is ready at $VM_IP"
                 return 0
             fi
@@ -55,9 +58,6 @@ fi
 
 # Get VM IP
 VM_IP=$(tart ip "$VM_NAME")
-
-# SSH options for reliability
-SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
 
 echo "🌐 VM IP: $VM_IP"
 echo "Running command in VM: $COMMAND"
