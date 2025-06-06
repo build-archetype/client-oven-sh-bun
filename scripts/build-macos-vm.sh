@@ -613,13 +613,14 @@ VM_PID=$!
 
     # Test required tools
     local tools_check="
+        export PATH=\"/usr/local/bin:/opt/homebrew/bin:\$PATH\"
         echo '=== Tool Validation ==='
-        command -v bun && echo 'Bun: ✅ '$(bun --version) || echo 'Bun: ❌ MISSING'
-        command -v cargo && echo 'Cargo: ✅ '$(cargo --version) || echo 'Cargo: ❌ MISSING'  
-        command -v cmake && echo 'CMake: ✅ '$(cmake --version | head -1) || echo 'CMake: ❌ MISSING'
-        command -v node && echo 'Node: ✅ '$(node --version) || echo 'Node: ❌ MISSING'
-        command -v clang && echo 'Clang: ✅ '$(clang --version | head -1) || echo 'Clang: ❌ MISSING'
-        command -v ninja && echo 'Ninja: ✅ '$(ninja --version) || echo 'Ninja: ❌ MISSING'
+        command -v bun && echo 'Bun: ✅ '\$(bun --version) || echo 'Bun: ❌ MISSING'
+        command -v cargo && echo 'Cargo: ✅ '\$(cargo --version) || echo 'Cargo: ❌ MISSING'  
+        command -v cmake && echo 'CMake: ✅ '\$(cmake --version | head -1) || echo 'CMake: ❌ MISSING'
+        command -v node && echo 'Node: ✅ '\$(node --version) || echo 'Node: ❌ MISSING'
+        command -v clang && echo 'Clang: ✅ '\$(clang --version | head -1) || echo 'Clang: ❌ MISSING'
+        command -v ninja && echo 'Ninja: ✅ '\$(ninja --version) || echo 'Ninja: ❌ MISSING'
         echo '======================='
     "
     
