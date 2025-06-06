@@ -2,7 +2,7 @@
 set -e
 set -x
 
-# Version: 3.3 - Fixed smart caching to force rebuilds when bootstrap version changes
+# Version: 3.5 - Full parity with bootstrap.sh: Added Buildkite + Chromium for complete CI/testing support
 # A comprehensive bootstrap script for macOS based on the main bootstrap.sh
 
 # Constants
@@ -398,78 +398,42 @@ install_rust() {
     fi
 }
 
-install_buildkite_agent() {
+install_buildkite() {
     print "Installing Buildkite Agent..."
     
-    local buildkite_home="/opt/buildkite-agent"
-    create_directory "$buildkite_home"
-    
-    local curl="$(require curl)"
-    local sh="$(require sh)"
-    
-    # Download and run the official Buildkite Agent installer
-    local installer_script=$(download_file "https://raw.githubusercontent.com/buildkite/agent/main/install.sh")
-    
-    # Set environment for the installer
-    export DESTINATION="$buildkite_home"
-    export INSTALL_PATH="$buildkite_home"
-    
-    execute "$sh" "$installer_script"
-    
-    # Create symlink in system bin directory
-    local bin_dir="/usr/local/bin"
-    if [ "$(uname -m)" = "arm64" ] && [ -d "/opt/homebrew/bin" ]; then
-        bin_dir="/opt/homebrew/bin"
-    fi
-    
-    execute sudo ln -sf "$buildkite_home/bin/buildkite-agent" "$bin_dir/buildkite-agent"
-    
-    # Create default config directory
-    local config_dir="$HOME/.buildkite-agent"
-    create_directory "$config_dir"
-    execute sudo chown -R "$(whoami):staff" "$config_dir"
+    local buildkite_version="3.87.0"
+    local arch="$(uname -m)"
+    case "$arch" in
+    arm64)
+        buildkite_arch="arm64"
+        ;;
+    x86_64)
+        buildkite_arch="amd64"
+        ;;
+    esac
+
+    local buildkite_filename="buildkite-agent-darwin-$buildkite_arch-$buildkite_version.tar.gz"
+    local buildkite_url="https://github.com/buildkite/agent/releases/download/v$buildkite_version/$buildkite_filename"
+    local buildkite_tar="$(download_file "$buildkite_url")"
+    local buildkite_tmpdir="$(dirname "$buildkite_tar")"
+
+    execute tar -xzf "$buildkite_tar" -C "$buildkite_tmpdir"
+    move_to_bin "$buildkite_tmpdir/buildkite-agent"
     
     print "✅ Buildkite Agent installed successfully: $(buildkite-agent --version)"
 }
 
-install_common_software() {
-    print "Installing common software..."
-    
-    install_packages \
-        bash \
-        ca-certificates \
-        curl \
-        htop \
-        gnupg \
-        git \
-        unzip \
-        wget \
-        jq
-
-    install_rosetta
-    install_nodejs
-    install_bun
-    install_buildkite_agent
-}
-
-install_build_essentials() {
-    print "Installing build essentials..."
-    
-    install_packages \
-        ninja \
-        pkg-config \
-        golang \
-        make \
-        python3 \
-        libtool \
-        ruby \
-        perl \
-        zig
-
-    install_cmake
-    install_llvm
-    install_ccache
-    install_rust
+install_chromium() {
+    print "Installing Chromium for browser testing..."
+    # Use Google Chrome via Homebrew cask for better compatibility
+    execute_as_user brew install google-chrome --cask || {
+        print "⚠️ Chrome installation failed, trying chromium..."
+        execute_as_user brew install chromium --cask || {
+            print "⚠️ Chromium installation also failed - browser tests may not work"
+            return 1
+        }
+    }
+    print "✅ Browser installed successfully"
 }
 
 install_docker() {
@@ -480,17 +444,35 @@ install_docker() {
 }
 
 install_xcode_tools() {
-    if ! command -v gcc >/dev/null 2>&1; then
-        print "Installing Xcode Command Line Tools..."
-        execute xcode-select --install
+    # Check if we already have a working C++ compiler (from Xcode or Command Line Tools)
+    if command -v clang >/dev/null 2>&1 && command -v clang++ >/dev/null 2>&1; then
+        print "✅ C/C++ compilers already available:"
+        print "  clang: $(which clang)"
+        print "  clang++: $(which clang++)"
+        
+        # Check if this is from full Xcode
+        if xcode-select -p >/dev/null 2>&1; then
+            local xcode_path="$(xcode-select -p)"
+            print "  Xcode developer tools path: $xcode_path"
+            if [[ "$xcode_path" == *"/Applications/Xcode"* ]]; then
+                print "  ✅ Full Xcode installation detected - skipping Command Line Tools"
+                return 0
+            fi
+        fi
+        
+        print "  ✅ Command Line Tools already installed - skipping installation"
+        return 0
     fi
+    
+    print "Installing Xcode Command Line Tools..."
+    execute xcode-select --install
 }
 
 # Verification function
 verify_installations() {
     print "Verifying installations..."
     
-    local tools="bun cmake ninja go clang rustc cargo make python3 libtool ruby perl ccache zig buildkite-agent"
+    local tools="bun cmake ninja go clang rustc cargo make python3 libtool ruby perl ccache buildkite-agent"
     local missing_tools=""
     local verification_failed=false
     
@@ -537,9 +519,6 @@ verify_installations() {
             ccache) 
                 version_output="$(ccache --version 2>/dev/null | head -1 || echo 'version check failed')" 
                 ;;
-            zig) 
-                version_output="$(zig version 2>/dev/null || echo 'version check failed')" 
-                ;;
             buildkite-agent) 
                 version_output="$(buildkite-agent --version 2>/dev/null || echo 'version check failed')" 
                 ;;
@@ -551,6 +530,13 @@ verify_installations() {
             verification_failed=true
         fi
     done
+    
+    # Check for browser availability (Chrome or Chromium)
+    if [ -d "/Applications/Google Chrome.app" ] || [ -d "/Applications/Chromium.app" ]; then
+        print "✅ Browser installed for testing"
+    else
+        print "⚠️ No browser found - browser tests may fail"
+    fi
     
     if [ "$verification_failed" = true ]; then
         print "⚠️  Some tools are missing:$missing_tools"
@@ -578,6 +564,7 @@ main() {
     # Install software in stages
     install_common_software
     install_build_essentials
+    install_chromium
     install_docker
     install_xcode_tools
     
@@ -591,6 +578,45 @@ main() {
     print "- All build dependencies are ready"
     print "- The actual Bun build should happen in subsequent CI steps"
     print "- This image is now ready for Bun compilation"
+}
+
+install_common_software() {
+    print "Installing common software..."
+    
+    install_packages \
+        bash \
+        ca-certificates \
+        curl \
+        htop \
+        gnupg \
+        git \
+        unzip \
+        wget \
+        jq
+
+    install_rosetta
+    install_nodejs
+    install_bun
+    install_buildkite
+}
+
+install_build_essentials() {
+    print "Installing build essentials..."
+    
+    install_packages \
+        ninja \
+        pkg-config \
+        golang \
+        make \
+        python3 \
+        libtool \
+        ruby \
+        perl
+
+    install_cmake
+    install_llvm
+    install_ccache
+    install_rust
 }
 
 # Run main function
