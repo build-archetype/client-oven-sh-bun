@@ -18,6 +18,7 @@ SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalK
 echo "🔍 ===== WAITING FOR VM ====="
 
 # Function to wait for VM and get IP
+# Required for ssh access to the VM
 wait_for_vm() {
     local vm_name="$1"
     local max_attempts=30
