@@ -498,16 +498,20 @@ VM_PID=$!
     # Wait for SSH to be available and run bootstrap
     log "Waiting for SSH to be available and running bootstrap..."
     SSH_SUCCESS=false
+    
+    # SSH options to bypass all host key checking and known_hosts conflicts
+    SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
+    
     for i in {1..30}; do
         log "SSH attempt $i/30..."
         
         # First check if we can SSH at all
-        if sshpass -p "admin" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 admin@"$VM_IP" "echo 'SSH connection successful'"; then
+        if sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "echo 'SSH connection successful'"; then
             log "✅ SSH connection established"
             
             # Check initial state before bootstrap
             log "Checking VM state before bootstrap..."
-            sshpass -p "admin" ssh -o StrictHostKeyChecking=no admin@"$VM_IP" '
+            sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" '
                 echo "Current user: $(whoami)"
                 echo "Current directory: $(pwd)"
                 echo "PATH: $PATH"
@@ -516,7 +520,7 @@ VM_PID=$!
             '
             
             # Run the bootstrap script
-            if sshpass -p "admin" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 admin@"$VM_IP" "cd '/Volumes/My Shared Files/workspace' && ./scripts/bootstrap-macos.sh"; then
+            if sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "cd '/Volumes/My Shared Files/workspace' && ./scripts/bootstrap-macos.sh"; then
                 log "✅ Bootstrap completed successfully!"
                 SSH_SUCCESS=true
                 break
@@ -537,7 +541,7 @@ VM_PID=$!
 
 # Stop the VM gracefully
     log "Shutting down VM..."
-    sshpass -p "admin" ssh -o StrictHostKeyChecking=no admin@"$VM_IP" "sudo shutdown -h now" || true
+    sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "sudo shutdown -h now" || true
     
     # Wait for VM to stop
     sleep 30
