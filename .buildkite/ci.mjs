@@ -102,7 +102,8 @@ function getTargetLabel(target) {
  * @type {Platform[]}
  */
 const buildPlatforms = [
-  { os: "darwin", arch: "aarch64", release: "14" },
+  { os: "darwin", arch: "aarch64", release: "13" },
+  // { os: "darwin", arch: "aarch64", release: "14" },
   // { os: "darwin", arch: "x64", release: "14" },
   // { os: "linux", arch: "aarch64", distro: "amazonlinux", release: "2023", features: ["docker"] },
   // { os: "linux", arch: "x64", distro: "amazonlinux", release: "2023", features: ["docker"] },
@@ -433,7 +434,7 @@ function getBuildVendorStep(platform, options) {
   // If macOS, run in VM
   if (platform.os === "darwin") {
     step.command = [
-      `./scripts/ci-macos.sh "${getBuildCommand(platform, options)} --target dependencies" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target dependencies" "${process.cwd()}"`
     ];
   }
   return step;
@@ -464,8 +465,8 @@ function getBuildCppStep(platform, options) {
   // If macOS, run in VM
   if (platform.os === "darwin") {
     step.command = [
-      `./scripts/ci-macos.sh "${command} --target bun" "${process.cwd()}"`,
-      `./scripts/ci-macos.sh "${command} --target dependencies" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target bun" "${process.cwd()}"`,
+      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target dependencies" "${process.cwd()}"`
     ];
   }
   return step;
@@ -507,7 +508,7 @@ function getBuildZigStep(platform, options) {
   // If macOS, run in VM
   if (platform.os === "darwin") {
     step.command = [
-      `./scripts/ci-macos.sh "${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}\" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}\" "${process.cwd()}"`
     ];
   }
   return step;
@@ -535,7 +536,7 @@ function getLinkBunStep(platform, options) {
   // If macOS, run in VM
   if (platform.os === "darwin") {
     step.command = [
-      `./scripts/ci-macos.sh "${getBuildCommand(platform, options)} --target bun" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target bun" "${process.cwd()}"`
     ];
   }
   return step;
@@ -1069,6 +1070,26 @@ async function getPipelineOptions() {
 }
 
 /**
+ * @param {Platform} platform
+ * @param {PipelineOptions} options
+ * @returns {Step}
+ */
+function getMacOSVMBuildStep(platform, options) {
+  const { release } = platform;
+  return {
+    key: `build-macos-vm-${release}`,
+    label: `🍎 Build macOS ${release} VM image`,
+    agents: {
+      queue: "darwin",
+      // TODO: In future, use different tag for base image builds
+      // macos_vm_builder: "true"
+    },
+    command: `./scripts/build-macos-vm.sh --release=${release}`,
+    timeout_in_minutes: 60,
+  };
+}
+
+/**
  * @param {PipelineOptions} [options]
  * @returns {Promise<Pipeline | undefined>}
  */
@@ -1099,16 +1120,13 @@ async function getPipeline(options = {}) {
   /** @type {Step[]} */
   const steps = [];
 
-  // Add macOS VM image build step if we have any macOS platforms
-  const hasMacOS = buildPlatforms.some(platform => platform.os === "darwin");
-  if (hasMacOS) {
+  // Add macOS VM base image build steps - one for each unique macOS release
+  const macOSReleases = [...new Set(buildPlatforms.filter(p => p.os === "darwin").map(p => p.release))];
+  if (macOSReleases.length > 0) {
     steps.push({
-      key: "build-macos-vm",
-      label: "Build macOS VM image",
-      agents: {
-        queue: "darwin",
-      },
-      command: "./scripts/build-macos-vm.sh",
+      key: "build-macos-base-images", 
+      group: "🍎 macOS Base Images",
+      steps: macOSReleases.map(release => getMacOSVMBuildStep({ os: "darwin", release }, options))
     });
   }
 
@@ -1150,9 +1168,9 @@ async function getPipeline(options = {}) {
         if (imagePlatforms.has(imageKey)) {
           dependsOn.push(`${imageKey}-build-image`);
         }
-        // Add dependency on macOS VM build if this is a macOS platform
+        // Add dependency on specific macOS VM build if this is a macOS platform
         if (target.os === "darwin") {
-          dependsOn.push("build-macos-vm");
+          dependsOn.push(`build-macos-vm-${target.release}`);
         }
 
         return getStepWithDependsOn(
@@ -1247,5 +1265,3 @@ async function main() {
 }
 
 await main();
-
-
