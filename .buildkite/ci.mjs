@@ -428,7 +428,11 @@ function getBuildVendorStep(platform, options) {
     agents: getCppAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
-    env: getBuildEnv(platform, options),
+    env: {
+      BUILDKITE_CACHE: "ON",
+      BUILDKITE_GROUP_KEY: getTargetKey(platform),
+      ...getBuildEnv(platform, options),
+    },
     command: `${getBuildCommand(platform, options)} --target dependencies`,
   };
   // If macOS, run in VM
@@ -455,11 +459,11 @@ function getBuildCppStep(platform, options) {
     cancel_on_build_failing: isMergeQueue(),
     env: {
       BUN_CPP_ONLY: "ON",
+      BUILDKITE_CACHE: "ON",
+      BUILDKITE_GROUP_KEY: getTargetKey(platform),
       ...getBuildEnv(platform, options),
     },
-    // We used to build the C++ dependencies and bun in separate steps.
-    // However, as long as the zig build takes longer than both sequentially,
-    // it's cheaper to run them in the same step. Can be revisited in the future.
+    // Build C++ components and dependencies separately for better caching
     command: [`${command} --target bun`, `${command} --target dependencies`],
   };
   // If macOS, run in VM
@@ -501,7 +505,11 @@ function getBuildZigStep(platform, options) {
     agents: getZigAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
-    env: getBuildEnv(platform, options),
+    env: {
+      BUILDKITE_CACHE: "ON",
+      BUILDKITE_GROUP_KEY: getTargetKey(platform),
+      ...getBuildEnv(platform, options),
+    },
     command: `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
     timeout_in_minutes: 35,
   };
@@ -522,13 +530,15 @@ function getBuildZigStep(platform, options) {
 function getLinkBunStep(platform, options) {
   const step = {
     key: `${getTargetKey(platform)}-build-bun`,
-    label: `${getTargetLabel(platform)} - build-bun`,
+    label: `${getTargetLabel(platform)} - build-bun (link)`,
     depends_on: [`${getTargetKey(platform)}-build-cpp`, `${getTargetKey(platform)}-build-zig`],
     agents: getCppAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
     env: {
       BUN_LINK_ONLY: "ON",
+      BUILDKITE_CACHE: "ON",
+      BUILDKITE_GROUP_KEY: getTargetKey(platform),
       ...getBuildEnv(platform, options),
     },
     command: `${getBuildCommand(platform, options)} --target bun`,
@@ -554,7 +564,11 @@ function getBuildBunStep(platform, options) {
     agents: getCppAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
-    env: getBuildEnv(platform, options),
+    env: {
+      BUILDKITE_CACHE: "ON",
+      BUILDKITE_GROUP_KEY: getTargetKey(platform),
+      ...getBuildEnv(platform, options),
+    },
     command: getBuildCommand(platform, options),
   };
 }
@@ -643,6 +657,26 @@ function getBuildImageStep(platform, options) {
     cancel_on_build_failing: isMergeQueue(),
     command: command.filter(Boolean).join(" "),
     timeout_in_minutes: 3 * 60,
+  };
+}
+
+/**
+ * @param {Platform} platform
+ * @param {PipelineOptions} options
+ * @returns {Step}
+ */
+function getMacOSVMBuildStep(platform, options) {
+  const { release } = platform;
+  return {
+    key: `build-macos-vm-${release}`,
+    label: `🍎 Build macOS ${release} VM image`,
+    agents: {
+      queue: "darwin",
+      // TODO: In future, use different tag for base image builds
+      // macos_vm_builder: "true"
+    },
+    command: `./scripts/build-macos-vm.sh --release=${release}`,
+    timeout_in_minutes: 60,
   };
 }
 
@@ -1121,7 +1155,10 @@ async function getPipeline(options = {}) {
   const steps = [];
 
   // Add macOS VM base image build steps - one for each unique macOS release
-  const macOSReleases = [...new Set(buildPlatforms.filter(p => p.os === "darwin").map(p => p.release))];
+  const macOSReleases = [...new Set([
+    ...buildPlatforms.filter(p => p.os === "darwin").map(p => p.release),
+    ...testPlatforms.filter(p => p.os === "darwin").map(p => p.release)
+  ])];
   if (macOSReleases.length > 0) {
     steps.push({
       key: "build-macos-base-images", 
