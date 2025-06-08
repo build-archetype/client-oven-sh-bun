@@ -127,6 +127,21 @@ if [ "$goto_privileged_setup" = false ]; then
     esac
   done
 
+  # 0.5. Monitoring setup selection
+  while true; do
+    echo_color "$BLUE" "Enable monitoring and logging?"
+    echo "  0) No monitoring"
+    echo "  1) Grafana Cloud (recommended)"
+    echo "  2) Self-hosted Grafana/Prometheus"
+    read -rp "Choice [1]: " monitoring_choice
+    case "${monitoring_choice:-1}" in
+      0) MONITORING_ENABLED=false; break ;;
+      1) MONITORING_ENABLED=true; MONITORING_TYPE="grafana-cloud"; break ;;
+      2) MONITORING_ENABLED=true; MONITORING_TYPE="self-hosted"; break ;;
+      *) echo_color "$YELLOW" "Invalid choice. Please enter 0, 1, or 2." ;;
+    esac
+  done
+
   # 1. Buildkite token
   if [ -z "${BUILDKITE_AGENT_TOKEN:-}" ]; then
     prompt_secret BUILDKITE_AGENT_TOKEN "Enter your Buildkite Agent Token"
@@ -138,6 +153,39 @@ if [ "$goto_privileged_setup" = false ]; then
   fi
   if [ -z "${GITHUB_TOKEN:-}" ]; then
     prompt_secret GITHUB_TOKEN "Enter your GitHub Token (for ghcr.io pushes)"
+  fi
+
+  # 1c. Monitoring credentials (if enabled)
+  if [ "$MONITORING_ENABLED" = true ]; then
+    case "$MONITORING_TYPE" in
+      grafana-cloud)
+        echo_color "$BLUE" "Grafana Cloud Configuration:"
+        if [ -z "${GRAFANA_CLOUD_USER:-}" ]; then
+          prompt_text GRAFANA_CLOUD_USER "Enter Grafana Cloud username/instance ID"
+        fi
+        if [ -z "${GRAFANA_CLOUD_API_KEY:-}" ]; then
+          prompt_secret GRAFANA_CLOUD_API_KEY "Enter Grafana Cloud API key"
+        fi
+        if [ -z "${GRAFANA_CLOUD_PROMETHEUS_URL:-}" ]; then
+          prompt_text GRAFANA_CLOUD_PROMETHEUS_URL "Enter Prometheus endpoint URL" "https://prometheus-prod-XX-XXX.grafana.net/api/prom/push"
+        fi
+        if [ -z "${GRAFANA_CLOUD_LOKI_URL:-}" ]; then
+          prompt_text GRAFANA_CLOUD_LOKI_URL "Enter Loki endpoint URL" "https://logs-prod-XXX.grafana.net/loki/api/v1/push"
+        fi
+        ;;
+      self-hosted)
+        echo_color "$BLUE" "Self-hosted Grafana Configuration:"
+        if [ -z "${PROMETHEUS_URL:-}" ]; then
+          prompt_text PROMETHEUS_URL "Enter Prometheus URL" "http://localhost:9090"
+        fi
+        if [ -z "${LOKI_URL:-}" ]; then
+          prompt_text LOKI_URL "Enter Loki URL" "http://localhost:3100"
+        fi
+        if [ -z "${GRAFANA_URL:-}" ]; then
+          prompt_text GRAFANA_URL "Enter Grafana URL" "http://localhost:3000"
+        fi
+        ;;
+    esac
   fi
 
   # Create dedicated CI keychain and store credentials securely
@@ -158,6 +206,24 @@ if [ "$goto_privileged_setup" = false ]; then
   echo_color "$BLUE" "Storing GitHub credentials in secure keychain..."
   security add-generic-password -a "bun-ci" -s "github-username" -w "$GITHUB_USERNAME" -k "$CI_KEYCHAIN"
   security add-generic-password -a "bun-ci" -s "github-token" -w "$GITHUB_TOKEN" -k "$CI_KEYCHAIN"
+
+  # Store monitoring credentials in the CI keychain (if enabled)
+  if [ "$MONITORING_ENABLED" = true ]; then
+    echo_color "$BLUE" "Storing monitoring credentials in secure keychain..."
+    case "$MONITORING_TYPE" in
+      grafana-cloud)
+        security add-generic-password -a "bun-ci" -s "grafana-cloud-user" -w "$GRAFANA_CLOUD_USER" -k "$CI_KEYCHAIN"
+        security add-generic-password -a "bun-ci" -s "grafana-cloud-api-key" -w "$GRAFANA_CLOUD_API_KEY" -k "$CI_KEYCHAIN"
+        security add-generic-password -a "bun-ci" -s "grafana-cloud-prometheus-url" -w "$GRAFANA_CLOUD_PROMETHEUS_URL" -k "$CI_KEYCHAIN"
+        security add-generic-password -a "bun-ci" -s "grafana-cloud-loki-url" -w "$GRAFANA_CLOUD_LOKI_URL" -k "$CI_KEYCHAIN"
+        ;;
+      self-hosted)
+        security add-generic-password -a "bun-ci" -s "prometheus-url" -w "$PROMETHEUS_URL" -k "$CI_KEYCHAIN"
+        security add-generic-password -a "bun-ci" -s "loki-url" -w "$LOKI_URL" -k "$CI_KEYCHAIN"
+        security add-generic-password -a "bun-ci" -s "grafana-url" -w "$GRAFANA_URL" -k "$CI_KEYCHAIN"
+        ;;
+    esac
+  fi
 
   # Store keychain password securely for later access
   echo "$CI_KEYCHAIN_PASSWORD" > "$REAL_HOME/.buildkite-agent/ci-keychain-password.txt"
@@ -250,6 +316,22 @@ if [ "$goto_privileged_setup" = false ]; then
   else
     echo "  VPN Setup:                Skipped"
   fi
+  if [ "$MONITORING_ENABLED" = true ]; then
+    echo "  Monitoring Type:          $MONITORING_TYPE"
+    case "$MONITORING_TYPE" in
+      grafana-cloud)
+        echo "  Grafana Cloud User:       $GRAFANA_CLOUD_USER"
+        echo "  Grafana Cloud API Key:    [hidden]"
+        echo "  Prometheus URL:           $GRAFANA_CLOUD_PROMETHEUS_URL"
+        echo "  Loki URL:                 $GRAFANA_CLOUD_LOKI_URL" ;;
+      self-hosted)
+        echo "  Prometheus URL:           $PROMETHEUS_URL"
+        echo "  Loki URL:                 $LOKI_URL"
+        echo "  Grafana URL:              $GRAFANA_URL" ;;
+    esac
+  else
+    echo "  Monitoring Setup:         Disabled"
+  fi
   echo "  Build VLAN:               $BUILD_VLAN"
   echo "  Management VLAN:          $MGMT_VLAN"
   echo "  Storage VLAN:             $STORAGE_VLAN"
@@ -334,6 +416,17 @@ if [ "$goto_privileged_setup" = false ]; then
       echo_color "$RED" "Tailscale is not in PATH after installation. Aborting."; exit 1;
     fi
     brew install buildkite/buildkite/buildkite-agent terraform jq yq wget git wireguard-tools openvpn node
+    
+    # Install monitoring tools if enabled
+    if [ "${MONITORING_ENABLED:-false}" = true ]; then
+      echo_color "$BLUE" "Installing monitoring tools..."
+      # Install Grafana Alloy (unified agent for metrics and logs)
+      brew install grafana/grafana/alloy || { echo_color "$RED" "Failed to install Grafana Alloy."; exit 1; }
+      # Install Node Exporter for system metrics
+      brew install prometheus-node-exporter || { echo_color "$RED" "Failed to install Node Exporter."; exit 1; }
+      echo_color "$GREEN" "✅ Monitoring tools installed successfully."
+    fi
+    
     echo_color "$GREEN" "✅ Homebrew and dependencies installed."
 
     # Verify Node.js installation
@@ -375,6 +468,12 @@ if [ "$goto_privileged_setup" = false ]; then
 
     echo_color "$BLUE" "Switching to root for system configuration..."
     export_vars="BUILDKITE_AGENT_TOKEN=\"$BUILDKITE_AGENT_TOKEN\" VPN_ENABLED=\"$VPN_ENABLED\" BUILD_VLAN=\"$BUILD_VLAN\" MGMT_VLAN=\"$MGMT_VLAN\" STORAGE_VLAN=\"$STORAGE_VLAN\" MACHINE_LOCATION=\"$MACHINE_LOCATION\" COMPUTER_NAME=\"$COMPUTER_NAME\""
+    
+    # Add monitoring variables
+    if [ "$MONITORING_ENABLED" = true ]; then
+      export_vars+=" MONITORING_ENABLED=\"$MONITORING_ENABLED\" MONITORING_TYPE=\"$MONITORING_TYPE\""
+    fi
+    
     if [ "$VPN_ENABLED" = true ]; then
       export_vars+=" VPN_TYPE=\"$VPN_TYPE\""
       case "$VPN_TYPE" in
@@ -446,6 +545,409 @@ $REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/sshpass *
 $REAL_USER ALL=(ALL) NOPASSWD: /opt/homebrew/bin/sshpass *
 $REAL_USER ALL=(ALL) NOPASSWD: /usr/local/bin/sshpass *
 EOF
+
+# --- Configure monitoring (if enabled) ---
+if [ "${MONITORING_ENABLED:-false}" = true ]; then
+  echo_color "$BLUE" "Configuring monitoring and logging..."
+  
+  # Create monitoring directories
+  MONITORING_DIRS=(
+    "$REAL_HOME/.alloy"
+    "$REAL_HOME/.monitoring"
+    "$REAL_HOME/.monitoring/logs"
+    "$REAL_HOME/.monitoring/data"
+    "/opt/homebrew/etc/alloy"
+    "/opt/homebrew/var/log/alloy"
+  )
+  
+  for dir in "${MONITORING_DIRS[@]}"; do
+    mkdir -p "$dir"
+    chown "$REAL_USER:staff" "$dir"
+    chmod 755 "$dir"
+  done
+  
+  # Load credentials from keychain for configuration
+  CI_KEYCHAIN="$REAL_HOME/Library/Keychains/bun-ci.keychain-db"
+  KEYCHAIN_PASSWORD_FILE="$REAL_HOME/.buildkite-agent/ci-keychain-password.txt"
+  
+  if [ -f "$KEYCHAIN_PASSWORD_FILE" ]; then
+    KEYCHAIN_PASSWORD=$(cat "$KEYCHAIN_PASSWORD_FILE")
+    security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$CI_KEYCHAIN" 2>/dev/null || true
+  fi
+  
+  # Create Grafana Alloy configuration
+  case "${MONITORING_TYPE:-grafana-cloud}" in
+    grafana-cloud)
+      # Load Grafana Cloud credentials
+      GRAFANA_CLOUD_USER=$(security find-generic-password -a "bun-ci" -s "grafana-cloud-user" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "")
+      GRAFANA_CLOUD_API_KEY=$(security find-generic-password -a "bun-ci" -s "grafana-cloud-api-key" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "")
+      GRAFANA_CLOUD_PROMETHEUS_URL=$(security find-generic-password -a "bun-ci" -s "grafana-cloud-prometheus-url" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "")
+      GRAFANA_CLOUD_LOKI_URL=$(security find-generic-password -a "bun-ci" -s "grafana-cloud-loki-url" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "")
+      
+      cat > "$REAL_HOME/.alloy/config.alloy" << EOF
+// Grafana Alloy configuration for Bun CI monitoring
+// This configuration collects system metrics, build logs, and application metrics
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+// === METRICS COLLECTION ===
+
+// Node Exporter for system metrics
+prometheus.exporter.unix "node" {
+  include_exporter_metrics = true
+  disable_collectors       = ["mdadm"]
+  filesystem {
+    fs_types_exclude     = "^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$"
+    mount_points_exclude = "^/(dev|proc|run|sys|tmp)($|/)"
+  }
+}
+
+// Custom Buildkite metrics exporter
+prometheus.exporter.process "buildkite_agent" {
+  matcher {
+    name = "buildkite-agent"
+  }
+}
+
+// Collect metrics from exporters
+prometheus.scrape "local_metrics" {
+  targets = concat(
+    prometheus.exporter.unix.node.targets,
+    prometheus.exporter.process.buildkite_agent.targets,
+  )
+  
+  forward_to = [prometheus.relabel.add_labels.receiver]
+  
+  scrape_interval = "15s"
+  scrape_timeout  = "10s"
+}
+
+// Add machine labels to all metrics
+prometheus.relabel "add_labels" {
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+  
+  rule {
+    target_label = "machine_id"
+    replacement  = "$MACHINE_UUID"
+  }
+  
+  rule {
+    target_label = "machine_location" 
+    replacement  = "$MACHINE_LOCATION"
+  }
+  
+  rule {
+    target_label = "machine_name"
+    replacement  = "$COMPUTER_NAME"
+  }
+  
+  rule {
+    target_label = "environment"
+    replacement  = "ci"
+  }
+  
+  rule {
+    target_label = "service_type"
+    replacement  = "buildkite-agent"
+  }
+}
+
+// Send metrics to Grafana Cloud
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = "$GRAFANA_CLOUD_PROMETHEUS_URL"
+    basic_auth {
+      username = "$GRAFANA_CLOUD_USER"
+      password = "$GRAFANA_CLOUD_API_KEY"
+    }
+  }
+}
+
+// === LOGS COLLECTION ===
+
+// Buildkite agent logs
+loki.source.file "buildkite_logs" {
+  targets = [
+    {__path__ = "/opt/homebrew/var/log/buildkite-agent.log"},
+    {__path__ = "/usr/local/var/log/buildkite-agent.log"},
+    {__path__ = "$REAL_HOME/builds/**/buildkite-*.log"},
+  ]
+  
+  forward_to = [loki.relabel.buildkite.receiver]
+}
+
+// System logs
+loki.source.file "system_logs" {
+  targets = [
+    {__path__ = "/var/log/system.log"},
+    {__path__ = "/var/log/install.log"},
+    {__path__ = "/var/log/wifi.log"},
+  ]
+  
+  forward_to = [loki.relabel.system.receiver]
+}
+
+// Tart VM logs
+loki.source.file "tart_logs" {
+  targets = [
+    {__path__ = "$REAL_HOME/.tart/logs/*.log"},
+    {__path__ = "$REAL_HOME/.tart/vms/*/console.log"},
+  ]
+  
+  forward_to = [loki.relabel.tart.receiver]
+}
+
+// Build logs from CI jobs
+loki.source.file "build_logs" {
+  targets = [
+    {__path__ = "$REAL_HOME/builds/**/*.log"},
+    {__path__ = "$REAL_HOME/builds/**/cmake-build-*.log"},
+    {__path__ = "$REAL_HOME/builds/**/bun-build-*.log"},
+  ]
+  
+  forward_to = [loki.relabel.builds.receiver]
+}
+
+// Label buildkite logs
+loki.relabel "buildkite" {
+  forward_to = [loki.write.grafana_cloud.receiver]
+  
+  rule {
+    source_labels = ["__path__"]
+    target_label  = "log_type"
+    replacement   = "buildkite"
+  }
+  
+  rule {
+    target_label = "machine_id"
+    replacement  = "$MACHINE_UUID"
+  }
+  
+  rule {
+    target_label = "machine_location"
+    replacement  = "$MACHINE_LOCATION"
+  }
+  
+  rule {
+    target_label = "machine_name"
+    replacement  = "$COMPUTER_NAME"
+  }
+}
+
+// Label system logs  
+loki.relabel "system" {
+  forward_to = [loki.write.grafana_cloud.receiver]
+  
+  rule {
+    source_labels = ["__path__"]
+    target_label  = "log_type"
+    replacement   = "system"
+  }
+  
+  rule {
+    target_label = "machine_id"
+    replacement  = "$MACHINE_UUID"
+  }
+  
+  rule {
+    target_label = "machine_location"
+    replacement  = "$MACHINE_LOCATION"
+  }
+  
+  rule {
+    target_label = "machine_name"
+    replacement  = "$COMPUTER_NAME"
+  }
+}
+
+// Label Tart logs
+loki.relabel "tart" {
+  forward_to = [loki.write.grafana_cloud.receiver]
+  
+  rule {
+    source_labels = ["__path__"]
+    target_label  = "log_type"
+    replacement   = "tart"
+  }
+  
+  rule {
+    target_label = "machine_id"
+    replacement  = "$MACHINE_UUID"
+  }
+  
+  rule {
+    target_label = "machine_location"
+    replacement  = "$MACHINE_LOCATION"
+  }
+  
+  rule {
+    target_label = "machine_name"
+    replacement  = "$COMPUTER_NAME"
+  }
+}
+
+// Label build logs
+loki.relabel "builds" {
+  forward_to = [loki.write.grafana_cloud.receiver]
+  
+  rule {
+    source_labels = ["__path__"]
+    target_label  = "log_type"
+    replacement   = "build"
+  }
+  
+  rule {
+    source_labels = ["__path__"]
+    regex         = ".*/builds/([^/]+)/.*"
+    target_label  = "build_id"
+    replacement   = "\${1}"
+  }
+  
+  rule {
+    target_label = "machine_id"
+    replacement  = "$MACHINE_UUID"
+  }
+  
+  rule {
+    target_label = "machine_location"
+    replacement  = "$MACHINE_LOCATION"
+  }
+  
+  rule {
+    target_label = "machine_name"
+    replacement  = "$COMPUTER_NAME"
+  }
+}
+
+// Send logs to Grafana Cloud
+loki.write "grafana_cloud" {
+  endpoint {
+    url = "$GRAFANA_CLOUD_LOKI_URL"
+    basic_auth {
+      username = "$GRAFANA_CLOUD_USER"
+      password = "$GRAFANA_CLOUD_API_KEY"
+    }
+  }
+}
+EOF
+      ;;
+      
+    self-hosted)
+      # Load self-hosted credentials
+      PROMETHEUS_URL=$(security find-generic-password -a "bun-ci" -s "prometheus-url" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "http://localhost:9090")
+      LOKI_URL=$(security find-generic-password -a "bun-ci" -s "loki-url" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "http://localhost:3100")
+      
+      cat > "$REAL_HOME/.alloy/config.alloy" << EOF
+// Grafana Alloy configuration for self-hosted monitoring
+
+logging {
+  level  = "info"
+  format = "logfmt"
+}
+
+// === METRICS COLLECTION ===
+
+prometheus.exporter.unix "node" {
+  include_exporter_metrics = true
+  disable_collectors       = ["mdadm"]
+}
+
+prometheus.exporter.process "buildkite_agent" {
+  matcher {
+    name = "buildkite-agent"
+  }
+}
+
+prometheus.scrape "local_metrics" {
+  targets = concat(
+    prometheus.exporter.unix.node.targets,
+    prometheus.exporter.process.buildkite_agent.targets,
+  )
+  
+  forward_to = [prometheus.relabel.add_labels.receiver]
+  
+  scrape_interval = "15s"
+  scrape_timeout  = "10s"
+}
+
+prometheus.relabel "add_labels" {
+  forward_to = [prometheus.remote_write.self_hosted.receiver]
+  
+  rule {
+    target_label = "machine_id"
+    replacement  = "$MACHINE_UUID"
+  }
+  
+  rule {
+    target_label = "machine_location" 
+    replacement  = "$MACHINE_LOCATION"
+  }
+  
+  rule {
+    target_label = "machine_name"
+    replacement  = "$COMPUTER_NAME"
+  }
+}
+
+prometheus.remote_write "self_hosted" {
+  endpoint {
+    url = "$PROMETHEUS_URL/api/v1/write"
+  }
+}
+
+// === LOGS COLLECTION ===
+
+loki.source.file "all_logs" {
+  targets = [
+    {__path__ = "/opt/homebrew/var/log/buildkite-agent.log", log_type = "buildkite"},
+    {__path__ = "/var/log/system.log", log_type = "system"},
+    {__path__ = "$REAL_HOME/builds/**/*.log", log_type = "build"},
+    {__path__ = "$REAL_HOME/.tart/logs/*.log", log_type = "tart"},
+  ]
+  
+  forward_to = [loki.relabel.all.receiver]
+}
+
+loki.relabel "all" {
+  forward_to = [loki.write.self_hosted.receiver]
+  
+  rule {
+    target_label = "machine_id"
+    replacement  = "$MACHINE_UUID"
+  }
+  
+  rule {
+    target_label = "machine_location"
+    replacement  = "$MACHINE_LOCATION"
+  }
+  
+  rule {
+    target_label = "machine_name"
+    replacement  = "$COMPUTER_NAME"
+  }
+}
+
+loki.write "self_hosted" {
+  endpoint {
+    url = "$LOKI_URL/loki/api/v1/push"
+  }
+}
+EOF
+      ;;
+  esac
+  
+  # Set permissions on config file
+  chown "$REAL_USER:staff" "$REAL_HOME/.alloy/config.alloy"
+  chmod 644 "$REAL_HOME/.alloy/config.alloy"
+  
+  # Copy config to Homebrew location
+  cp "$REAL_HOME/.alloy/config.alloy" "/opt/homebrew/etc/alloy/"
+  
+  echo_color "$GREEN" "✅ Monitoring configuration created"
+fi
 
 # --- Prevent system sleep (server mode) ---
 echo_color "$BLUE" "Configuring system to never sleep (server mode)..."
@@ -733,6 +1235,62 @@ elif [ -f "/usr/local/bin/brew" ]; then
     echo_color "$YELLOW" "⚠️  Buildkite agent may not have started correctly"
     echo_color "$YELLOW" "Check logs at: /usr/local/var/log/buildkite-agent.log"
   fi
+fi
+
+# --- Start monitoring services (if enabled) ---
+if [ "${MONITORING_ENABLED:-false}" = true ]; then
+  echo_color "$BLUE" "Starting monitoring services as $REAL_USER..."
+  
+  # Start Node Exporter
+  if [ -f "/opt/homebrew/bin/brew" ]; then
+    sudo -u "$REAL_USER" /opt/homebrew/bin/brew services start prometheus-node-exporter
+  elif [ -f "/usr/local/bin/brew" ]; then
+    sudo -u "$REAL_USER" /usr/local/bin/brew services start prometheus-node-exporter
+  fi
+  
+  # Start Grafana Alloy
+  if [ -f "/opt/homebrew/bin/brew" ]; then
+    sudo -u "$REAL_USER" /opt/homebrew/bin/brew services start alloy
+  elif [ -f "/usr/local/bin/brew" ]; then
+    sudo -u "$REAL_USER" /usr/local/bin/brew services start alloy
+  fi
+  
+  # Verify monitoring services are running
+  sleep 5
+  
+  MONITORING_STATUS=""
+  if [ -f "/opt/homebrew/bin/brew" ]; then
+    if sudo -u "$REAL_USER" /opt/homebrew/bin/brew services list | grep -q "prometheus-node-exporter.*started"; then
+      MONITORING_STATUS+="✅ Node Exporter started\n"
+    else
+      MONITORING_STATUS+="⚠️  Node Exporter may not have started\n"
+    fi
+    
+    if sudo -u "$REAL_USER" /opt/homebrew/bin/brew services list | grep -q "alloy.*started"; then
+      MONITORING_STATUS+="✅ Grafana Alloy started\n"
+    else
+      MONITORING_STATUS+="⚠️  Grafana Alloy may not have started\n"
+    fi
+  elif [ -f "/usr/local/bin/brew" ]; then
+    if sudo -u "$REAL_USER" /usr/local/bin/brew services list | grep -q "prometheus-node-exporter.*started"; then
+      MONITORING_STATUS+="✅ Node Exporter started\n"
+    else
+      MONITORING_STATUS+="⚠️  Node Exporter may not have started\n"
+    fi
+    
+    if sudo -u "$REAL_USER" /usr/local/bin/brew services list | grep -q "alloy.*started"; then
+      MONITORING_STATUS+="✅ Grafana Alloy started\n"
+    else
+      MONITORING_STATUS+="⚠️  Grafana Alloy may not have started\n"
+    fi
+  fi
+  
+  echo -e "$MONITORING_STATUS"
+  
+  echo_color "$BLUE" "Monitoring endpoints:"
+  echo "  - Node Exporter metrics: http://localhost:9100/metrics"
+  echo "  - Alloy status: http://localhost:12345"
+  echo_color "$YELLOW" "Check Alloy logs at: /opt/homebrew/var/log/alloy.log"
 fi
 
 echo_color "$GREEN" "\n[3/3] Setup complete!"
