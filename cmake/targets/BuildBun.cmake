@@ -926,10 +926,20 @@ if(WIN32)
 endif()
 
 if(APPLE)
+  # Check if the new linker is available (requires Xcode 15+)
+  include(CheckLinkerFlag)
+  check_linker_flag(CXX "-Wl,-ld_new" HAVE_LD_NEW)
+  
+  if(HAVE_LD_NEW)
+    set(APPLE_LD_NEW_FLAG "-Wl,-ld_new")
+  else()
+    set(APPLE_LD_NEW_FLAG "")
+  endif()
+  
   target_link_options(${bun} PUBLIC
     -dead_strip
     -dead_strip_dylibs
-    -Wl,-ld_new
+    ${APPLE_LD_NEW_FLAG}
     -Wl,-no_compact_unwind
     -Wl,-stack_size,0x1200000
     -fno-keep-static-consts
