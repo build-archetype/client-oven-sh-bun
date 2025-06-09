@@ -42,8 +42,11 @@ emergency_cleanup() {
         fi
     done
     
-    log "Deleting old versioned base images (keeping only latest bootstrap)..."
-    tart list | awk '/^local/ && $2 ~ /^bun-build-macos-.*-bootstrap-[0-9.]+$/ && $2 !~ /bootstrap-3\.5$/ {print $2}' | while read vm_name; do
+    # FIXED: Use current bootstrap version from get_base_vm_image function
+    # This prevents deleting the current base images we need to use
+    local current_bootstrap_version=$(get_base_vm_image "14" "1.2.16" | sed 's/.*bootstrap-//')
+    log "Deleting old versioned base images (keeping only bootstrap-${current_bootstrap_version})..."
+    tart list | awk '/^local/ && $2 ~ /^bun-build-macos-.*-bootstrap-[0-9.]+$/ && $2 !~ /bootstrap-'${current_bootstrap_version}'$/ {print $2}' | while read vm_name; do
         if [ -n "$vm_name" ]; then
             log "Emergency deleting old base: $vm_name"
             tart delete "$vm_name" 2>/dev/null || log "Failed to delete $vm_name"
