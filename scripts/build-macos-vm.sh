@@ -273,12 +273,64 @@ check_remote_image() {
     # Fix permissions before trying to use tart
     fix_tart_permissions >&2
     
-    # Try to pull the image (this will fail if it doesn't exist)
-    if tart pull "$remote_url" >/dev/null 2>&1; then
-        log "✅ Remote image found and pulled" >&2
+    # Show progress during pull since VM images are large (GB+) and can take 10-30+ minutes
+    log "📥 Attempting to download remote image (this may take 10-30+ minutes for large VM images)..." >&2
+    log "    Please be patient - VM images can be 5-15GB+ in size" >&2
+    log "    Progress messages will appear every 60 seconds during download" >&2
+    
+    # Create a temporary file to capture the exit code and progress control
+    local exit_code_file=$(mktemp)
+    local progress_control_file=$(mktemp)
+    echo "running" > "$progress_control_file"
+    
+    # Create a background process to show periodic progress
+    (
+        sleep 60  # Wait 60 seconds before first progress message
+        local count=1
+        while [ -f "$progress_control_file" ] && [ "$(cat "$progress_control_file" 2>/dev/null)" = "running" ]; do
+            log "    📥 Download progress: ${count} minute(s) elapsed - still downloading..." >&2
+            count=$((count + 1))
+            sleep 60  # Show progress every minute
+        done
+    ) &
+    local progress_pid=$!
+    
+    # Try to pull the image with output redirection for better control
+    local pull_output_file=$(mktemp)
+    
+    # Run tart pull in background and capture both output and exit code
+    (
+        tart pull "$remote_url" > "$pull_output_file" 2>&1
+        echo $? > "$exit_code_file"
+        echo "done" > "$progress_control_file"
+    ) &
+    local pull_pid=$!
+    
+    # Wait for pull to complete and show any output
+    wait $pull_pid
+    
+    # Kill the progress indicator
+    kill $progress_pid 2>/dev/null || true
+    rm -f "$progress_control_file"
+    
+    # Show any output from tart pull
+    if [ -f "$pull_output_file" ] && [ -s "$pull_output_file" ]; then
+        log "    tart pull output:" >&2
+        while IFS= read -r line; do
+            log "    tart: $line" >&2
+        done < "$pull_output_file"
+    fi
+    rm -f "$pull_output_file"
+    
+    # Read the exit code
+    local pull_result=$(cat "$exit_code_file" 2>/dev/null || echo "1")
+    rm -f "$exit_code_file"
+    
+    if [ "$pull_result" = "0" ]; then
+        log "✅ Remote image found and downloaded successfully" >&2
         return 0
     else
-        log "❌ Remote image not found" >&2
+        log "❌ Remote image not found or download failed (exit code: $pull_result)" >&2
         return 1
     fi
 }
@@ -363,6 +415,7 @@ execute_caching_decision() {
             # Clean up any existing local image to avoid conflicts
             tart delete "$target_image_name" 2>/dev/null || log "No existing local image to delete" >&2
             # Clone from remote (already pulled in check_remote_image)
+            log "📋 Cloning remote image to local storage..." >&2
             tart clone "$remote_image_url" "$target_image_name"
             log "✅ Remote image cloned locally as: $target_image_name" >&2
             return 0
