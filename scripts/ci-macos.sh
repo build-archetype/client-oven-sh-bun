@@ -65,6 +65,34 @@ emergency_cleanup() {
     fi
 }
 
+# Function to safely clean up only old temporary VMs (never base images)
+safe_cleanup_temp_vms() {
+    log "Safely cleaning up old temporary VMs only..."
+    
+    # Only delete timestamp-based VMs (never base images)
+    tart list | awk '/^local/ && $2 ~ /^bun-build-[0-9]+-/ {print $2}' | while read vm_name; do
+        if [ -n "$vm_name" ]; then
+            log "Deleting temporary VM: $vm_name"
+            tart delete "$vm_name" 2>/dev/null || log "Failed to delete $vm_name"
+        fi
+    done
+    
+    # Clean up any VMs older than specified hours
+    local cutoff_time=$(date -d "${MAX_VM_AGE_HOURS} hours ago" +%s 2>/dev/null || date -v-${MAX_VM_AGE_HOURS}H +%s)
+    tart list | awk '/^local/ && $2 ~ /^bun-build-[0-9]+-/ {print $2}' | while read vm_name; do
+        if [ -n "$vm_name" ]; then
+            # Extract timestamp from VM name
+            local vm_timestamp=$(echo "$vm_name" | sed 's/bun-build-\([0-9]\+\)-.*/\1/')
+            if [ "$vm_timestamp" -lt "$cutoff_time" ]; then
+                log "Deleting expired temporary VM: $vm_name"
+                tart delete "$vm_name" 2>/dev/null || log "Failed to delete expired VM $vm_name"
+            fi
+        fi
+    done
+    
+    log "✅ Safe cleanup complete - base images preserved"
+}
+
 # Function to clean up VMs
 cleanup_vms() {
     log "Cleaning up stopped VMs..."
@@ -75,13 +103,9 @@ cleanup_vms() {
         return $?
     fi
     
-    # Check disk usage and trigger emergency cleanup if needed
-    local current_usage=$(get_disk_usage)
-    if [ "$current_usage" -gt "$DISK_USAGE_THRESHOLD" ]; then
-        log "Disk usage at ${current_usage}% - triggering emergency cleanup"
-        emergency_cleanup
-        return $?
-    fi
+    # REMOVED: Automatic emergency cleanup during build phases
+    # Build phases should NEVER delete base images automatically
+    # Emergency cleanup should only happen during base image creation or explicit cleanup-only mode
     
     # Normal cleanup - delete ALL timestamp-based VMs
     tart list | awk '/^local/ && $2 ~ /^bun-build-[0-9]+-/ {print $2}' | while read vm_name; do
@@ -135,8 +159,17 @@ create_and_run_vm() {
     tart list || log "Failed to list VMs"
     log "=========================="
 
-    # Clean up any existing stopped VMs
-    cleanup_vms
+    # Monitor disk usage but NEVER trigger emergency cleanup during build phases
+    local current_usage=$(get_disk_usage)
+    log "Current disk usage: ${current_usage}%"
+    if [ "$current_usage" -gt "$DISK_USAGE_THRESHOLD" ]; then
+        log "⚠️  WARNING: Disk usage at ${current_usage}% exceeds threshold (${DISK_USAGE_THRESHOLD}%)"
+        log "    Base images will NOT be deleted during build phases for safety"
+        log "    Please run cleanup manually: ./scripts/ci-macos.sh --cleanup-only --emergency-cleanup"
+    fi
+
+    # FIXED: Use safe cleanup that never deletes base images during build phases
+    safe_cleanup_temp_vms
 
     # Start logging
     start_logging
