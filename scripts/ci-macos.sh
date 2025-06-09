@@ -3,10 +3,8 @@ set -euo pipefail
 
 # Configuration - can be overridden via environment variables
 BASE_VM_IMAGE="${BASE_VM_IMAGE:-}"  # Will be determined based on platform
-EMERGENCY_CLEANUP="${EMERGENCY_CLEANUP:-false}"
-MAX_VM_AGE_HOURS="${MAX_VM_AGE_HOURS:-1}"
-DISK_USAGE_THRESHOLD="${DISK_USAGE_THRESHOLD:-80}"
 FORCE_BASE_IMAGE_REBUILD="${FORCE_BASE_IMAGE_REBUILD:-false}"
+DISK_USAGE_THRESHOLD="${DISK_USAGE_THRESHOLD:-80}"  # For monitoring only, no cleanup action
 
 # Function to log messages with timestamps
 log() {
@@ -27,106 +25,6 @@ SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalK
 # Function to get disk usage percentage
 get_disk_usage() {
     df -h . | tail -1 | awk '{print $5}' | sed 's/%//'
-}
-
-# Function to perform emergency cleanup
-emergency_cleanup() {
-    log "🚨 EMERGENCY CLEANUP INITIATED 🚨"
-    log "Current disk usage: $(get_disk_usage)%"
-    
-    log "Deleting ALL timestamp-based VMs..."
-    tart list | awk '/^local/ && $2 ~ /^bun-build-[0-9]+-/ {print $2}' | while read vm_name; do
-        if [ -n "$vm_name" ]; then
-            log "Emergency deleting: $vm_name"
-            tart delete "$vm_name" 2>/dev/null || log "Failed to delete $vm_name"
-        fi
-    done
-    
-    # FIXED: Use current bootstrap version from get_base_vm_image function
-    # This prevents deleting the current base images we need to use
-    local current_bootstrap_version=$(get_base_vm_image "14" "1.2.16" | sed 's/.*bootstrap-//')
-    log "Deleting old versioned base images (keeping only bootstrap-${current_bootstrap_version})..."
-    tart list | awk '/^local/ && $2 ~ /^bun-build-macos-.*-bootstrap-[0-9.]+$/ && $2 !~ /bootstrap-'${current_bootstrap_version}'$/ {print $2}' | while read vm_name; do
-        if [ -n "$vm_name" ]; then
-            log "Emergency deleting old base: $vm_name"
-            tart delete "$vm_name" 2>/dev/null || log "Failed to delete $vm_name"
-        fi
-    done
-    
-    local final_usage=$(get_disk_usage)
-    log "Emergency cleanup complete. Disk usage: ${final_usage}%"
-    
-    if [ "$final_usage" -gt "$DISK_USAGE_THRESHOLD" ]; then
-        log "⚠️  Warning: Disk still at ${final_usage}% after emergency cleanup"
-        return 1
-    else
-        log "✅ Emergency cleanup successful!"
-        return 0
-    fi
-}
-
-# Function to safely clean up only old temporary VMs (never base images)
-safe_cleanup_temp_vms() {
-    log "Safely cleaning up old temporary VMs only..."
-    
-    # Only delete timestamp-based VMs (never base images)
-    tart list | awk '/^local/ && $2 ~ /^bun-build-[0-9]+-/ {print $2}' | while read vm_name; do
-        if [ -n "$vm_name" ]; then
-            log "Deleting temporary VM: $vm_name"
-            tart delete "$vm_name" 2>/dev/null || log "Failed to delete $vm_name"
-        fi
-    done
-    
-    # Clean up any VMs older than specified hours
-    local cutoff_time=$(date -d "${MAX_VM_AGE_HOURS} hours ago" +%s 2>/dev/null || date -v-${MAX_VM_AGE_HOURS}H +%s)
-    tart list | awk '/^local/ && $2 ~ /^bun-build-[0-9]+-/ {print $2}' | while read vm_name; do
-        if [ -n "$vm_name" ]; then
-            # Extract timestamp from VM name
-            local vm_timestamp=$(echo "$vm_name" | sed 's/bun-build-\([0-9]\+\)-.*/\1/')
-            if [ "$vm_timestamp" -lt "$cutoff_time" ]; then
-                log "Deleting expired temporary VM: $vm_name"
-                tart delete "$vm_name" 2>/dev/null || log "Failed to delete expired VM $vm_name"
-            fi
-        fi
-    done
-    
-    log "✅ Safe cleanup complete - base images preserved"
-}
-
-# Function to clean up VMs
-cleanup_vms() {
-    log "Cleaning up stopped VMs..."
-    
-    # Check if emergency cleanup is requested
-    if [ "$EMERGENCY_CLEANUP" = "true" ]; then
-        emergency_cleanup
-        return $?
-    fi
-    
-    # REMOVED: Automatic emergency cleanup during build phases
-    # Build phases should NEVER delete base images automatically
-    # Emergency cleanup should only happen during base image creation or explicit cleanup-only mode
-    
-    # Normal cleanup - delete ALL timestamp-based VMs
-    tart list | awk '/^local/ && $2 ~ /^bun-build-[0-9]+-/ {print $2}' | while read vm_name; do
-        if [ -n "$vm_name" ]; then
-            log "Deleting old VM: $vm_name"
-            tart delete "$vm_name" 2>/dev/null || log "Failed to delete $vm_name"
-        fi
-    done
-    
-    # Also clean up any VMs older than specified hours
-    local cutoff_time=$(date -d "${MAX_VM_AGE_HOURS} hours ago" +%s 2>/dev/null || date -v-${MAX_VM_AGE_HOURS}H +%s)
-    tart list | awk '/^local/ && $2 ~ /^bun-build-[0-9]+-/ {print $2}' | while read vm_name; do
-        if [ -n "$vm_name" ]; then
-            # Extract timestamp from VM name
-            local vm_timestamp=$(echo "$vm_name" | sed 's/bun-build-\([0-9]\+\)-.*/\1/')
-            if [ "$vm_timestamp" -lt "$cutoff_time" ]; then
-                log "Deleting expired VM: $vm_name"
-                tart delete "$vm_name" 2>/dev/null || log "Failed to delete expired VM $vm_name"
-            fi
-        fi
-    done
 }
 
 # Function to start logging
@@ -159,17 +57,17 @@ create_and_run_vm() {
     tart list || log "Failed to list VMs"
     log "=========================="
 
-    # Monitor disk usage but NEVER trigger emergency cleanup during build phases
+    # Monitor disk usage for awareness but take NO cleanup action during build phases
     local current_usage=$(get_disk_usage)
     log "Current disk usage: ${current_usage}%"
     if [ "$current_usage" -gt "$DISK_USAGE_THRESHOLD" ]; then
         log "⚠️  WARNING: Disk usage at ${current_usage}% exceeds threshold (${DISK_USAGE_THRESHOLD}%)"
-        log "    Base images will NOT be deleted during build phases for safety"
-        log "    Please run cleanup manually: ./scripts/ci-macos.sh --cleanup-only --emergency-cleanup"
+        log "    Build phases perform NO cleanup - this is handled in VM preparation step"
+        log "    If needed, run cleanup manually: ./scripts/build-macos-vm.sh (includes cleanup)"
     fi
 
-    # FIXED: Use safe cleanup that never deletes base images during build phases
-    safe_cleanup_temp_vms
+    # BUILD PHASES DO NO CLEANUP - this is handled in VM preparation step
+    # We assume base images exist and temporary VMs are managed by preparation step
 
     # Start logging
     start_logging
@@ -235,32 +133,26 @@ show_usage() {
     echo ""
     echo "Options:"
     echo "  --help                    Show this help message"
-    echo "  --cleanup-only            Only perform VM cleanup, don't run build"
-    echo "  --emergency-cleanup       Force emergency cleanup (same as EMERGENCY_CLEANUP=true)"
     echo "  --force-base-rebuild      Force rebuild of base image before use"
     echo "  --release=VERSION         macOS release version (13, 14) [default: 14]"
     echo ""
     echo "Environment Variables:"
     echo "  BASE_VM_IMAGE             Base VM image to clone (auto-determined if not set)"
-    echo "  EMERGENCY_CLEANUP         Set to 'true' to force emergency cleanup (default: false)"
-    echo "  MAX_VM_AGE_HOURS          Maximum age of VMs before cleanup (default: 1)"
-    echo "  DISK_USAGE_THRESHOLD      Disk usage % to trigger emergency cleanup (default: 80)"
     echo "  FORCE_BASE_IMAGE_REBUILD  Set to 'true' to force base image rebuild (default: false)"
     echo ""
     echo "Examples:"
     echo "  $0                                           # Run default build on macOS 14"
     echo "  $0 --release=13                              # Run default build on macOS 13"
     echo "  $0 'bun run build:release'                  # Run custom command"
-    echo "  $0 --cleanup-only                           # Only cleanup VMs"
-    echo "  EMERGENCY_CLEANUP=true $0 --cleanup-only    # Emergency cleanup"
     echo "  $0 --force-base-rebuild --release=13        # Force rebuild base image for macOS 13"
     echo "  BASE_VM_IMAGE=my-custom-image $0            # Use custom base image"
+    echo ""
+    echo "Note: For VM cleanup, use ./scripts/build-macos-vm.sh which handles all cleanup operations"
 }
 
 # Main execution
 main() {
     # Parse arguments
-    local cleanup_only=false
     local show_help=false
     local release="14"  # Default to macOS 14
     
@@ -270,17 +162,8 @@ main() {
                 show_help=true
                 shift
                 ;;
-            --cleanup-only)
-                cleanup_only=true
-                shift
-                ;;
             --force-base-rebuild)
                 FORCE_BASE_IMAGE_REBUILD=true
-                shift
-                ;;
-            --emergency-cleanup)
-                EMERGENCY_CLEANUP=true
-                cleanup_only=true
                 shift
                 ;;
             --release=*)
@@ -298,18 +181,8 @@ main() {
         exit 0
     fi
     
-    # If cleanup-only mode, just run cleanup and exit
-    if [ "$cleanup_only" = true ]; then
-        log "Running cleanup-only mode..."
-        log "Configuration:"
-        log "  EMERGENCY_CLEANUP: $EMERGENCY_CLEANUP"
-        log "  MAX_VM_AGE_HOURS: $MAX_VM_AGE_HOURS"
-        log "  DISK_USAGE_THRESHOLD: $DISK_USAGE_THRESHOLD"
-        log "  Current disk usage: $(get_disk_usage)%"
-        
-        cleanup_vms
-        exit $?
-    fi
+    # BUILD PHASES ONLY - no cleanup functionality
+    # All cleanup is handled by VM preparation step (build-macos-vm.sh)
     
     # Generate a unique VM name
     local vm_name="bun-build-$(date +%s)-$(uuidgen)"
@@ -324,9 +197,7 @@ main() {
     log "Configuration:"
     log "  macOS Release: $release"
     log "  BASE_VM_IMAGE override: ${BASE_VM_IMAGE:-<auto-determined>}"
-    log "  EMERGENCY_CLEANUP: $EMERGENCY_CLEANUP"
-    log "  MAX_VM_AGE_HOURS: $MAX_VM_AGE_HOURS"
-    log "  DISK_USAGE_THRESHOLD: $DISK_USAGE_THRESHOLD"
+    log "  FORCE_BASE_IMAGE_REBUILD: $FORCE_BASE_IMAGE_REBUILD"
     log "VM Name: $vm_name"
     log "Command: $command"
     log "Workspace: $workspace_dir"
