@@ -424,8 +424,8 @@ check_remote_image() {
     # Show that download is starting since VM images are large (GB+) and can take 10-30+ minutes
     log "📥 Starting download of remote VM image (may be 5-15GB+, please wait)..." >&2
     
-    # Run tart pull directly to show native progress output (percentages, etc.)
-    if tart pull "$remote_url"; then
+    # Run tart pull - redirect ALL output to stderr to avoid contaminating return values
+    if tart pull "$remote_url" >&2; then
         log "✅ Remote image found and downloaded successfully" >&2
         return 0
     else
