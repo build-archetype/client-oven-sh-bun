@@ -1030,7 +1030,11 @@ EOF
   chmod 644 "$REAL_HOME/.alloy/config.alloy"
   
   # Copy config to Homebrew location
-  cp "$REAL_HOME/.alloy/config.alloy" "/opt/homebrew/etc/alloy/"
+  if mkdir -p /opt/homebrew/etc/alloy 2>/dev/null; then
+    cp "$REAL_HOME/.alloy/config.alloy" /opt/homebrew/etc/alloy/ 2>/dev/null || echo_color "$YELLOW" "⚠️  Failed to copy alloy config to Homebrew location"
+  else
+    echo_color "$YELLOW" "⚠️  Cannot create Homebrew alloy config directory (non-fatal)"
+  fi
   
   echo_color "$GREEN" "✅ Monitoring configuration created"
 fi
@@ -1074,10 +1078,18 @@ EOF
 chown "$REAL_USER:staff" "$REAL_HOME/.buildkite-agent/buildkite-agent.cfg"
 chmod 600 "$REAL_HOME/.buildkite-agent/buildkite-agent.cfg"
 
-# Also write to Homebrew location
-mkdir -p /opt/homebrew/etc/buildkite-agent
-cp "$REAL_HOME/.buildkite-agent/buildkite-agent.cfg" /opt/homebrew/etc/buildkite-agent/
-chown "$REAL_USER:staff" /opt/homebrew/etc/buildkite-agent/buildkite-agent.cfg
+# Also write to Homebrew location (optional - may fail without elevated permissions)
+echo_color "$BLUE" "Attempting to write buildkite config to Homebrew location..."
+if mkdir -p /opt/homebrew/etc/buildkite-agent 2>/dev/null; then
+    if cp "$REAL_HOME/.buildkite-agent/buildkite-agent.cfg" /opt/homebrew/etc/buildkite-agent/ 2>/dev/null; then
+        chown "$REAL_USER:staff" /opt/homebrew/etc/buildkite-agent/buildkite-agent.cfg 2>/dev/null || true
+        echo_color "$GREEN" "✅ Buildkite config written to Homebrew location"
+    else
+        echo_color "$YELLOW" "⚠️  Failed to copy buildkite config to Homebrew location (non-fatal)"
+    fi
+else
+    echo_color "$YELLOW" "⚠️  Cannot create Homebrew buildkite config directory (non-fatal - agent will use user config)"
+fi
 
 # --- Create environment hook for proper PATH ---
 echo_color "$BLUE" "Creating environment hook..."
