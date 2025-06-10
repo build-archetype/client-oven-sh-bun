@@ -1031,9 +1031,9 @@ EOF
   
   # Copy config to Homebrew location
   if mkdir -p /opt/homebrew/etc/alloy 2>/dev/null; then
-    cp "$REAL_HOME/.alloy/config.alloy" /opt/homebrew/etc/alloy/ 2>/dev/null || echo_color "$YELLOW" "⚠️  Failed to copy alloy config to Homebrew location"
+    cp "$REAL_HOME/.alloy/config.alloy" /opt/homebrew/etc/alloy/ 2>/dev/null || echo_color "$YELLOW" "⚠️  Failed to copy alloy config to Homebrew location (non-fatal)"
   else
-    echo_color "$YELLOW" "⚠️  Cannot create Homebrew alloy config directory (non-fatal)"
+    echo_color "$YELLOW" "⚠️  Cannot create Homebrew alloy directory (non-fatal)"
   fi
   
   echo_color "$GREEN" "✅ Monitoring configuration created"
@@ -1088,7 +1088,7 @@ if mkdir -p /opt/homebrew/etc/buildkite-agent 2>/dev/null; then
         echo_color "$YELLOW" "⚠️  Failed to copy buildkite config to Homebrew location (non-fatal)"
     fi
 else
-    echo_color "$YELLOW" "⚠️  Cannot create Homebrew buildkite config directory (non-fatal - agent will use user config)"
+    echo_color "$YELLOW" "⚠️  Cannot create Homebrew buildkite directory (non-fatal - agent will use user config)"
 fi
 
 # --- Create environment hook for proper PATH ---
