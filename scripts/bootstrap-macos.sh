@@ -2,7 +2,7 @@
 set -e
 set -x
 
-# Version: 4.0 - Added US locale configuration to fix date formatting tests
+# Version: 4.1 - Added US locale configuration and ICU4C for test compatibility
 # A comprehensive bootstrap script for macOS based on the main bootstrap.sh
 
 # Constants
@@ -231,6 +231,11 @@ install_brew() {
         append_to_profile "export LANG=en_US.UTF-8"
         append_to_profile "export LC_ALL=en_US.UTF-8"
         
+        # Set ICU environment variables for Bun compilation (fixes ICU version test)
+        append_to_profile "export PKG_CONFIG_PATH=/opt/homebrew/opt/icu4c/lib/pkgconfig:\$PKG_CONFIG_PATH"
+        append_to_profile "export LDFLAGS=\"-L/opt/homebrew/opt/icu4c/lib \$LDFLAGS\""
+        append_to_profile "export CPPFLAGS=\"-I/opt/homebrew/opt/icu4c/include \$CPPFLAGS\""
+        
         # Configure node-gyp for C++20 compatibility with Node.js v23.11.0+
         append_to_profile "export CXX_FLAGS=-std=c++20"
         append_to_profile "export CXXFLAGS=-std=c++20"
@@ -244,6 +249,11 @@ install_brew() {
         # Ensure locale is set for consistent date/time formatting (fixes toLocaleDateString tests)
         append_to_profile "export LANG=en_US.UTF-8"
         append_to_profile "export LC_ALL=en_US.UTF-8"
+        
+        # Set ICU environment variables for Bun compilation (fixes ICU version test)
+        append_to_profile "export PKG_CONFIG_PATH=/opt/homebrew/opt/icu4c/lib/pkgconfig:\$PKG_CONFIG_PATH"
+        append_to_profile "export LDFLAGS=\"-L/opt/homebrew/opt/icu4c/lib \$LDFLAGS\""
+        append_to_profile "export CPPFLAGS=\"-I/opt/homebrew/opt/icu4c/include \$CPPFLAGS\""
         
         # Configure node-gyp for C++20 compatibility with Node.js v23.11.0+
         append_to_profile "export CXX_FLAGS=-std=c++20"
@@ -631,7 +641,8 @@ install_build_essentials() {
         python3 \
         libtool \
         ruby \
-        perl
+        perl \
+        icu4c
 
     install_cmake
     install_llvm
