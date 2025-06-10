@@ -517,11 +517,33 @@ if [ "$goto_privileged_setup" = false ]; then
     fi
     
     # Verify buildkite-agent is installed and accessible
+    echo_color "$BLUE" "Verifying buildkite-agent installation..."
+    
+    # Ensure Homebrew paths are in PATH for verification
+    export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+    
     if ! command -v buildkite-agent &> /dev/null; then
       echo_color "$RED" "Buildkite agent not found in PATH after installation. Aborting."
       echo_color "$YELLOW" "Debug: Checking if binary exists..."
-      ls -la /opt/homebrew/bin/buildkite-agent 2>/dev/null || ls -la /usr/local/bin/buildkite-agent 2>/dev/null || echo "Binary not found in standard locations"
-      exit 1
+      echo_color "$YELLOW" "PATH: $PATH"
+      ls -la /opt/homebrew/bin/buildkite-agent 2>/dev/null && echo "Found in /opt/homebrew/bin/" || echo "Not in /opt/homebrew/bin/"
+      ls -la /usr/local/bin/buildkite-agent 2>/dev/null && echo "Found in /usr/local/bin/" || echo "Not in /usr/local/bin/"
+      
+      # Try creating symlink as fallback
+      if [ -f "/opt/homebrew/bin/buildkite-agent" ] && [ ! -f "/usr/local/bin/buildkite-agent" ]; then
+        echo_color "$YELLOW" "Attempting to create symlink from /opt/homebrew to /usr/local..."
+        sudo mkdir -p /usr/local/bin
+        sudo ln -sf /opt/homebrew/bin/buildkite-agent /usr/local/bin/buildkite-agent
+        
+        if command -v buildkite-agent &> /dev/null; then
+          echo_color "$GREEN" "✅ Symlink created successfully"
+        else
+          echo_color "$RED" "❌ Symlink creation failed"
+          exit 1
+        fi
+      else
+        exit 1
+      fi
     fi
     
     AGENT_VERSION=$(buildkite-agent --version | head -1)
@@ -1360,10 +1382,15 @@ fi
 # --- Start services as the real user ---
 echo_color "$BLUE" "Starting Buildkite agent as $REAL_USER..."
 
+# Ensure Homebrew paths are available
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 # Verify buildkite-agent is accessible
 if ! command -v buildkite-agent &> /dev/null; then
   echo_color "$RED" "❌ Buildkite agent not found! Cannot start service."
   echo_color "$YELLOW" "Please ensure buildkite-agent is properly installed."
+  echo_color "$YELLOW" "Current PATH: $PATH"
+  echo_color "$YELLOW" "Try: brew install buildkite/buildkite/buildkite-agent"
   exit 1
 fi
 
