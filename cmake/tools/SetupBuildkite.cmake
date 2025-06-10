@@ -1,4 +1,10 @@
-optionx(BUILDKITE_CACHE BOOL "If the build can use Buildkite caches, even if not running in Buildkite" DEFAULT ${BUILDKITE})
+if(APPLE AND CI)
+  set(DEFAULT_BUILDKITE_CACHE ON)
+else()
+  set(DEFAULT_BUILDKITE_CACHE ${BUILDKITE})
+endif()
+
+optionx(BUILDKITE_CACHE BOOL "If the build can use Buildkite caches, even if not running in Buildkite" DEFAULT ${DEFAULT_BUILDKITE_CACHE})
 
 if(NOT BUILDKITE_CACHE OR NOT BUN_LINK_ONLY)
   return()
@@ -34,6 +40,65 @@ endif()
 
 setx(BUILDKITE_BUILD_URL https://buildkite.com/${BUILDKITE_ORGANIZATION_SLUG}/${BUILDKITE_PIPELINE_SLUG}/builds/${BUILDKITE_BUILD_ID})
 setx(BUILDKITE_BUILD_PATH ${BUILDKITE_BUILDS_PATH}/builds/${BUILDKITE_BUILD_ID})
+
+# === CACHE RESTORATION ===
+# Restore cache files immediately during CMake configuration
+# This avoids dependency cycles and provides cache for all build steps
+
+message(STATUS "Restoring Buildkite cache artifacts...")
+
+if(BUILDKITE)
+  set(CACHE_ARTIFACTS "ccache-cache.tar.gz" "zig-local-cache.tar.gz" "zig-global-cache.tar.gz")
+  foreach(cache_artifact ${CACHE_ARTIFACTS})
+    # Determine cache directory based on artifact name
+    if(cache_artifact STREQUAL "ccache-cache.tar.gz")
+      set(cache_dir ${CACHE_PATH}/ccache)
+    elseif(cache_artifact STREQUAL "zig-local-cache.tar.gz")
+      set(cache_dir ${CACHE_PATH}/zig/local)
+    elseif(cache_artifact STREQUAL "zig-global-cache.tar.gz")
+      set(cache_dir ${CACHE_PATH}/zig/global)
+    endif()
+    
+    # Download cache artifact if available
+    execute_process(
+      COMMAND buildkite-agent artifact download ${cache_artifact} ${BUILD_PATH}
+      WORKING_DIRECTORY ${BUILD_PATH}
+      RESULT_VARIABLE download_result
+      OUTPUT_QUIET
+      ERROR_QUIET
+    )
+    
+    if(download_result EQUAL 0 AND EXISTS ${BUILD_PATH}/${cache_artifact})
+      # Extract cache to target directory
+      file(MAKE_DIRECTORY ${cache_dir})
+      execute_process(
+        COMMAND ${CMAKE_COMMAND} -E tar xzf ${BUILD_PATH}/${cache_artifact}
+        WORKING_DIRECTORY ${cache_dir}
+        RESULT_VARIABLE extract_result
+        OUTPUT_QUIET
+        ERROR_QUIET
+      )
+      
+      if(extract_result EQUAL 0)
+        # Count files for reporting
+        file(GLOB_RECURSE cache_files ${cache_dir}/*)
+        list(LENGTH cache_files file_count)
+        message(STATUS "  ✅ Restored ${cache_artifact}: ${file_count} files")
+      else()
+        message(STATUS "  ⚠️  Failed to extract ${cache_artifact}")
+      endif()
+      
+      # Clean up downloaded archive
+      file(REMOVE ${BUILD_PATH}/${cache_artifact})
+    else()
+      message(STATUS "  📭 No ${cache_artifact} found (normal for first builds)")
+    endif()
+  endforeach()
+else()
+  message(STATUS "  ⚠️  Not running in Buildkite, skipping cache restoration")
+endif()
+
+# === END CACHE RESTORATION ===
 
 file(
   DOWNLOAD ${BUILDKITE_BUILD_URL}

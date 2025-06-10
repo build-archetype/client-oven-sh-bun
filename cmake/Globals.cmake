@@ -954,3 +954,68 @@ function(print_compiler_flags)
     endif()
   endforeach()
 endfunction()
+
+# === BUILDKITE CACHE UPLOAD TARGETS ===
+# Upload cache artifacts after builds complete
+
+if(BUILDKITE_CACHE AND BUILDKITE AND BUN_LINK_ONLY AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only"))
+  
+  # ccache upload
+  if(IS_DIRECTORY ${CACHE_PATH}/ccache)
+    register_command(
+      TARGET upload-ccache-cache
+      COMMENT "Uploading ccache cache"
+      COMMAND ${CMAKE_COMMAND} -E tar czf ccache-cache.tar.gz -C ${CACHE_PATH}/ccache .
+      COMMAND buildkite-agent artifact upload ccache-cache.tar.gz
+      CWD ${BUILD_PATH}
+      ARTIFACTS ${BUILD_PATH}/ccache-cache.tar.gz
+    )
+  endif()
+
+  # Zig local cache upload
+  if(IS_DIRECTORY ${CACHE_PATH}/zig/local)
+    register_command(
+      TARGET upload-zig-local-cache
+      COMMENT "Uploading Zig local cache"
+      COMMAND ${CMAKE_COMMAND} -E tar czf zig-local-cache.tar.gz -C ${CACHE_PATH}/zig/local .
+      COMMAND buildkite-agent artifact upload zig-local-cache.tar.gz
+      CWD ${BUILD_PATH}
+      ARTIFACTS ${BUILD_PATH}/zig-local-cache.tar.gz
+    )
+  endif()
+
+  # Zig global cache upload
+  if(IS_DIRECTORY ${CACHE_PATH}/zig/global)
+    register_command(
+      TARGET upload-zig-global-cache
+      COMMENT "Uploading Zig global cache"
+      COMMAND ${CMAKE_COMMAND} -E tar czf zig-global-cache.tar.gz -C ${CACHE_PATH}/zig/global .
+      COMMAND buildkite-agent artifact upload zig-global-cache.tar.gz
+      CWD ${BUILD_PATH}
+      ARTIFACTS ${BUILD_PATH}/zig-global-cache.tar.gz
+    )
+  endif()
+  
+  # Meta target to upload all cache types
+  if(TARGET upload-ccache-cache OR TARGET upload-zig-local-cache OR TARGET upload-zig-global-cache)
+    set(CACHE_UPLOAD_TARGETS)
+    
+    if(TARGET upload-ccache-cache)
+      list(APPEND CACHE_UPLOAD_TARGETS upload-ccache-cache)
+    endif()
+    
+    if(TARGET upload-zig-local-cache)
+      list(APPEND CACHE_UPLOAD_TARGETS upload-zig-local-cache)
+    endif()
+    
+    if(TARGET upload-zig-global-cache)
+      list(APPEND CACHE_UPLOAD_TARGETS upload-zig-global-cache)
+    endif()
+    
+    add_custom_target(upload-all-caches
+      COMMENT "Upload all cache artifacts"
+      DEPENDS ${CACHE_UPLOAD_TARGETS}
+    )
+  endif()
+  
+endif()

@@ -91,6 +91,67 @@ get_disk_usage() {
     df -h . | tail -1 | awk '{print $5}' | sed 's/%//'
 }
 
+# Function to clean up orphaned temporary VMs
+cleanup_orphaned_vms() {
+    log "🧹 Cleaning up orphaned temporary VMs..."
+    
+    local cleaned_count=0
+    local total_size_freed=0
+    
+    # Find all temporary VMs (pattern: bun-build-TIMESTAMP-UUID)
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^local[[:space:]]+bun-build-[0-9]+-[A-F0-9-]+[[:space:]] ]]; then
+            local vm_name=$(echo "$line" | awk '{print $2}')
+            local size=$(echo "$line" | awk '{print $4}')
+            
+            log "🗑️  Deleting orphaned temporary VM: $vm_name (${size}GB)"
+            if tart delete "$vm_name"; then
+                log "✅ Successfully deleted $vm_name"
+                cleaned_count=$((cleaned_count + 1))
+                total_size_freed=$((total_size_freed + size))
+            else
+                log "❌ Failed to delete $vm_name"
+            fi
+        fi
+    done <<< "$(tart list 2>/dev/null || echo '')"
+    
+    if [ $cleaned_count -gt 0 ]; then
+        log "🎉 Cleaned up $cleaned_count orphaned VMs, freed ${total_size_freed}GB"
+    else
+        log "✅ No orphaned temporary VMs found"
+    fi
+}
+
+# Function to cleanup single VM with better error handling
+cleanup_vm() {
+    local vm_name="$1"
+    
+    log "🧹 Cleaning up VM: $vm_name"
+    
+    # Check if VM exists first
+    if ! tart list | grep -q "^local.*$vm_name"; then
+        log "✅ VM $vm_name already deleted or doesn't exist"
+        return 0
+    fi
+    
+    # Try to stop VM first if it's running
+    if tart list | grep "$vm_name" | grep -q "running"; then
+        log "🛑 Stopping running VM: $vm_name"
+        tart stop "$vm_name" || log "⚠️ Failed to stop VM (may already be stopped)"
+        sleep 2
+    fi
+    
+    # Delete the VM
+    log "🗑️  Deleting VM: $vm_name"
+    if tart delete "$vm_name"; then
+        log "✅ Successfully deleted VM: $vm_name"
+        return 0
+    else
+        log "❌ Failed to delete VM: $vm_name"
+        return 1
+    fi
+}
+
 # Function to start logging
 start_logging() {
     log "Starting Tart logging..."
@@ -158,6 +219,14 @@ create_and_run_vm() {
     log "✅ Base image found - cloning VM"
     tart clone "$base_vm_image" "$vm_name"
     
+    # Set up cleanup trap to ensure VM is deleted even if script exits early
+    cleanup_trap() {
+        local exit_code=$?
+        log "🛡️  Cleanup trap triggered (exit code: $exit_code)"
+        cleanup_vm "$vm_name"
+    }
+    trap cleanup_trap EXIT INT TERM
+    
     log "Starting VM with workspace: $workspace_dir"
     tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" > vm.log 2>&1 &
     
@@ -175,14 +244,8 @@ create_and_run_vm() {
     # Upload logs
     buildkite-agent artifact upload vm.log || true
 
-    # Cleanup
-    log "Checking VM status before cleanup..."
-    if tart list | grep -q "$vm_name"; then
-        log "VM $vm_name exists, deleting..."
-        tart delete "$vm_name" || true
-    else
-        log "VM $vm_name not found - may have been cleaned up earlier or crashed"
-    fi
+    # Cleanup - use robust cleanup function
+    cleanup_vm "$vm_name"
 
     log "=== FINAL TART STATE ==="
     log "Available Tart VMs:"
@@ -198,6 +261,7 @@ show_usage() {
     echo "  --help                    Show this help message"
     echo "  --force-base-rebuild      Force rebuild of base image before use"
     echo "  --release=VERSION         macOS release version (13, 14) [default: 14]"
+    echo "  --cleanup-orphaned        Clean up orphaned temporary VMs"
     echo ""
     echo "Environment Variables:"
     echo "  BASE_VM_IMAGE             Base VM image to clone (auto-determined if not set)"
@@ -218,6 +282,7 @@ main() {
     # Parse arguments
     local show_help=false
     local release="14"  # Default to macOS 14
+    local cleanup_orphaned=false
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -233,6 +298,10 @@ main() {
                 release="${1#*=}"
                 shift
                 ;;
+            --cleanup-orphaned)
+                cleanup_orphaned=true
+                shift
+                ;;
             *)
                 break
                 ;;
@@ -241,6 +310,12 @@ main() {
     
     if [ "$show_help" = true ]; then
         show_usage
+        exit 0
+    fi
+    
+    # Handle cleanup-orphaned option
+    if [ "$cleanup_orphaned" = true ]; then
+        cleanup_orphaned_vms
         exit 0
     fi
     

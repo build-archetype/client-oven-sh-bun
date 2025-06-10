@@ -423,7 +423,7 @@ check_remote_image() {
     log "📥 Starting download of remote VM image (may be 5-15GB+, please wait)..." >&2
     
     # Run tart pull directly to show native progress output (percentages, etc.)
-    if tart pull "$remote_url"; then
+    if tart pull "$remote_url" >&2; then
         log "✅ Remote image found and downloaded successfully" >&2
         return 0
     else
