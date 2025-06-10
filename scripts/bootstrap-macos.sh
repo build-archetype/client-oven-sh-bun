@@ -2,7 +2,7 @@
 set -e
 set -x
 
-# Version: 4.1 - Added US locale configuration and C++20 to binding.gyp files for test compatibility
+# Version: 4.0 - Added US locale configuration to fix date formatting tests
 # A comprehensive bootstrap script for macOS based on the main bootstrap.sh
 
 # Constants
