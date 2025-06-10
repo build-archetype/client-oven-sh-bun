@@ -335,6 +335,30 @@ version_compare() {
     return 0  # Equal
 }
 
+# Check if two versions are compatible for incremental updates (same major.minor)
+version_compatible() {
+    local v1="$1"
+    local v2="$2"
+    
+    # Split versions into arrays
+    IFS='.' read -ra V1 <<< "$v1"
+    IFS='.' read -ra V2 <<< "$v2"
+    
+    # Compare major.minor only
+    local major1=${V1[0]:-0}
+    local minor1=${V1[1]:-0}
+    local major2=${V2[0]:-0}
+    local minor2=${V2[1]:-0}
+    
+    [ "$major1" = "$major2" ] && [ "$minor1" = "$minor2" ]
+}
+
+# Get the minor version (e.g., "1.2" from "1.2.16")
+get_minor_version() {
+    local version="$1"
+    echo "$version" | sed -E 's/^([0-9]+\.[0-9]+)\..*/\1/'
+}
+
 # Parse image name to extract version and bootstrap info
 parse_image_name() {
     local image_name="$1"
@@ -364,8 +388,11 @@ check_local_image_version() {
     
     # Results
     local exact_match=""
-    local usable_images=()
+    local compatible_images=()  # Same minor version (e.g., 1.2.x)
+    local usable_images=()      # Different minor version but could be useful
     local all_bun_images=()
+    
+    local target_minor=$(get_minor_version "$target_bun_version")
     
     # Parse each line for bun-build-macos images
     while IFS= read -r line; do
@@ -387,17 +414,40 @@ check_local_image_version() {
                 if [ "$image_name" = "$target_image_name" ]; then
                     exact_match="$image_name"
                     log "    ✅ Exact match found!" >&2
-                # Check for usable match (same Bun version, different bootstrap)
-                elif [ "$bun_ver" = "$target_bun_version" ] && [ "$bootstrap_ver" != "$target_bootstrap_version" ]; then
+                # Check for compatible match (same minor version)
+                elif [ -n "$bun_ver" ] && version_compatible "$bun_ver" "$target_bun_version"; then
+                    compatible_images+=("$image_name")
+                    log "    🔄 Compatible match (same minor version: $(get_minor_version "$bun_ver"))" >&2
+                # Check for usable match (different minor but could bootstrap)
+                elif [ -n "$bun_ver" ] && [ "$bun_ver" != "$target_bun_version" ]; then
                     usable_images+=("$image_name")
-                    log "    🔄 Usable match (different bootstrap)" >&2
+                    log "    🔧 Usable base (different minor: $(get_minor_version "$bun_ver"))" >&2
                 fi
             fi
         fi
     done <<< "$tart_output"
     
-    # Return results (format: exact|usable1,usable2|all1,all2)
-    # Handle empty arrays properly
+    # Find best compatible image (highest version with same minor)
+    local best_compatible=""
+    if [ ${#compatible_images[@]} -gt 0 ]; then
+        local best_compatible_version=""
+        for image in "${compatible_images[@]}"; do
+            local version_info=$(parse_image_name "$image")
+            local bun_ver="${version_info%|*}"
+            if [ -z "$best_compatible_version" ] || version_compare "$bun_ver" "$best_compatible_version"; then
+                best_compatible="$image"
+                best_compatible_version="$bun_ver"
+            fi
+        done
+        log "  🎯 Best compatible: $best_compatible (Bun: $best_compatible_version)" >&2
+    fi
+    
+    # Return results (format: exact|compatible|usable|all)
+    local compatible_list=""
+    if [ -n "$best_compatible" ]; then
+        compatible_list="$best_compatible"
+    fi
+    
     local usable_list=""
     if [ ${#usable_images[@]} -gt 0 ]; then
         usable_list=$(IFS=','; echo "${usable_images[*]}")
@@ -408,7 +458,7 @@ check_local_image_version() {
         all_list=$(IFS=','; echo "${all_bun_images[*]}")
     fi
     
-    echo "$exact_match|$usable_list|$all_list"
+    echo "$exact_match|$compatible_list|$usable_list|$all_list"
 }
 
 # Check if remote image exists
@@ -471,9 +521,14 @@ make_caching_decision() {
     
     # Check local images (skip in distributed mode if remote was found)
     local local_analysis=$(check_local_image_version "$target_bun_version" "$target_bootstrap_version" "$target_image_name")
+    
+    # Parse the enhanced results: exact|compatible|usable|all
     local exact_match="${local_analysis%%|*}"
-    local usable_images="${local_analysis%|*}"
-    usable_images="${usable_images#*|}"
+    local remaining="${local_analysis#*|}"
+    local compatible_match="${remaining%%|*}"
+    remaining="${remaining#*|}"
+    local usable_images="${remaining%%|*}"
+    local all_images="${remaining#*|}"
     
     # Priority 1: Exact local match (only if not distributed mode or remote failed)
     if [ -n "$exact_match" ]; then
@@ -482,9 +537,17 @@ make_caching_decision() {
         return
     fi
     
-    # Priority 2: Check remote for perfect match (if not already done in distributed mode)
+    # Priority 2: Compatible local match (same minor version - incremental update)
+    if [ -n "$compatible_match" ]; then
+        log "🔄 Compatible local image found: $compatible_match" >&2
+        log "🎯 Decision: Build incrementally from compatible local base" >&2
+        echo "build_incremental|$compatible_match"
+        return
+    fi
+    
+    # Priority 3: Check remote for perfect match (if not already done in distributed mode)
     if [ "$distributed_mode" != true ]; then
-        log "🌐 No exact local match, checking remote..." >&2
+        log "🌐 No local matches, checking remote..." >&2
         if check_remote_image "$remote_image_url"; then
             log "🎯 Decision: Use remote perfect match" >&2
             echo "use_remote|$remote_image_url"
@@ -492,8 +555,8 @@ make_caching_decision() {
         fi
     fi
     
-    # Priority 3: Build new image
-    log "🎯 Decision: Build new image (no suitable local or remote found)" >&2
+    # Priority 4: Build from scratch
+    log "🎯 Decision: Build new image from scratch (no compatible options found)" >&2
     echo "build_new"
 }
 
@@ -530,8 +593,17 @@ execute_caching_decision() {
             return 0
             ;;
             
+        "build_incremental")
+            log "🔄 Building incrementally from compatible base: $target" >&2
+            # Set environment variable for main build logic to know about incremental build
+            export INCREMENTAL_BASE_IMAGE="$target"
+            return 1  # Signal that we need to build
+            ;;
+            
         "build_new")
             log "🏗️  Building new image: $target_image_name" >&2
+            # Clear any incremental base image
+            unset INCREMENTAL_BASE_IMAGE
             return 1  # Signal that we need to build
             ;;
             
@@ -738,17 +810,35 @@ main() {
     fi
     
     # If we reach here, we need to build a new image
-    log "=== BUILDING NEW BASE IMAGE ==="
-    log "Building new base image for Bun ${BUN_VERSION}..."
-    
-    # Clean up the specific image we're about to build (if it exists)
-    log "Cleaning up target image if it exists: $LOCAL_IMAGE_NAME"
-    tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "Target image doesn't exist (expected)"
-    
-    # Clone base image
-    log "Cloning base image: $BASE_IMAGE"
-    tart clone "$BASE_IMAGE" "$LOCAL_IMAGE_NAME"
-    log "✅ Base image cloned"
+    if [ -n "${INCREMENTAL_BASE_IMAGE:-}" ]; then
+        log "=== BUILDING INCREMENTAL IMAGE ==="
+        log "Building incremental image for Bun ${BUN_VERSION} from base: $INCREMENTAL_BASE_IMAGE"
+        
+        # Clean up the specific image we're about to build (if it exists)
+        log "Cleaning up target image if it exists: $LOCAL_IMAGE_NAME"
+        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "Target image doesn't exist (expected)"
+        
+        # Clone from incremental base instead of raw macOS image
+        log "Cloning from incremental base: $INCREMENTAL_BASE_IMAGE"
+        tart clone "$INCREMENTAL_BASE_IMAGE" "$LOCAL_IMAGE_NAME"
+        log "✅ Incremental base cloned"
+        
+        IS_INCREMENTAL_BUILD=true
+    else
+        log "=== BUILDING NEW BASE IMAGE ==="
+        log "Building new base image for Bun ${BUN_VERSION}..."
+        
+        # Clean up the specific image we're about to build (if it exists)
+        log "Cleaning up target image if it exists: $LOCAL_IMAGE_NAME"
+        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "Target image doesn't exist (expected)"
+        
+        # Clone base image
+        log "Cloning base image: $BASE_IMAGE"
+        tart clone "$BASE_IMAGE" "$LOCAL_IMAGE_NAME"
+        log "✅ Base image cloned"
+        
+        IS_INCREMENTAL_BUILD=false
+    fi
     
     # Pass the version to bootstrap script
     log "Making bootstrap script executable..."
