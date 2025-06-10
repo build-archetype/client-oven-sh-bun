@@ -2,7 +2,7 @@
 set -e
 set -x
 
-# Version: 4.1 - Added US locale and C++20 node-gyp configuration for Node.js v23.11.0+ compatibility
+# Version: 4.1 - Added US locale configuration and C++20 to binding.gyp files for test compatibility
 # A comprehensive bootstrap script for macOS based on the main bootstrap.sh
 
 # Constants
