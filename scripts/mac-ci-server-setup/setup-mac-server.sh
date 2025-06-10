@@ -498,58 +498,7 @@ if [ "$goto_privileged_setup" = false ]; then
       echo_color "$RED" "Tailscale is not in PATH after installation. Aborting."; exit 1;
     fi
     
-    # Install Buildkite agent
-    echo_color "$BLUE" "Installing Buildkite agent..."
-    
-    # Add buildkite tap first
-    echo_color "$BLUE" "Adding Buildkite tap..."
-    if ! brew tap buildkite/buildkite; then
-      echo_color "$RED" "Failed to add buildkite tap. Aborting."
-      exit 1
-    fi
-    echo_color "$GREEN" "✅ Buildkite tap added"
-    
-    # Install buildkite-agent
-    echo_color "$BLUE" "Installing buildkite-agent package..."
-    if ! brew install buildkite/buildkite/buildkite-agent; then
-      echo_color "$RED" "Failed to install buildkite-agent. Aborting."
-      exit 1
-    fi
-    
-    # Verify buildkite-agent is installed and accessible
-    echo_color "$BLUE" "Verifying buildkite-agent installation..."
-    
-    # Ensure Homebrew paths are in PATH for verification
-    export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-    
-    if ! command -v buildkite-agent &> /dev/null; then
-      echo_color "$RED" "Buildkite agent not found in PATH after installation. Aborting."
-      echo_color "$YELLOW" "Debug: Checking if binary exists..."
-      echo_color "$YELLOW" "PATH: $PATH"
-      ls -la /opt/homebrew/bin/buildkite-agent 2>/dev/null && echo "Found in /opt/homebrew/bin/" || echo "Not in /opt/homebrew/bin/"
-      ls -la /usr/local/bin/buildkite-agent 2>/dev/null && echo "Found in /usr/local/bin/" || echo "Not in /usr/local/bin/"
-      
-      # Try creating symlink as fallback
-      if [ -f "/opt/homebrew/bin/buildkite-agent" ] && [ ! -f "/usr/local/bin/buildkite-agent" ]; then
-        echo_color "$YELLOW" "Attempting to create symlink from /opt/homebrew to /usr/local..."
-        sudo mkdir -p /usr/local/bin
-        sudo ln -sf /opt/homebrew/bin/buildkite-agent /usr/local/bin/buildkite-agent
-        
-        if command -v buildkite-agent &> /dev/null; then
-          echo_color "$GREEN" "✅ Symlink created successfully"
-        else
-          echo_color "$RED" "❌ Symlink creation failed"
-          exit 1
-        fi
-      else
-        exit 1
-      fi
-    fi
-    
-    AGENT_VERSION=$(buildkite-agent --version | head -1)
-    echo_color "$GREEN" "✅ Buildkite agent installed and verified (${AGENT_VERSION})"
-    
-    # Install other CI tools
+    # Install other CI tools (buildkite-agent moved to privileged section)
     echo_color "$BLUE" "Installing other CI dependencies..."
     
     # Install Node.js first (critical for Bun CI)
@@ -710,6 +659,64 @@ $REAL_USER ALL=(ALL) NOPASSWD: /usr/bin/sshpass *
 $REAL_USER ALL=(ALL) NOPASSWD: /opt/homebrew/bin/sshpass *
 $REAL_USER ALL=(ALL) NOPASSWD: /usr/local/bin/sshpass *
 EOF
+
+# --- Install Buildkite agent as the CI user ---
+echo_color "$BLUE" "Installing Buildkite agent for $REAL_USER..."
+
+# Ensure the CI user has Homebrew properly set up
+echo_color "$BLUE" "Setting up Homebrew environment for $REAL_USER..."
+sudo -u "$REAL_USER" bash -c '
+  if [ -f "/opt/homebrew/bin/brew" ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+    echo '\''eval "$(/opt/homebrew/bin/brew shellenv)"'\'' >> ~/.zprofile
+  elif [ -f "/usr/local/bin/brew" ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+    echo '\''eval "$(/usr/local/bin/brew shellenv)"'\'' >> ~/.bash_profile
+  fi
+'
+
+# Install buildkite-agent as the CI user
+echo_color "$BLUE" "Installing buildkite-agent as $REAL_USER..."
+if sudo -u "$REAL_USER" bash -c '
+  # Load Homebrew environment
+  if [ -f "/opt/homebrew/bin/brew" ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [ -f "/usr/local/bin/brew" ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+  
+  # Add tap and install
+  brew tap buildkite/buildkite && brew install buildkite/buildkite/buildkite-agent
+'; then
+  echo_color "$GREEN" "✅ Buildkite agent installed successfully for $REAL_USER"
+else
+  echo_color "$RED" "❌ Failed to install buildkite-agent for $REAL_USER. Aborting."
+  exit 1
+fi
+
+# Verify installation as the CI user
+echo_color "$BLUE" "Verifying buildkite-agent installation for $REAL_USER..."
+if sudo -u "$REAL_USER" bash -c '
+  if [ -f "/opt/homebrew/bin/brew" ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [ -f "/usr/local/bin/brew" ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+  command -v buildkite-agent
+' >/dev/null; then
+  AGENT_VERSION=$(sudo -u "$REAL_USER" bash -c '
+    if [ -f "/opt/homebrew/bin/brew" ]; then
+      eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [ -f "/usr/local/bin/brew" ]; then
+      eval "$(/usr/local/bin/brew shellenv)"
+    fi
+    buildkite-agent --version | head -1
+  ')
+  echo_color "$GREEN" "✅ Buildkite agent verified for $REAL_USER: $AGENT_VERSION"
+else
+  echo_color "$RED" "❌ Buildkite agent not accessible for $REAL_USER after installation"
+  exit 1
+fi
 
 # --- Configure monitoring (if enabled) ---
 if [ "${MONITORING_ENABLED:-false}" = true ]; then
@@ -1382,20 +1389,6 @@ fi
 # --- Start services as the real user ---
 echo_color "$BLUE" "Starting Buildkite agent as $REAL_USER..."
 
-# Ensure Homebrew paths are available
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-
-# Verify buildkite-agent is accessible
-if ! command -v buildkite-agent &> /dev/null; then
-  echo_color "$RED" "❌ Buildkite agent not found! Cannot start service."
-  echo_color "$YELLOW" "Please ensure buildkite-agent is properly installed."
-  echo_color "$YELLOW" "Current PATH: $PATH"
-  echo_color "$YELLOW" "Try: brew install buildkite/buildkite/buildkite-agent"
-  exit 1
-fi
-
-echo_color "$GREEN" "✅ Buildkite agent found: $(buildkite-agent --version | head -1)"
-
 # Ensure proper ownership of Homebrew directories
 chown -R "$REAL_USER:staff" /opt/homebrew/var/buildkite-agent 2>/dev/null || true
 chown -R "$REAL_USER:staff" /opt/homebrew/var/log 2>/dev/null || true
@@ -1411,46 +1404,51 @@ else
   exit 1
 fi
 
-# Check if service is already running
-echo_color "$BLUE" "Checking service status..."
-if sudo -u "$REAL_USER" "$HOMEBREW_PREFIX/bin/brew" services list | grep -q "buildkite-agent.*started"; then
-  echo_color "$YELLOW" "Service already running, restarting..."
-  sudo -u "$REAL_USER" "$HOMEBREW_PREFIX/bin/brew" services restart buildkite-agent
-else
-  # Try to start the service
-  echo_color "$BLUE" "Starting service..."
-  if sudo -u "$REAL_USER" "$HOMEBREW_PREFIX/bin/brew" services start buildkite-agent; then
-    echo_color "$GREEN" "✅ Service start command executed"
-  else
-    echo_color "$YELLOW" "⚠️ Service start command failed, trying alternative approach..."
-    
-    # Alternative: try stopping first, then starting
-    echo_color "$BLUE" "Attempting stop/start cycle..."
-    sudo -u "$REAL_USER" "$HOMEBREW_PREFIX/bin/brew" services stop buildkite-agent 2>/dev/null || true
-    sleep 2
-    
-    if sudo -u "$REAL_USER" "$HOMEBREW_PREFIX/bin/brew" services start buildkite-agent; then
-      echo_color "$GREEN" "✅ Service started after stop/start cycle"
-    else
-      echo_color "$RED" "❌ Service start failed even after stop/start cycle"
-      echo_color "$YELLOW" "Manual recovery commands:"
-      echo_color "$YELLOW" "  sudo -u $REAL_USER brew services stop buildkite-agent"
-      echo_color "$YELLOW" "  sudo -u $REAL_USER brew services start buildkite-agent"
-      echo_color "$YELLOW" "  Check logs: $HOMEBREW_PREFIX/var/log/buildkite-agent.log"
-    fi
+# Start buildkite-agent service as the CI user
+echo_color "$BLUE" "Starting service as $REAL_USER..."
+if sudo -u "$REAL_USER" bash -c "
+  # Load Homebrew environment
+  if [ -f '/opt/homebrew/bin/brew' ]; then
+    eval \"\$(/opt/homebrew/bin/brew shellenv)\"
+  elif [ -f '/usr/local/bin/brew' ]; then
+    eval \"\$(/usr/local/bin/brew shellenv)\"
   fi
+  
+  # Start the service
+  brew services start buildkite-agent
+"; then
+  echo_color "$GREEN" "✅ Buildkite agent service start command executed"
+else
+  echo_color "$YELLOW" "⚠️ Service start command failed, trying restart..."
+  
+  # Try restart as fallback
+  sudo -u "$REAL_USER" bash -c "
+    if [ -f '/opt/homebrew/bin/brew' ]; then
+      eval \"\$(/opt/homebrew/bin/brew shellenv)\"
+    elif [ -f '/usr/local/bin/brew' ]; then
+      eval \"\$(/usr/local/bin/brew shellenv)\"
+    fi
+    brew services restart buildkite-agent
+  " || echo_color "$RED" "❌ Service restart also failed"
 fi
 
 # Verify it's running
 sleep 5
 echo_color "$BLUE" "Verifying service status..."
-if sudo -u "$REAL_USER" "$HOMEBREW_PREFIX/bin/brew" services list | grep -q "buildkite-agent.*started"; then
+if sudo -u "$REAL_USER" bash -c "
+  if [ -f '/opt/homebrew/bin/brew' ]; then
+    eval \"\$(/opt/homebrew/bin/brew shellenv)\"
+  elif [ -f '/usr/local/bin/brew' ]; then
+    eval \"\$(/usr/local/bin/brew shellenv)\"
+  fi
+  brew services list | grep -q 'buildkite-agent.*started'
+"; then
   echo_color "$GREEN" "✅ Buildkite agent service is running"
 elif pgrep -f "buildkite-agent" >/dev/null; then
-  echo_color "$GREEN" "✅ Buildkite agent process is running (detected via process list)"
+  echo_color "$GREEN" "✅ Buildkite agent process is running (via process check)"
 else
   echo_color "$YELLOW" "⚠️ Service status unclear. Manual check:"
-  echo_color "$YELLOW" "  brew services list | grep buildkite"
+  echo_color "$YELLOW" "  sudo -u $REAL_USER brew services list | grep buildkite"
   echo_color "$YELLOW" "  Check logs: $HOMEBREW_PREFIX/var/log/buildkite-agent.log"
   echo_color "$YELLOW" "     Manual start: sudo -u $REAL_USER brew services start buildkite-agent"
 fi
