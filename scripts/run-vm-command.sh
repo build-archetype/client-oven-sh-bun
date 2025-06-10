@@ -12,6 +12,17 @@ fi
 VM_NAME="$1"
 COMMAND="${2:-echo 'VM is ready'}"
 
+# Check for required dependencies
+if ! command -v sshpass >/dev/null 2>&1; then
+    echo "❌ ERROR: sshpass is required but not found!"
+    echo "   This script needs sshpass to connect to VMs"
+    echo "   Please install sshpass or ensure it's in PATH"
+    echo "   Current PATH: $PATH"
+    echo "   Available in /opt/homebrew/bin: $(ls -la /opt/homebrew/bin/sshpass 2>/dev/null || echo 'not found')"
+    echo "   Available in /usr/local/bin: $(ls -la /usr/local/bin/sshpass 2>/dev/null || echo 'not found')"
+    exit 1
+fi
+
 # SSH options for reliability - comprehensive host key bypass
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
 
