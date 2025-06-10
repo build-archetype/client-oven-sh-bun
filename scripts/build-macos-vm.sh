@@ -439,10 +439,12 @@ make_caching_decision() {
     local target_image_name="$3"
     local remote_image_url="$4"
     local force_refresh="$5"
+    local distributed_mode="$6"
     
     log "🧠 Making smart caching decision..." >&2
     log "  Target: Bun $target_bun_version, Bootstrap $target_bootstrap_version" >&2
     log "  Force refresh: $force_refresh" >&2
+    log "  Distributed mode: $distributed_mode" >&2
     
     # If force refresh, skip all local checks
     if [ "$force_refresh" = true ]; then
@@ -455,32 +457,42 @@ make_caching_decision() {
         return
     fi
     
-    # Check local images
+    # In distributed mode, prioritize registry over local images
+    if [ "$distributed_mode" = true ]; then
+        log "🌐 Distributed mode: Checking registry first..." >&2
+        if check_remote_image "$remote_image_url"; then
+            log "🎯 Decision: Use remote image (distributed mode)" >&2
+            echo "use_remote|$remote_image_url"
+            return
+        fi
+        
+        log "❌ No remote image found, checking local as fallback..." >&2
+    fi
+    
+    # Check local images (skip in distributed mode if remote was found)
     local local_analysis=$(check_local_image_version "$target_bun_version" "$target_bootstrap_version" "$target_image_name")
     local exact_match="${local_analysis%%|*}"
     local usable_images="${local_analysis%|*}"
     usable_images="${usable_images#*|}"
     
-    # Priority 1: Exact local match
+    # Priority 1: Exact local match (only if not distributed mode or remote failed)
     if [ -n "$exact_match" ]; then
         log "🎯 Decision: Use exact local match ($exact_match)" >&2
         echo "use_local_exact|$exact_match"
         return
     fi
     
-    # Priority 2: Check remote for perfect match
-    log "🌐 No exact local match, checking remote..." >&2
-    if check_remote_image "$remote_image_url"; then
-        log "🎯 Decision: Use remote perfect match" >&2
-        echo "use_remote|$remote_image_url"
-        return
+    # Priority 2: Check remote for perfect match (if not already done in distributed mode)
+    if [ "$distributed_mode" != true ]; then
+        log "🌐 No exact local match, checking remote..." >&2
+        if check_remote_image "$remote_image_url"; then
+            log "🎯 Decision: Use remote perfect match" >&2
+            echo "use_remote|$remote_image_url"
+            return
+        fi
     fi
     
-    # Priority 3: Check for newer bootstrap versions only (removed old fallback)
-    # Bootstrap version changes are critical - always build new if version doesn't match
-    # Old logic that used different bootstrap versions removed for safety
-    
-    # Priority 4: Build new image
+    # Priority 3: Build new image
     log "🎯 Decision: Build new image (no suitable local or remote found)" >&2
     echo "build_new"
 }
@@ -574,6 +586,7 @@ main() {
     # Parse arguments
     local force_refresh=false
     local cleanup_only=false
+    local distributed_mode=false
     for arg in "$@"; do
         case $arg in
             --force-refresh)
@@ -582,6 +595,10 @@ main() {
                 ;;
             --cleanup-only)
                 cleanup_only=true
+                shift
+                ;;
+            --distributed)
+                distributed_mode=true
                 shift
                 ;;
             --release=*)
@@ -594,6 +611,7 @@ main() {
                 echo "Options:"
                 echo "  --force-refresh     Force refresh of base image"
                 echo "  --cleanup-only      Clean up old VM images and exit"
+                echo "  --distributed       Enable distributed CI mode (registry-first)"
                 echo "  --release=VERSION   macOS release version (13, 14) [default: 14]"
                 echo "  --help, -h          Show this help message"
                 echo ""
@@ -608,6 +626,7 @@ main() {
                 echo "Examples:"
                 echo "  $0                    # Build macOS 14 base image"
                 echo "  $0 --release=13       # Build macOS 13 base image"
+                echo "  $0 --distributed      # Enable distributed CI mode"
                 echo "  $0 --force-refresh    # Force rebuild of base image"
                 echo "  $0 --cleanup-only     # Clean up old images and exit"
                 exit 0
@@ -705,7 +724,7 @@ main() {
     log "=== SMART CACHING ANALYSIS ==="
     
     # Make intelligent caching decision
-    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh")
+    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh" "$distributed_mode")
     
     log "Caching decision: $caching_decision"
     
