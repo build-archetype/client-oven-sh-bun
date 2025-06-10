@@ -481,7 +481,28 @@ if [ "$goto_privileged_setup" = false ]; then
     
     # Install core dependencies for Buildkite CI
     echo_color "$BLUE" "Installing core CI dependencies..."
-    brew install buildkite/buildkite/buildkite-agent terraform jq yq wget git wireguard-tools openvpn node cmake ninja ccache pkg-config golang make python3 libtool ruby perl
+    
+    # First, ensure buildkite tap is available and install buildkite-agent separately
+    echo_color "$BLUE" "Installing Buildkite agent..."
+    if ! brew tap buildkite/buildkite; then
+      echo_color "$RED" "Failed to add buildkite tap. Aborting."
+      exit 1
+    fi
+    if ! brew install buildkite/buildkite/buildkite-agent; then
+      echo_color "$RED" "Failed to install buildkite-agent. Aborting."
+      exit 1
+    fi
+    
+    # Verify buildkite-agent is installed
+    if ! command -v buildkite-agent &> /dev/null; then
+      echo_color "$RED" "Buildkite agent not found in PATH after installation. Aborting."
+      exit 1
+    fi
+    echo_color "$GREEN" "✅ Buildkite agent installed successfully"
+    
+    # Install other CI tools
+    echo_color "$BLUE" "Installing other CI dependencies..."
+    brew install terraform jq yq wget git wireguard-tools openvpn node cmake ninja ccache pkg-config golang make python3 libtool ruby perl
     
     # Install monitoring tools if enabled
     if [ "${MONITORING_ENABLED:-false}" = true ]; then
@@ -1302,6 +1323,15 @@ fi
 
 # --- Start services as the real user ---
 echo_color "$BLUE" "Starting Buildkite agent as $REAL_USER..."
+
+# Verify buildkite-agent is installed before starting
+if ! command -v buildkite-agent &> /dev/null; then
+  echo_color "$RED" "❌ Buildkite agent not found! Cannot start service."
+  echo_color "$YELLOW" "Please ensure buildkite-agent is properly installed."
+  exit 1
+fi
+
+echo_color "$GREEN" "✅ Buildkite agent found: $(buildkite-agent --version | head -1)"
 
 # Ensure proper ownership
 chown -R "$REAL_USER:staff" /opt/homebrew/var/buildkite-agent || true
