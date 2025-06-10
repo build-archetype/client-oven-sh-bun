@@ -141,10 +141,10 @@ cleanup_old_images() {
     # Get all local images
     local tart_output=$(tart list 2>&1)
     
-    # Track latest version for each macOS release (using regular variables instead of associative arrays)
-    local latest_macos13_version="" latest_macos14_version=""
-    local latest_macos13_bootstrap="" latest_macos14_bootstrap=""
-    local latest_macos13_image="" latest_macos14_image=""
+    # Track latest version for each macOS release
+    declare -A latest_macos13_version latest_macos14_version
+    declare -A latest_macos13_bootstrap latest_macos14_bootstrap
+    declare -A latest_macos13_image latest_macos14_image
     
     local all_bun_images=()
     local images_to_delete=()
@@ -216,23 +216,25 @@ cleanup_old_images() {
     fi
     
     # Mark all others for deletion
-    for image in "${all_bun_images[@]}"; do
-        local should_keep=false
-        
-        # Keep if it's the latest for macOS 13
-        if [ -n "${latest_macos13_image:-}" ] && [ "$image" = "${latest_macos13_image}" ]; then
-            should_keep=true
-        fi
-        
-        # Keep if it's the latest for macOS 14
-        if [ -n "${latest_macos14_image:-}" ] && [ "$image" = "${latest_macos14_image}" ]; then
-            should_keep=true
-        fi
-        
-        if [ "$should_keep" = false ]; then
-            images_to_delete+=("$image")
-        fi
-    done
+    if [ ${#all_bun_images[@]} -gt 0 ]; then
+        for image in "${all_bun_images[@]}"; do
+            local should_keep=false
+            
+            # Keep if it's the latest for macOS 13
+            if [ -n "${latest_macos13_image:-}" ] && [ "$image" = "${latest_macos13_image}" ]; then
+                should_keep=true
+            fi
+            
+            # Keep if it's the latest for macOS 14
+            if [ -n "${latest_macos14_image:-}" ] && [ "$image" = "${latest_macos14_image}" ]; then
+                should_keep=true
+            fi
+            
+            if [ "$should_keep" = false ]; then
+                images_to_delete+=("$image")
+            fi
+        done
+    fi
     
     # Delete old images
     if [ ${#images_to_delete[@]} -gt 0 ]; then
