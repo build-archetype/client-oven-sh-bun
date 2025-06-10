@@ -1,6 +1,47 @@
 #!/bin/bash
 
-# last updated 2025-05-25 at 10:12 PM
+# last updated 2025-06-10 - FIXED VERSION
+# Fixed critical issues: REAL_USER definition, monitoring defaults, error handling
+#
+# Environment Variables (optional - will be prompted if not set):
+# - BUILDKITE_AGENT_TOKEN: Your Buildkite agent token (required)
+# - GITHUB_USERNAME: GitHub username for ghcr.io pushes (required)  
+# - GITHUB_TOKEN: GitHub token for ghcr.io pushes (required)
+# - MACHINE_LOCATION: Machine location identifier (default: office-1)
+# - COMPUTER_NAME: Computer name (default: system hostname)
+# - MONITORING_ENABLED: Enable monitoring (true/false, default: prompt)
+# - MONITORING_TYPE: Type of monitoring - "grafana-cloud" or "self-hosted" (default: grafana-cloud)
+# - GRAFANA_CLOUD_USER: Grafana Cloud username/instance ID (required if MONITORING_TYPE=grafana-cloud)
+# - GRAFANA_CLOUD_API_KEY: Grafana Cloud API key (required if MONITORING_TYPE=grafana-cloud)
+# - GRAFANA_CLOUD_PROMETHEUS_URL: Grafana Cloud Prometheus endpoint (required if MONITORING_TYPE=grafana-cloud)
+# - GRAFANA_CLOUD_LOKI_URL: Grafana Cloud Loki endpoint (required if MONITORING_TYPE=grafana-cloud)
+# - PROMETHEUS_URL: Prometheus URL (required if MONITORING_TYPE=self-hosted, default: http://localhost:9090)
+# - LOKI_URL: Loki URL (required if MONITORING_TYPE=self-hosted, default: http://localhost:3100)
+# - GRAFANA_URL: Grafana URL (required if MONITORING_TYPE=self-hosted, default: http://localhost:3000)
+# - VPN_ENABLED: Enable VPN setup (true/false, default: prompt)
+# - VPN_TYPE: VPN type - "tailscale", "wireguard", "unifi", "cloudflare", or "none"
+# - TAILSCALE_AUTH_KEY: Tailscale authentication key (optional)
+# - WIREGUARD_PRIVATE_KEY: WireGuard private key (required if VPN_TYPE=wireguard)
+# - WIREGUARD_PUBLIC_KEY: WireGuard peer public key (required if VPN_TYPE=wireguard)
+# - WIREGUARD_ENDPOINT: WireGuard endpoint (required if VPN_TYPE=wireguard)
+# - UNIFI_VPN_USER: UniFi VPN username (required if VPN_TYPE=unifi)
+# - UNIFI_VPN_PASSWORD: UniFi VPN password (required if VPN_TYPE=unifi)
+# - UNIFI_VPN_SERVER: UniFi VPN server (required if VPN_TYPE=unifi)
+# - CLOUDFLARE_TUNNEL_TOKEN: Cloudflare Tunnel token (required if VPN_TYPE=cloudflare)
+# - AUTO_CONFIRM: Skip confirmation prompts (true/false, default: false)
+#
+# Example:
+# MONITORING_ENABLED=true MONITORING_TYPE=grafana-cloud ./setup-mac-server-fixed.sh
+#
+# Example with monitoring disabled and Tailscale VPN:
+# MONITORING_ENABLED=false VPN_ENABLED=true VPN_TYPE=tailscale ./setup-mac-server-fixed.sh
+#
+# Example with full environment variables (non-interactive):
+# BUILDKITE_AGENT_TOKEN=xxx GITHUB_USERNAME=myuser GITHUB_TOKEN=xxx \
+# MONITORING_ENABLED=true MONITORING_TYPE=grafana-cloud \
+# GRAFANA_CLOUD_USER=123456 GRAFANA_CLOUD_API_KEY=xxx \
+# VPN_ENABLED=true VPN_TYPE=tailscale TAILSCALE_AUTH_KEY=xxx \
+# AUTO_CONFIRM=true ./setup-mac-server-fixed.sh
 
 set -euo pipefail
 
@@ -109,38 +150,54 @@ if [ "$goto_privileged_setup" = false ]; then
   }
 
   # 0. VPN type selection (always shown)
-  while true; do
-    echo_color "$BLUE" "Select VPN type:"
-    echo "  0) None"
-    echo "  1) Tailscale (default)"
-    echo "  2) WireGuard"
-    echo "  3) UniFi VPN"
-    echo "  4) Cloudflare Tunnel"
-    read -rp "Choice [1]: " vpn_choice
-    case "${vpn_choice:-1}" in
-      0) VPN_TYPE="none"; VPN_ENABLED=false; break ;;
-      1|"") VPN_TYPE="tailscale"; VPN_ENABLED=true; break ;;
-      2) VPN_TYPE="wireguard"; VPN_ENABLED=true; break ;;
-      3) VPN_TYPE="unifi"; VPN_ENABLED=true; break ;;
-      4) VPN_TYPE="cloudflare"; VPN_ENABLED=true; break ;;
-      *) echo_color "$YELLOW" "Invalid choice. Please enter 0, 1, 2, 3, or 4." ;;
+  if [ -z "${VPN_ENABLED:-}" ] || [ -z "${VPN_TYPE:-}" ]; then
+    while true; do
+      echo_color "$BLUE" "Select VPN type:"
+      echo "  0) None"
+      echo "  1) Tailscale (default)"
+      echo "  2) WireGuard"
+      echo "  3) UniFi VPN"
+      echo "  4) Cloudflare Tunnel"
+      read -rp "Choice [1]: " vpn_choice
+      case "${vpn_choice:-1}" in
+        0) VPN_TYPE="none"; VPN_ENABLED=false; break ;;
+        1|"") VPN_TYPE="tailscale"; VPN_ENABLED=true; break ;;
+        2) VPN_TYPE="wireguard"; VPN_ENABLED=true; break ;;
+        3) VPN_TYPE="unifi"; VPN_ENABLED=true; break ;;
+        4) VPN_TYPE="cloudflare"; VPN_ENABLED=true; break ;;
+        *) echo_color "$YELLOW" "Invalid choice. Please enter 0, 1, 2, 3, or 4." ;;
+      esac
+    done
+  else
+    # If VPN variables are set via environment, validate them
+    case "${VPN_TYPE}" in
+      none) VPN_ENABLED=false ;;
+      tailscale|wireguard|unifi|cloudflare) VPN_ENABLED=true ;;
+      *) echo_color "$RED" "Invalid VPN_TYPE: $VPN_TYPE. Valid options: none, tailscale, wireguard, unifi, cloudflare"; exit 1 ;;
     esac
-  done
+  fi
 
   # 0.5. Monitoring setup selection
-  while true; do
-    echo_color "$BLUE" "Enable monitoring and logging?"
-    echo "  0) No monitoring"
-    echo "  1) Grafana Cloud (recommended)"
-    echo "  2) Self-hosted Grafana/Prometheus"
-    read -rp "Choice [1]: " monitoring_choice
-    case "${monitoring_choice:-1}" in
-      0) MONITORING_ENABLED=false; break ;;
-      1) MONITORING_ENABLED=true; MONITORING_TYPE="grafana-cloud"; break ;;
-      2) MONITORING_ENABLED=true; MONITORING_TYPE="self-hosted"; break ;;
-      *) echo_color "$YELLOW" "Invalid choice. Please enter 0, 1, or 2." ;;
-    esac
-  done
+  if [ -z "${MONITORING_ENABLED:-}" ]; then
+    while true; do
+      echo_color "$BLUE" "Enable monitoring and logging?"
+      echo "  0) No monitoring (default)"
+      echo "  1) Grafana Cloud"
+      echo "  2) Self-hosted Grafana/Prometheus"
+      read -rp "Choice [0]: " monitoring_choice
+      case "${monitoring_choice:-0}" in
+        0) MONITORING_ENABLED=false; break ;;
+        1) MONITORING_ENABLED=true; MONITORING_TYPE="grafana-cloud"; break ;;
+        2) MONITORING_ENABLED=true; MONITORING_TYPE="self-hosted"; break ;;
+        *) echo_color "$YELLOW" "Invalid choice. Please enter 0, 1, or 2." ;;
+      esac
+    done
+  else
+    # If MONITORING_ENABLED is set via environment variable, set MONITORING_TYPE if not already set
+    if [ "$MONITORING_ENABLED" = true ] && [ -z "${MONITORING_TYPE:-}" ]; then
+      MONITORING_TYPE="${MONITORING_TYPE:-grafana-cloud}"  # Default to grafana-cloud if not specified
+    fi
+  fi
 
   # 1. Buildkite token
   if [ -z "${BUILDKITE_AGENT_TOKEN:-}" ]; then
@@ -378,16 +435,22 @@ if [ "$goto_privileged_setup" = false ]; then
   if [ "$EUID" -ne 0 ]; then
     echo_color "$BLUE" "\n[1/3] Installing Homebrew and dependencies..."
     
+    # Define user variables early (needed for sshpass installation later)
+    REAL_USER="${SUDO_USER:-$USER}"
+    REAL_HOME=$(eval echo ~$REAL_USER)
+    
     # First, try to add Homebrew to PATH if it exists but isn't detected
-    if [ ! command -v brew &> /dev/null ]; then
+    if ! command -v brew &> /dev/null; then
       if [ -f "/opt/homebrew/bin/brew" ]; then
         echo_color "$BLUE" "Found Homebrew at /opt/homebrew, adding to PATH..."
         eval "$('/opt/homebrew/bin/brew' shellenv)"
         echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+        export PATH="/opt/homebrew/bin:$PATH"
       elif [ -f "/usr/local/bin/brew" ]; then
         echo_color "$BLUE" "Found Homebrew at /usr/local, adding to PATH..."
         eval "$('/usr/local/bin/brew' shellenv)"
         echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.bash_profile
+        export PATH="/usr/local/bin:$PATH"
       fi
     fi
     
@@ -415,16 +478,23 @@ if [ "$goto_privileged_setup" = false ]; then
     if ! command -v tailscale &> /dev/null; then
       echo_color "$RED" "Tailscale is not in PATH after installation. Aborting."; exit 1;
     fi
-    brew install buildkite/buildkite/buildkite-agent terraform jq yq wget git wireguard-tools openvpn node
+    
+    # Install core dependencies for Buildkite CI
+    echo_color "$BLUE" "Installing core CI dependencies..."
+    brew install buildkite/buildkite/buildkite-agent terraform jq yq wget git wireguard-tools openvpn node cmake ninja ccache pkg-config golang make python3 libtool ruby perl
     
     # Install monitoring tools if enabled
     if [ "${MONITORING_ENABLED:-false}" = true ]; then
       echo_color "$BLUE" "Installing monitoring tools..."
-      # Install Grafana Alloy (unified agent for metrics and logs)
-      brew install grafana/grafana/alloy || { echo_color "$RED" "Failed to install Grafana Alloy."; exit 1; }
+      # Install Grafana Alloy (unified agent for metrics and logs) - with error handling
+      if ! brew tap grafana/grafana; then
+        echo_color "$YELLOW" "⚠️ Failed to add Grafana tap, skipping Grafana Alloy"
+      else
+        brew install grafana/grafana/alloy || echo_color "$YELLOW" "⚠️ Failed to install Grafana Alloy"
+      fi
       # Install Node Exporter for system metrics
-      brew install prometheus-node-exporter || { echo_color "$RED" "Failed to install Node Exporter."; exit 1; }
-      echo_color "$GREEN" "✅ Monitoring tools installed successfully."
+      brew install prometheus-node-exporter || echo_color "$YELLOW" "⚠️ Failed to install Node Exporter"
+      echo_color "$GREEN" "✅ Monitoring tools installation completed (some may have failed)"
     fi
     
     echo_color "$GREEN" "✅ Homebrew and dependencies installed."
@@ -440,7 +510,10 @@ if [ "$goto_privileged_setup" = false ]; then
     # --- Tart install via Cirrus Labs tap ---
     if ! command -v tart &> /dev/null; then
       echo_color "$YELLOW" "Tart is not installed. Installing from cirruslabs/cli tap..."
-      brew tap cirruslabs/cli
+      if ! brew tap cirruslabs/cli; then
+        echo_color "$RED" "Failed to add cirruslabs/cli tap. Aborting."
+        exit 1
+      fi
       brew install cirruslabs/cli/tart
       if command -v tart &> /dev/null; then
         echo_color "$GREEN" "✅ Tart installed successfully."
@@ -449,29 +522,40 @@ if [ "$goto_privileged_setup" = false ]; then
         exit 1
       fi
     else
-      echo_color "$GREEN" "Tart is already installed."
+      echo_color "$GREEN" "✅ Tart is already installed."
     fi
 
     # --- Install sshpass if needed ---
     if ! command -v sshpass &> /dev/null; then
       echo_color "$YELLOW" "Installing sshpass for VM access..."
+      # Ensure cirruslabs tap is available
+      brew tap cirruslabs/cli || echo_color "$YELLOW" "⚠️ cirruslabs tap already added or failed"
       # Find brew location and run with proper environment
       if [ -f "/opt/homebrew/bin/brew" ]; then
-        sudo -u "$REAL_USER" /opt/homebrew/bin/brew install cirruslabs/cli/sshpass
+        sudo -u "$REAL_USER" /opt/homebrew/bin/brew install cirruslabs/cli/sshpass || echo_color "$YELLOW" "⚠️ Failed to install sshpass"
       elif [ -f "/usr/local/bin/brew" ]; then
-        sudo -u "$REAL_USER" /usr/local/bin/brew install cirruslabs/cli/sshpass
+        sudo -u "$REAL_USER" /usr/local/bin/brew install cirruslabs/cli/sshpass || echo_color "$YELLOW" "⚠️ Failed to install sshpass"
       else
         echo_color "$RED" "Homebrew not found. Cannot install sshpass."
         exit 1
       fi
+      # Verify installation
+      if command -v sshpass &> /dev/null; then
+        echo_color "$GREEN" "✅ sshpass installed successfully"
+      else
+        echo_color "$YELLOW" "⚠️ sshpass installation may have failed - VM access may not work"
+      fi
+    else
+      echo_color "$GREEN" "✅ sshpass is already installed"
     fi
 
     echo_color "$BLUE" "Switching to root for system configuration..."
     export_vars="BUILDKITE_AGENT_TOKEN=\"$BUILDKITE_AGENT_TOKEN\" VPN_ENABLED=\"$VPN_ENABLED\" BUILD_VLAN=\"$BUILD_VLAN\" MGMT_VLAN=\"$MGMT_VLAN\" STORAGE_VLAN=\"$STORAGE_VLAN\" MACHINE_LOCATION=\"$MACHINE_LOCATION\" COMPUTER_NAME=\"$COMPUTER_NAME\""
     
     # Add monitoring variables
+    export_vars+=" MONITORING_ENABLED=\"$MONITORING_ENABLED\""
     if [ "$MONITORING_ENABLED" = true ]; then
-      export_vars+=" MONITORING_ENABLED=\"$MONITORING_ENABLED\" MONITORING_TYPE=\"$MONITORING_TYPE\""
+      export_vars+=" MONITORING_TYPE=\"$MONITORING_TYPE\""
     fi
     
     if [ "$VPN_ENABLED" = true ]; then
@@ -494,9 +578,11 @@ fi
 # --- Privileged setup (root) ---
 echo_color "$BLUE" "\n[2/3] Running privileged setup..."
 
-# Get current user info (who ran sudo)
-REAL_USER="${SUDO_USER:-$USER}"
-REAL_HOME=$(eval echo ~$REAL_USER)
+# Get current user info (already defined earlier if not running as root)
+if [ -z "${REAL_USER:-}" ]; then
+  REAL_USER="${SUDO_USER:-$USER}"
+  REAL_HOME=$(eval echo ~$REAL_USER)
+fi
 
 echo_color "$BLUE" "Setting up CI for user $REAL_USER..."
 echo_color "$BLUE" "Debug: REAL_USER=$REAL_USER"
@@ -1294,3 +1380,100 @@ if [ "${MONITORING_ENABLED:-false}" = true ]; then
 fi
 
 echo_color "$GREEN" "\n[3/3] Setup complete!"
+
+# --- Final verification ---
+echo_color "$BLUE" "\n🔍 Verifying installation..."
+
+# Critical tools for CI
+CRITICAL_TOOLS=(
+  "brew:Homebrew"
+  "buildkite-agent:Buildkite Agent"
+  "node:Node.js"
+  "git:Git"
+  "tart:Tart VM"
+  "jq:JSON processor"
+)
+
+# Optional tools
+OPTIONAL_TOOLS=(
+  "sshpass:SSH password utility"
+  "tailscale:Tailscale VPN"
+  "cmake:CMake build system"
+  "ninja:Ninja build system"
+  "ccache:Compiler cache"
+  "python3:Python 3"
+  "ruby:Ruby"
+  "perl:Perl"
+  "golang:Go language"
+)
+
+verify_tool() {
+  local tool_cmd="$1"
+  local tool_name="$2"
+  local is_critical="$3"
+  
+  if command -v "$tool_cmd" &> /dev/null; then
+    local version=""
+    case "$tool_cmd" in
+      "node") version=" ($(node --version))" ;;
+      "buildkite-agent") version=" ($(buildkite-agent --version 2>/dev/null | head -1))" ;;
+      "tart") version=" ($(tart --version 2>/dev/null))" ;;
+      *) version="" ;;
+    esac
+    echo_color "$GREEN" "  ✅ $tool_name$version"
+    return 0
+  else
+    if [ "$is_critical" = "true" ]; then
+      echo_color "$RED" "  ❌ $tool_name - MISSING (CRITICAL)"
+      return 1
+    else
+      echo_color "$YELLOW" "  ⚠️  $tool_name - missing (optional)"
+      return 0
+    fi
+  fi
+}
+
+echo_color "$BLUE" "\nCritical tools:"
+CRITICAL_MISSING=0
+for tool_info in "${CRITICAL_TOOLS[@]}"; do
+  IFS=':' read -r cmd name <<< "$tool_info"
+  if ! verify_tool "$cmd" "$name" "true"; then
+    CRITICAL_MISSING=$((CRITICAL_MISSING + 1))
+  fi
+done
+
+echo_color "$BLUE" "\nOptional tools:"
+for tool_info in "${OPTIONAL_TOOLS[@]}"; do
+  IFS=':' read -r cmd name <<< "$tool_info"
+  verify_tool "$cmd" "$name" "false"
+done
+
+# Check Buildkite agent service
+echo_color "$BLUE" "\nServices:"
+if [ -f "/opt/homebrew/bin/brew" ]; then
+  if sudo -u "$REAL_USER" /opt/homebrew/bin/brew services list | grep -q "buildkite-agent.*started"; then
+    echo_color "$GREEN" "  ✅ Buildkite agent service running"
+  else
+    echo_color "$YELLOW" "  ⚠️  Buildkite agent service not running"
+    echo_color "$YELLOW" "     Check logs: /opt/homebrew/var/log/buildkite-agent.log"
+  fi
+elif [ -f "/usr/local/bin/brew" ]; then
+  if sudo -u "$REAL_USER" /usr/local/bin/brew services list | grep -q "buildkite-agent.*started"; then
+    echo_color "$GREEN" "  ✅ Buildkite agent service running"
+  else
+    echo_color "$YELLOW" "  ⚠️  Buildkite agent service not running"
+    echo_color "$YELLOW" "     Check logs: /usr/local/var/log/buildkite-agent.log"
+  fi
+fi
+
+# Summary
+if [ $CRITICAL_MISSING -eq 0 ]; then
+  echo_color "$GREEN" "\n🎉 Setup completed successfully! All critical tools are installed."
+  echo_color "$BLUE" "\nNext steps:"
+  echo_color "$BLUE" "  • Your Buildkite agent should start receiving jobs"
+  echo_color "$BLUE" "  • Tart VMs can be created and managed"
+  echo_color "$BLUE" "  • CI builds should work with Node.js, Git, and build tools"
+else
+  echo_color "$RED" "\n⚠️  Setup completed with $CRITICAL_MISSING critical tool(s) missing."
+  echo_color "$YELLOW" "Please install the missing tools manually before running CI jobs."
+fi
