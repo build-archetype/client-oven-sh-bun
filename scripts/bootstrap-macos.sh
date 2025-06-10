@@ -2,7 +2,7 @@
 set -e
 set -x
 
-# Version: 3.6 - Fixed SSH connectivity and improved base image validation
+# Version: 4.0 - Added US locale configuration to fix date formatting tests
 # A comprehensive bootstrap script for macOS based on the main bootstrap.sh
 
 # Constants
@@ -227,9 +227,17 @@ install_brew() {
         append_to_profile "export HOMEBREW_NO_AUTO_UPDATE=1"
         append_to_profile "export HOMEBREW_NO_ANALYTICS=1"
         
+        # Set locale for consistent date/time formatting (fixes toLocaleDateString tests)
+        append_to_profile "export LANG=en_US.UTF-8"
+        append_to_profile "export LC_ALL=en_US.UTF-8"
+        
         print "✅ Homebrew installed successfully"
     else
         print "✅ Homebrew already installed"
+        
+        # Ensure locale is set for consistent date/time formatting (fixes toLocaleDateString tests)
+        append_to_profile "export LANG=en_US.UTF-8"
+        append_to_profile "export LC_ALL=en_US.UTF-8"
     fi
 }
 

@@ -23,8 +23,6 @@ else
 fi
 # Base image to clone for new VM images
 BASE_IMAGE="${BASE_IMAGE:-ghcr.io/cirruslabs/macos-sonoma-xcode:latest}"
-# Bootstrap script version (bump to force new images)
-BOOTSTRAP_VERSION="${BOOTSTRAP_VERSION:-3.6}"
 # Bun version (auto-detected, can override)
 BUN_VERSION="${BUN_VERSION:-}"
 # If not set, will be detected later in the script
@@ -273,64 +271,15 @@ check_remote_image() {
     # Fix permissions before trying to use tart
     fix_tart_permissions >&2
     
-    # Show progress during pull since VM images are large (GB+) and can take 10-30+ minutes
-    log "📥 Attempting to download remote image (this may take 10-30+ minutes for large VM images)..." >&2
-    log "    Please be patient - VM images can be 5-15GB+ in size" >&2
-    log "    Progress messages will appear every 60 seconds during download" >&2
+    # Show that download is starting since VM images are large (GB+) and can take 10-30+ minutes
+    log "📥 Starting download of remote VM image (may be 5-15GB+, please wait)..." >&2
     
-    # Create a temporary file to capture the exit code and progress control
-    local exit_code_file=$(mktemp)
-    local progress_control_file=$(mktemp)
-    echo "running" > "$progress_control_file"
-    
-    # Create a background process to show periodic progress
-    (
-        sleep 60  # Wait 60 seconds before first progress message
-        local count=1
-        while [ -f "$progress_control_file" ] && [ "$(cat "$progress_control_file" 2>/dev/null)" = "running" ]; do
-            log "    📥 Download progress: ${count} minute(s) elapsed - still downloading..." >&2
-            count=$((count + 1))
-            sleep 60  # Show progress every minute
-        done
-    ) &
-    local progress_pid=$!
-    
-    # Try to pull the image with output redirection for better control
-    local pull_output_file=$(mktemp)
-    
-    # Run tart pull in background and capture both output and exit code
-    (
-        tart pull "$remote_url" > "$pull_output_file" 2>&1
-        echo $? > "$exit_code_file"
-        echo "done" > "$progress_control_file"
-    ) &
-    local pull_pid=$!
-    
-    # Wait for pull to complete and show any output
-    wait $pull_pid
-    
-    # Kill the progress indicator
-    kill $progress_pid 2>/dev/null || true
-    rm -f "$progress_control_file"
-    
-    # Show any output from tart pull
-    if [ -f "$pull_output_file" ] && [ -s "$pull_output_file" ]; then
-        log "    tart pull output:" >&2
-        while IFS= read -r line; do
-            log "    tart: $line" >&2
-        done < "$pull_output_file"
-    fi
-    rm -f "$pull_output_file"
-    
-    # Read the exit code
-    local pull_result=$(cat "$exit_code_file" 2>/dev/null || echo "1")
-    rm -f "$exit_code_file"
-    
-    if [ "$pull_result" = "0" ]; then
+    # Run tart pull directly to show native progress output (percentages, etc.)
+    if tart pull "$remote_url"; then
         log "✅ Remote image found and downloaded successfully" >&2
         return 0
     else
-        log "❌ Remote image not found or download failed (exit code: $pull_result)" >&2
+        log "❌ Remote image not found or download failed" >&2
         return 1
     fi
 }
@@ -455,6 +404,23 @@ get_local_image_info() {
     fi
 }
 
+# Get bootstrap version from the bootstrap script (single source of truth)
+get_bootstrap_version() {
+    local script_path="$1"
+    if [ ! -f "$script_path" ]; then
+        echo "0"
+        return
+    fi
+    
+    # Extract version from comment like "# Version: 4.0 - description"
+    local version=$(grep -E "^# Version: " "$script_path" | sed -E 's/^# Version: ([0-9.]+).*/\1/' | head -1)
+    if [ -n "$version" ]; then
+        echo "$version"
+    else
+        echo "0"
+    fi
+}
+
 # Main execution
 main() {
     # Parse arguments
@@ -479,7 +445,7 @@ main() {
                 echo ""
                 echo "Environment Variables:"
                 echo "  MACOS_RELEASE       macOS release version (default: 14)"
-                echo "  BOOTSTRAP_VERSION   Bootstrap script version (default: 3.6)"
+                echo "  BOOTSTRAP_VERSION   Bootstrap script version (auto-detected from script)"
                 echo "  BUN_VERSION         Bun version (auto-detected if not set)"
                 echo "  REGISTRY            Container registry (default: ghcr.io)"
                 echo "  ORGANIZATION        Organization name (default: build-archetype)"
@@ -520,7 +486,8 @@ main() {
     log "Detected Bun version: $BUN_VERSION"
     
     # Bootstrap script version - increment this when bootstrap changes to force new images
-    BOOTSTRAP_VERSION="3.6"  # Updated: Fixed SSH_OPTS and improved base image validation
+    BOOTSTRAP_VERSION=$(get_bootstrap_version scripts/bootstrap-macos.sh)
+    log "Detected Bootstrap version: $BOOTSTRAP_VERSION"
     
     # Image names (include release and bootstrap version to force rebuilds when bootstrap changes)
     LOCAL_IMAGE_NAME="bun-build-macos-${MACOS_RELEASE}-${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"

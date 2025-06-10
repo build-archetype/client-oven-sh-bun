@@ -1164,20 +1164,25 @@ export function isBuildManual() {
 
 /**
  * @param {string} [os]
- * @returns {number}
+ * @returns {string}
  */
 export function getBootstrapVersion(os) {
-  const scriptPath = join(
-    import.meta.dirname,
-    os === "windows" || (!os && isWindows) ? "bootstrap.ps1" : "bootstrap.sh",
-  );
+  let scriptPath;
+  if (os === "windows" || (!os && isWindows)) {
+    scriptPath = join(import.meta.dirname, "bootstrap.ps1");
+  } else if (os === "darwin" || (!os && isMacOS)) {
+    scriptPath = join(import.meta.dirname, "bootstrap-macos.sh");
+  } else {
+    scriptPath = join(import.meta.dirname, "bootstrap.sh");
+  }
+  
   const scriptContent = readFile(scriptPath, { cache: true });
-  const match = /# Version: (\d+)/.exec(scriptContent);
+  const match = /# Version: ([\d.]+)/.exec(scriptContent);
   if (match) {
     const [, version] = match;
-    return parseInt(version);
+    return version;
   }
-  return 0;
+  return "0";
 }
 
 /**

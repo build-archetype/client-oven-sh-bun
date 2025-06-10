@@ -15,8 +15,26 @@ log() {
 get_base_vm_image() {
     local release="${1:-14}"
     local bun_version="${2:-1.2.16}"
-    local bootstrap_version="${3:-3.6}"
+    # Auto-detect bootstrap version from script (single source of truth)
+    local bootstrap_version="${3:-$(get_bootstrap_version)}"
     echo "bun-build-macos-${release}-${bun_version}-bootstrap-${bootstrap_version}"
+}
+
+# Get bootstrap version from the bootstrap script (single source of truth)
+get_bootstrap_version() {
+    local script_path="scripts/bootstrap-macos.sh"
+    if [ ! -f "$script_path" ]; then
+        echo "4.0"  # fallback
+        return
+    fi
+    
+    # Extract version from comment like "# Version: 4.0 - description"
+    local version=$(grep -E "^# Version: " "$script_path" | sed -E 's/^# Version: ([0-9.]+).*/\1/' | head -1)
+    if [ -n "$version" ]; then
+        echo "$version"
+    else
+        echo "4.0"  # fallback
+    fi
 }
 
 # SSH options for VM connectivity

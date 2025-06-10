@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from 'fs';
+import { getBootstrapVersion } from '../scripts/utils.mjs';
 
 // Get the organization from the repository URL
 const getOrgFromRepo = () => {
@@ -44,7 +45,7 @@ export const IMAGE_CONFIG = {
     tag: "latest",
     get versionedName() {
       const version = getBunVersion();
-      const bootstrapVersion = "3.1"; // Must match the version in ensure-bun-image.sh
+      const bootstrapVersion = getBootstrapVersion("darwin"); // Single source of truth from bootstrap-macos.sh
       return `bun-build-macos-${version}-bootstrap-${bootstrapVersion}`;
     },
     get fullName() {
