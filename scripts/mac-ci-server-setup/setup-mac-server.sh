@@ -454,62 +454,52 @@ if [ "$goto_privileged_setup" = false ]; then
     echo_color "$BLUE" "Installing as user: $REAL_USER"
     echo_color "$BLUE" "Home directory: $REAL_HOME"
     
-    # Function to run commands as target CI user
-    run_as_ci_user() {
-      if [ "$USER" = "$TARGET_CI_USER" ]; then
-        # Already running as target user
-        bash -c "$1"
-      else
-        # Need to switch to target user
-        sudo -u "$TARGET_CI_USER" -i bash -c "$1"
+    # First, try to add Homebrew to PATH if it exists but isn't detected
+    if ! command -v brew &> /dev/null; then
+      if [ -f "/opt/homebrew/bin/brew" ]; then
+        echo_color "$BLUE" "Found Homebrew at /opt/homebrew, adding to PATH..."
+        eval "$('/opt/homebrew/bin/brew' shellenv)"
+        echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+        export PATH="/opt/homebrew/bin:$PATH"
+      elif [ -f "/usr/local/bin/brew" ]; then
+        echo_color "$BLUE" "Found Homebrew at /usr/local, adding to PATH..."
+        eval "$('/usr/local/bin/brew' shellenv)"
+        echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.bash_profile
+        export PATH="/usr/local/bin:$PATH"
       fi
-    }
+    fi
     
-    # Check if Homebrew already exists for the target user
-    echo_color "$BLUE" "Checking Homebrew installation for $TARGET_CI_USER..."
-    if run_as_ci_user 'command -v brew' &>/dev/null; then
-      echo_color "$GREEN" "✅ Homebrew already installed for $TARGET_CI_USER"
-    else
-      # Check if Homebrew exists but not in PATH
-      if run_as_ci_user '[ -f "/opt/homebrew/bin/brew" ]'; then
-        echo_color "$BLUE" "Found Homebrew at /opt/homebrew, adding to PATH for $TARGET_CI_USER..."
-        run_as_ci_user 'eval "$(/opt/homebrew/bin/brew shellenv)" && echo '\''eval "$(/opt/homebrew/bin/brew shellenv)"'\'' >> ~/.zprofile'
-      elif run_as_ci_user '[ -f "/usr/local/bin/brew" ]'; then
-        echo_color "$BLUE" "Found Homebrew at /usr/local, adding to PATH for $TARGET_CI_USER..."
-        run_as_ci_user 'eval "$(/usr/local/bin/brew shellenv)" && echo '\''eval "$(/usr/local/bin/brew shellenv)"'\'' >> ~/.bash_profile'
-      else
-        # Install Homebrew as target CI user
-        echo_color "$YELLOW" "Installing Homebrew for $TARGET_CI_USER..."
-        run_as_ci_user '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
-        
-        # Set up PATH for target user
-        if run_as_ci_user '[ -d "/opt/homebrew/bin" ]'; then
-          run_as_ci_user 'eval "$(/opt/homebrew/bin/brew shellenv)" && echo '\''eval "$(/opt/homebrew/bin/brew shellenv)"'\'' >> ~/.zprofile'
-        elif run_as_ci_user '[ -d "/usr/local/bin" ]'; then
-          run_as_ci_user 'eval "$(/usr/local/bin/brew shellenv)" && echo '\''eval "$(/usr/local/bin/brew shellenv)"'\'' >> ~/.bash_profile'
-        fi
+    # Now check if brew is available
+    if ! command -v brew &> /dev/null; then
+      echo_color "$YELLOW" "Homebrew not found. Installing..."
+      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+      # Add Homebrew to PATH for current shell
+      if [ -d "/opt/homebrew/bin" ]; then
+        eval "$('/opt/homebrew/bin/brew' shellenv)"
+        echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
+      elif [ -d "/usr/local/bin" ]; then
+        eval "$('/usr/local/bin/brew' shellenv)"
+        echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.bash_profile
       fi
-      
-      # Verify Homebrew is now accessible
-      if ! run_as_ci_user 'command -v brew' &>/dev/null; then
-        echo_color "$RED" "Homebrew installation failed for $TARGET_CI_USER. Aborting."
+      if ! command -v brew &> /dev/null; then
+        echo_color "$RED" "Homebrew installation failed or not found in PATH. Aborting."
         exit 1
       fi
-      echo_color "$GREEN" "✅ Homebrew installed successfully for $TARGET_CI_USER"
+    else
+      echo_color "$GREEN" "✅ Homebrew already installed."
     fi
     
     # Install packages as target CI user
-    echo_color "$BLUE" "Installing CI dependencies as $TARGET_CI_USER..."
+    echo_color "$BLUE" "Installing CI dependencies..."
     
     # Install Tailscale
-    run_as_ci_user 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew install tailscale'
-    if ! run_as_ci_user 'command -v tailscale' &>/dev/null; then
-      echo_color "$RED" "Tailscale installation failed for $TARGET_CI_USER. Aborting."
-      exit 1
+    brew install tailscale || { echo_color "$RED" "Failed to install Tailscale."; exit 1; }
+    if ! command -v tailscale &> /dev/null; then
+      echo_color "$RED" "Tailscale is not in PATH after installation. Aborting."; exit 1;
     fi
     
     # Install Buildkite agent
-    echo_color "$BLUE" "Installing Buildkite agent for $TARGET_CI_USER..."
+    echo_color "$BLUE" "Installing Buildkite agent..."
     if ! brew tap buildkite/buildkite; then
       echo_color "$RED" "Failed to add buildkite tap. Aborting."
       exit 1
@@ -524,58 +514,70 @@ if [ "$goto_privileged_setup" = false ]; then
       echo_color "$RED" "Buildkite agent not found in PATH after installation. Aborting."
       exit 1
     fi
-    echo_color "$GREEN" "✅ Buildkite agent installed successfully for $TARGET_CI_USER"
+    echo_color "$GREEN" "✅ Buildkite agent installed successfully"
     
     # Install other CI tools
-    echo_color "$BLUE" "Installing other CI dependencies for $TARGET_CI_USER..."
-    run_as_ci_user 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew install terraform jq yq wget git wireguard-tools openvpn node cmake ninja ccache pkg-config golang make python3 libtool ruby perl'
+    echo_color "$BLUE" "Installing other CI dependencies..."
+    brew install terraform jq yq wget git wireguard-tools openvpn node cmake ninja ccache pkg-config golang make python3 libtool ruby perl
     
     # Install monitoring tools if enabled
     if [ "${MONITORING_ENABLED:-false}" = true ]; then
-      echo_color "$BLUE" "Installing monitoring tools for $TARGET_CI_USER..."
-      run_as_ci_user 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew tap grafana/grafana' || echo_color "$YELLOW" "⚠️ Failed to add Grafana tap"
-      run_as_ci_user 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew install grafana/grafana/alloy' || echo_color "$YELLOW" "⚠️ Failed to install Grafana Alloy"
-      run_as_ci_user 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew install prometheus-node-exporter' || echo_color "$YELLOW" "⚠️ Failed to install Node Exporter"
-      echo_color "$GREEN" "✅ Monitoring tools installation completed for $TARGET_CI_USER"
+      echo_color "$BLUE" "Installing monitoring tools..."
+      # Install Grafana Alloy (unified agent for metrics and logs) - with error handling
+      if ! brew tap grafana/grafana; then
+        echo_color "$YELLOW" "⚠️ Failed to add Grafana tap, skipping Grafana Alloy"
+      else
+        brew install grafana/grafana/alloy || echo_color "$YELLOW" "⚠️ Failed to install Grafana Alloy"
+      fi
+      # Install Node Exporter for system metrics
+      brew install prometheus-node-exporter || echo_color "$YELLOW" "⚠️ Failed to install Node Exporter"
+      echo_color "$GREEN" "✅ Monitoring tools installation completed (some may have failed)"
     fi
     
+    echo_color "$GREEN" "✅ Homebrew and dependencies installed."
+
     # Verify Node.js installation
-    if ! run_as_ci_user 'command -v node' &>/dev/null; then
-      echo_color "$RED" "Node.js installation failed for $TARGET_CI_USER. Aborting."
+    if ! command -v node &> /dev/null; then
+      echo_color "$RED" "Node.js installation failed or not found in PATH. Aborting."
       exit 1
     fi
-    NODE_VERSION=$(run_as_ci_user 'node --version')
-    echo_color "$GREEN" "✅ Node.js installed for $TARGET_CI_USER (version: $NODE_VERSION)"
+    NODE_VERSION=$(node --version)
+    echo_color "$GREEN" "✅ Node.js installed (version: $NODE_VERSION)"
 
     # Install Tart
-    if ! run_as_ci_user 'command -v tart' &>/dev/null; then
-      echo_color "$YELLOW" "Installing Tart for $TARGET_CI_USER..."
-      run_as_ci_user 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew tap cirruslabs/cli'
-      run_as_ci_user 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew install cirruslabs/cli/tart'
-      if run_as_ci_user 'command -v tart' &>/dev/null; then
-        echo_color "$GREEN" "✅ Tart installed successfully for $TARGET_CI_USER"
+    if ! command -v tart &> /dev/null; then
+      echo_color "$YELLOW" "Tart is not installed. Installing from cirruslabs/cli tap..."
+      if ! brew tap cirruslabs/cli; then
+        echo_color "$RED" "Failed to add cirruslabs/cli tap. Aborting."
+        exit 1
+      fi
+      brew install cirruslabs/cli/tart
+      if command -v tart &> /dev/null; then
+        echo_color "$GREEN" "✅ Tart installed successfully."
       else
-        echo_color "$RED" "Tart installation failed for $TARGET_CI_USER. Aborting."
+        echo_color "$RED" "Tart installation failed. Please install manually from https://github.com/cirruslabs/tart."
         exit 1
       fi
     else
-      echo_color "$GREEN" "✅ Tart already installed for $TARGET_CI_USER"
+      echo_color "$GREEN" "✅ Tart is already installed."
     fi
 
     # Install sshpass
-    if ! run_as_ci_user 'command -v sshpass' &>/dev/null; then
-      echo_color "$YELLOW" "Installing sshpass for $TARGET_CI_USER..."
-      run_as_ci_user 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew install cirruslabs/cli/sshpass' || echo_color "$YELLOW" "⚠️ Failed to install sshpass"
-      if run_as_ci_user 'command -v sshpass' &>/dev/null; then
-        echo_color "$GREEN" "✅ sshpass installed successfully for $TARGET_CI_USER"
+    if ! command -v sshpass &> /dev/null; then
+      echo_color "$YELLOW" "Installing sshpass for VM access..."
+      # Ensure cirruslabs tap is available
+      brew tap cirruslabs/cli || echo_color "$YELLOW" "⚠️ cirruslabs tap already added or failed"
+      brew install cirruslabs/cli/sshpass || echo_color "$YELLOW" "⚠️ Failed to install sshpass"
+      if command -v sshpass &> /dev/null; then
+        echo_color "$GREEN" "✅ sshpass installed successfully"
       else
         echo_color "$YELLOW" "⚠️ sshpass installation may have failed - VM access may not work"
       fi
     else
-      echo_color "$GREEN" "✅ sshpass already installed for $TARGET_CI_USER"
+      echo_color "$GREEN" "✅ sshpass is already installed"
     fi
 
-    echo_color "$GREEN" "✅ All dependencies installed for $TARGET_CI_USER"
+    echo_color "$GREEN" "✅ All dependencies installed"
     echo_color "$BLUE" "Switching to root for system configuration..."
     
     # Export all variables including TARGET_CI_USER for privileged section
