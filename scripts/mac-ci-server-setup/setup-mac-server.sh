@@ -539,21 +539,6 @@ if [ "$goto_privileged_setup" = false ]; then
       echo_color "$GREEN" "✅ Tart is already installed."
     fi
 
-    # Install sshpass
-    if ! command -v sshpass &> /dev/null; then
-      echo_color "$YELLOW" "Installing sshpass for VM access..."
-      # Ensure cirruslabs tap is available
-      brew tap cirruslabs/cli || echo_color "$YELLOW" "⚠️ cirruslabs tap already added or failed"
-      brew install cirruslabs/cli/sshpass || echo_color "$YELLOW" "⚠️ Failed to install sshpass"
-      if command -v sshpass &> /dev/null; then
-        echo_color "$GREEN" "✅ sshpass installed successfully"
-      else
-        echo_color "$YELLOW" "⚠️ sshpass installation may have failed - VM access may not work"
-      fi
-    else
-      echo_color "$GREEN" "✅ sshpass is already installed"
-    fi
-
     echo_color "$GREEN" "✅ All dependencies installed"
     echo_color "$BLUE" "Switching to root for system configuration..."
     
@@ -747,6 +732,51 @@ if sudo -u "$REAL_USER" bash -c '
 else
   echo_color "$RED" "❌ Node.js not accessible for $REAL_USER after installation"
   exit 1
+fi
+
+# --- Install sshpass as the CI user ---
+echo_color "$BLUE" "Installing sshpass for $REAL_USER..."
+
+# Install sshpass as the CI user (needed for VM access)
+echo_color "$BLUE" "Installing sshpass as $REAL_USER..."
+if sudo -u "$REAL_USER" bash -c '
+  # Load Homebrew environment
+  if [ -f "/opt/homebrew/bin/brew" ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [ -f "/usr/local/bin/brew" ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+  
+  # Add cirruslabs tap and install sshpass
+  brew tap cirruslabs/cli || echo "Tap already exists or failed"
+  brew install cirruslabs/cli/sshpass
+'; then
+  echo_color "$GREEN" "✅ sshpass installed successfully for $REAL_USER"
+else
+  echo_color "$YELLOW" "⚠️ Failed to install sshpass for $REAL_USER (non-critical for basic CI)"
+fi
+
+# Verify sshpass installation as the CI user
+echo_color "$BLUE" "Verifying sshpass installation for $REAL_USER..."
+if sudo -u "$REAL_USER" bash -c '
+  if [ -f "/opt/homebrew/bin/brew" ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [ -f "/usr/local/bin/brew" ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+  command -v sshpass
+' >/dev/null; then
+  SSHPASS_VERSION=$(sudo -u "$REAL_USER" bash -c '
+    if [ -f "/opt/homebrew/bin/brew" ]; then
+      eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [ -f "/usr/local/bin/brew" ]; then
+      eval "$(/usr/local/bin/brew shellenv)"
+    fi
+    sshpass -V 2>&1 | head -1 || echo "version unknown"
+  ')
+  echo_color "$GREEN" "✅ sshpass verified for $REAL_USER: $SSHPASS_VERSION"
+else
+  echo_color "$YELLOW" "⚠️ sshpass not accessible for $REAL_USER (VM access may not work)"
 fi
 
 # --- Configure monitoring (if enabled) ---
@@ -1561,11 +1591,11 @@ CRITICAL_TOOLS=(
   "git:Git"
   "tart:Tart VM"
   "jq:JSON processor"
+  "sshpass:SSH password utility"
 )
 
 # Optional tools
 OPTIONAL_TOOLS=(
-  "sshpass:SSH password utility"
   "tailscale:Tailscale VPN"
   "cmake:CMake build system"
   "ninja:Ninja build system"
@@ -1619,6 +1649,15 @@ verify_tool() {
             eval \"\$(/usr/local/bin/brew shellenv)\"
           fi
           tart --version 2>/dev/null
+        " 2>/dev/null))" ;;
+      "sshpass") 
+        version=" ($(sudo -u "$REAL_USER" bash -c "
+          if [ -f '/opt/homebrew/bin/brew' ]; then
+            eval \"\$(/opt/homebrew/bin/brew shellenv)\"
+          elif [ -f '/usr/local/bin/brew' ]; then
+            eval \"\$(/usr/local/bin/brew shellenv)\"
+          fi
+          sshpass -V 2>&1 | head -1 | grep -o '[0-9][0-9.]*' || echo 'version unknown'
         " 2>/dev/null))" ;;
       *) version="" ;;
     esac
