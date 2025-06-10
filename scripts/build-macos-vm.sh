@@ -126,6 +126,151 @@ image_exists_in_registry() {
     fi
 }
 
+# Cleanup old VM images to free storage space
+cleanup_old_images() {
+    log "=== STORAGE CLEANUP ==="
+    log "🧹 Cleaning up old VM images to free storage space..."
+    
+    # Show current storage usage
+    local tart_dir="$HOME/.tart"
+    if [ -d "$tart_dir" ]; then
+        local before_size=$(du -sh "$tart_dir" 2>/dev/null | cut -f1 || echo "unknown")
+        log "📊 Current Tart storage usage: $before_size"
+    fi
+    
+    # Get all local images
+    local tart_output=$(tart list 2>&1)
+    
+    # Track latest version for each macOS release
+    declare -A latest_macos13_version latest_macos14_version
+    declare -A latest_macos13_bootstrap latest_macos14_bootstrap
+    declare -A latest_macos13_image latest_macos14_image
+    
+    local all_bun_images=()
+    local images_to_delete=()
+    
+    # Parse all bun-build-macos images and find latest for each macOS version
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+) ]]; then
+            local image_name="${BASH_REMATCH[1]}"
+            
+            # Only consider bun-build-macos images
+            if [[ "$image_name" =~ ^bun-build-macos-([0-9]+)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
+                local macos_ver="${BASH_REMATCH[1]}"
+                local bun_ver="${BASH_REMATCH[2]}"
+                local bootstrap_ver="${BASH_REMATCH[3]}"
+                
+                all_bun_images+=("$image_name")
+                log "  Found: $image_name (macOS: $macos_ver, Bun: $bun_ver, Bootstrap: $bootstrap_ver)"
+                
+                # Track latest for macOS 13
+                if [ "$macos_ver" = "13" ]; then
+                    if [ -z "${latest_macos13_version:-}" ] || version_compare "$bun_ver" "${latest_macos13_version}"; then
+                        # If same Bun version, prefer higher bootstrap version
+                        if [ "$bun_ver" = "${latest_macos13_version:-}" ]; then
+                            if version_compare "$bootstrap_ver" "${latest_macos13_bootstrap:-}"; then
+                                latest_macos13_version="$bun_ver"
+                                latest_macos13_bootstrap="$bootstrap_ver"
+                                latest_macos13_image="$image_name"
+                            fi
+                        else
+                            latest_macos13_version="$bun_ver"
+                            latest_macos13_bootstrap="$bootstrap_ver"
+                            latest_macos13_image="$image_name"
+                        fi
+                    fi
+                fi
+                
+                # Track latest for macOS 14
+                if [ "$macos_ver" = "14" ]; then
+                    if [ -z "${latest_macos14_version:-}" ] || version_compare "$bun_ver" "${latest_macos14_version}"; then
+                        # If same Bun version, prefer higher bootstrap version
+                        if [ "$bun_ver" = "${latest_macos14_version:-}" ]; then
+                            if version_compare "$bootstrap_ver" "${latest_macos14_bootstrap:-}"; then
+                                latest_macos14_version="$bun_ver"
+                                latest_macos14_bootstrap="$bootstrap_ver"
+                                latest_macos14_image="$image_name"
+                            fi
+                        else
+                            latest_macos14_version="$bun_ver"
+                            latest_macos14_bootstrap="$bootstrap_ver"
+                            latest_macos14_image="$image_name"
+                        fi
+                    fi
+                fi
+            fi
+        fi
+    done <<< "$tart_output"
+    
+    # Show what we found as latest
+    if [ -n "${latest_macos13_image:-}" ]; then
+        log "  📌 Latest macOS 13: ${latest_macos13_image} (Bun ${latest_macos13_version}, Bootstrap ${latest_macos13_bootstrap})"
+    else
+        log "  📌 No macOS 13 images found"
+    fi
+    
+    if [ -n "${latest_macos14_image:-}" ]; then
+        log "  📌 Latest macOS 14: ${latest_macos14_image} (Bun ${latest_macos14_version}, Bootstrap ${latest_macos14_bootstrap})"
+    else
+        log "  📌 No macOS 14 images found"
+    fi
+    
+    # Mark all others for deletion
+    for image in "${all_bun_images[@]}"; do
+        local should_keep=false
+        
+        # Keep if it's the latest for macOS 13
+        if [ -n "${latest_macos13_image:-}" ] && [ "$image" = "${latest_macos13_image}" ]; then
+            should_keep=true
+        fi
+        
+        # Keep if it's the latest for macOS 14
+        if [ -n "${latest_macos14_image:-}" ] && [ "$image" = "${latest_macos14_image}" ]; then
+            should_keep=true
+        fi
+        
+        if [ "$should_keep" = false ]; then
+            images_to_delete+=("$image")
+        fi
+    done
+    
+    # Delete old images
+    if [ ${#images_to_delete[@]} -gt 0 ]; then
+        log "🗑️  Deleting ${#images_to_delete[@]} old VM images:"
+        for image in "${images_to_delete[@]}"; do
+            log "    Deleting: $image"
+            if tart delete "$image" 2>/dev/null; then
+                log "      ✅ Deleted successfully"
+            else
+                log "      ⚠️  Failed to delete (may not exist)"
+            fi
+        done
+        log "✅ Cleanup completed"
+    else
+        log "✅ No old images to clean up"
+    fi
+    
+    # Show final storage state
+    log "📊 Final VM storage state:"
+    local final_output=$(tart list 2>&1)
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^local.*bun-build-macos ]]; then
+            log "    $line"
+        fi
+    done <<< "$final_output"
+    
+    # Show storage usage after cleanup
+    if [ -d "$tart_dir" ]; then
+        local after_size=$(du -sh "$tart_dir" 2>/dev/null | cut -f1 || echo "unknown")
+        log "📊 Tart storage usage after cleanup: $after_size"
+        if [ "$before_size" != "unknown" ] && [ "$after_size" != "unknown" ]; then
+            log "💾 Storage cleanup summary: $before_size → $after_size"
+        fi
+    fi
+    
+    log "=== CLEANUP COMPLETE ==="
+}
+
 # Get Bun version - fixed version detection
 get_bun_version() {
     local version=""
@@ -425,10 +570,15 @@ get_bootstrap_version() {
 main() {
     # Parse arguments
     local force_refresh=false
+    local cleanup_only=false
     for arg in "$@"; do
         case $arg in
             --force-refresh)
                 force_refresh=true
+                shift
+                ;;
+            --cleanup-only)
+                cleanup_only=true
                 shift
                 ;;
             --release=*)
@@ -440,6 +590,7 @@ main() {
                 echo ""
                 echo "Options:"
                 echo "  --force-refresh     Force refresh of base image"
+                echo "  --cleanup-only      Clean up old VM images and exit"
                 echo "  --release=VERSION   macOS release version (13, 14) [default: 14]"
                 echo "  --help, -h          Show this help message"
                 echo ""
@@ -455,6 +606,7 @@ main() {
                 echo "  $0                    # Build macOS 14 base image"
                 echo "  $0 --release=13       # Build macOS 13 base image"
                 echo "  $0 --force-refresh    # Force rebuild of base image"
+                echo "  $0 --cleanup-only     # Clean up old images and exit"
                 exit 0
                 ;;
         esac
@@ -462,6 +614,15 @@ main() {
     
     # Fix Tart permissions first thing
     fix_tart_permissions
+    
+    # Clean up old VM images to free storage space (do this early!)
+    cleanup_old_images
+    
+    # If cleanup-only requested, exit here
+    if [ "$cleanup_only" = true ]; then
+        log "✅ Cleanup-only mode complete - exiting"
+        exit 0
+    fi
     
     # Configuration - now uses the release parameter
     BASE_IMAGE=$(get_base_image "$MACOS_RELEASE")
@@ -523,9 +684,9 @@ main() {
     log "=== BUILDING NEW BASE IMAGE ==="
     log "Building new base image for Bun ${BUN_VERSION}..."
     
-    # Clean up any existing image
-    log "Cleaning up any existing local image..."
-    tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "No existing image to delete"
+    # Clean up the specific image we're about to build (if it exists)
+    log "Cleaning up target image if it exists: $LOCAL_IMAGE_NAME"
+    tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "Target image doesn't exist (expected)"
     
     # Clone base image
     log "Cloning base image: $BASE_IMAGE"
