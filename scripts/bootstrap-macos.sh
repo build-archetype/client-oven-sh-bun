@@ -2,7 +2,7 @@
 set -e
 set -x
 
-# Version: 4.0 - Added US locale configuration to fix date formatting tests
+# Version: 4.1 - Added US locale and C++20 node-gyp configuration for Node.js v23.11.0+ compatibility
 # A comprehensive bootstrap script for macOS based on the main bootstrap.sh
 
 # Constants
@@ -231,6 +231,12 @@ install_brew() {
         append_to_profile "export LANG=en_US.UTF-8"
         append_to_profile "export LC_ALL=en_US.UTF-8"
         
+        # Configure node-gyp for C++20 compatibility with Node.js v23.11.0+
+        append_to_profile "export CXX_FLAGS=-std=c++20"
+        append_to_profile "export CXXFLAGS=-std=c++20"
+        append_to_profile "export npm_config_cxx_flags=-std=c++20"
+        append_to_profile "export npm_config_cxxflags=-std=c++20"
+        
         print "✅ Homebrew installed successfully"
     else
         print "✅ Homebrew already installed"
@@ -238,6 +244,12 @@ install_brew() {
         # Ensure locale is set for consistent date/time formatting (fixes toLocaleDateString tests)
         append_to_profile "export LANG=en_US.UTF-8"
         append_to_profile "export LC_ALL=en_US.UTF-8"
+        
+        # Configure node-gyp for C++20 compatibility with Node.js v23.11.0+
+        append_to_profile "export CXX_FLAGS=-std=c++20"
+        append_to_profile "export CXXFLAGS=-std=c++20"
+        append_to_profile "export npm_config_cxx_flags=-std=c++20"
+        append_to_profile "export npm_config_cxxflags=-std=c++20"
     fi
 }
 
