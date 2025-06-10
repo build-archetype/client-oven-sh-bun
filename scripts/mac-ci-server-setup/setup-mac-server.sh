@@ -1581,12 +1581,45 @@ verify_tool() {
   local tool_name="$2"
   local is_critical="$3"
   
-  if command -v "$tool_cmd" &> /dev/null; then
+  # Check if tool is available as the mac-ci user (with Homebrew environment)
+  if sudo -u "$REAL_USER" bash -c "
+    # Load Homebrew environment
+    if [ -f '/opt/homebrew/bin/brew' ]; then
+      eval \"\$(/opt/homebrew/bin/brew shellenv)\"
+    elif [ -f '/usr/local/bin/brew' ]; then
+      eval \"\$(/usr/local/bin/brew shellenv)\"
+    fi
+    command -v '$tool_cmd'
+  " &> /dev/null; then
     local version=""
     case "$tool_cmd" in
-      "node") version=" ($(node --version))" ;;
-      "buildkite-agent") version=" ($(buildkite-agent --version 2>/dev/null | head -1))" ;;
-      "tart") version=" ($(tart --version 2>/dev/null))" ;;
+      "node") 
+        version=" ($(sudo -u "$REAL_USER" bash -c "
+          if [ -f '/opt/homebrew/bin/brew' ]; then
+            eval \"\$(/opt/homebrew/bin/brew shellenv)\"
+          elif [ -f '/usr/local/bin/brew' ]; then
+            eval \"\$(/usr/local/bin/brew shellenv)\"
+          fi
+          node --version
+        " 2>/dev/null))" ;;
+      "buildkite-agent") 
+        version=" ($(sudo -u "$REAL_USER" bash -c "
+          if [ -f '/opt/homebrew/bin/brew' ]; then
+            eval \"\$(/opt/homebrew/bin/brew shellenv)\"
+          elif [ -f '/usr/local/bin/brew' ]; then
+            eval \"\$(/usr/local/bin/brew shellenv)\"
+          fi
+          buildkite-agent --version 2>/dev/null | head -1
+        " 2>/dev/null))" ;;
+      "tart") 
+        version=" ($(sudo -u "$REAL_USER" bash -c "
+          if [ -f '/opt/homebrew/bin/brew' ]; then
+            eval \"\$(/opt/homebrew/bin/brew shellenv)\"
+          elif [ -f '/usr/local/bin/brew' ]; then
+            eval \"\$(/usr/local/bin/brew shellenv)\"
+          fi
+          tart --version 2>/dev/null
+        " 2>/dev/null))" ;;
       *) version="" ;;
     esac
     echo_color "$GREEN" "  ✅ $tool_name$version"
