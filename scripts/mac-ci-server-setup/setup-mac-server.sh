@@ -518,7 +518,25 @@ if [ "$goto_privileged_setup" = false ]; then
     
     # Install other CI tools
     echo_color "$BLUE" "Installing other CI dependencies..."
-    brew install terraform jq yq wget git wireguard-tools openvpn node cmake ninja ccache pkg-config golang make python3 libtool ruby perl
+    
+    # Install Node.js first (critical for Bun CI)
+    echo_color "$BLUE" "Installing Node.js..."
+    if ! brew install node; then
+      echo_color "$RED" "Node.js installation failed. Aborting."
+      exit 1
+    fi
+    
+    # Verify Node.js installation immediately
+    if ! command -v node &> /dev/null; then
+      echo_color "$RED" "Node.js not found in PATH after installation. Aborting."
+      exit 1
+    fi
+    NODE_VERSION=$(node --version)
+    echo_color "$GREEN" "✅ Node.js installed (version: $NODE_VERSION)"
+    
+    # Install other tools (non-critical, can continue if some fail)
+    echo_color "$BLUE" "Installing other development tools..."
+    brew install terraform jq yq wget git wireguard-tools openvpn cmake ninja ccache pkg-config golang make python3 libtool ruby perl || echo_color "$YELLOW" "⚠️ Some development tools may have failed to install"
     
     # Install monitoring tools if enabled
     if [ "${MONITORING_ENABLED:-false}" = true ]; then
@@ -535,14 +553,6 @@ if [ "$goto_privileged_setup" = false ]; then
     fi
     
     echo_color "$GREEN" "✅ Homebrew and dependencies installed."
-
-    # Verify Node.js installation
-    if ! command -v node &> /dev/null; then
-      echo_color "$RED" "Node.js installation failed or not found in PATH. Aborting."
-      exit 1
-    fi
-    NODE_VERSION=$(node --version)
-    echo_color "$GREEN" "✅ Node.js installed (version: $NODE_VERSION)"
 
     # Install Tart
     if ! command -v tart &> /dev/null; then
