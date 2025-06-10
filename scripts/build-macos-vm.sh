@@ -141,13 +141,10 @@ cleanup_old_images() {
     # Get all local images
     local tart_output=$(tart list 2>&1)
     
-    # Track latest version for each macOS release (using regular variables for Bash 3.x compatibility)
-    local latest_macos13_version=""
-    local latest_macos13_bootstrap=""
-    local latest_macos13_image=""
-    local latest_macos14_version=""
-    local latest_macos14_bootstrap=""
-    local latest_macos14_image=""
+    # Track latest version for each macOS release
+    declare -A latest_macos13_version latest_macos14_version
+    declare -A latest_macos13_bootstrap latest_macos14_bootstrap
+    declare -A latest_macos13_image latest_macos14_image
     
     local all_bun_images=()
     local images_to_delete=()
@@ -219,25 +216,23 @@ cleanup_old_images() {
     fi
     
     # Mark all others for deletion
-    if [ ${#all_bun_images[@]} -gt 0 ]; then
-        for image in "${all_bun_images[@]}"; do
-            local should_keep=false
-            
-            # Keep if it's the latest for macOS 13
-            if [ -n "${latest_macos13_image:-}" ] && [ "$image" = "${latest_macos13_image}" ]; then
-                should_keep=true
-            fi
-            
-            # Keep if it's the latest for macOS 14
-            if [ -n "${latest_macos14_image:-}" ] && [ "$image" = "${latest_macos14_image}" ]; then
-                should_keep=true
-            fi
-            
-            if [ "$should_keep" = false ]; then
-                images_to_delete+=("$image")
-            fi
-        done
-    fi
+    for image in "${all_bun_images[@]}"; do
+        local should_keep=false
+        
+        # Keep if it's the latest for macOS 13
+        if [ -n "${latest_macos13_image:-}" ] && [ "$image" = "${latest_macos13_image}" ]; then
+            should_keep=true
+        fi
+        
+        # Keep if it's the latest for macOS 14
+        if [ -n "${latest_macos14_image:-}" ] && [ "$image" = "${latest_macos14_image}" ]; then
+            should_keep=true
+        fi
+        
+        if [ "$should_keep" = false ]; then
+            images_to_delete+=("$image")
+        fi
+    done
     
     # Delete old images
     if [ ${#images_to_delete[@]} -gt 0 ]; then
@@ -424,8 +419,8 @@ check_remote_image() {
     # Show that download is starting since VM images are large (GB+) and can take 10-30+ minutes
     log "📥 Starting download of remote VM image (may be 5-15GB+, please wait)..." >&2
     
-    # Run tart pull - redirect ALL output to stderr to avoid contaminating return values
-    if tart pull "$remote_url" >&2; then
+    # Run tart pull directly to show native progress output (percentages, etc.)
+    if tart pull "$remote_url"; then
         log "✅ Remote image found and downloaded successfully" >&2
         return 0
     else
@@ -619,6 +614,41 @@ main() {
     
     # Fix Tart permissions first thing
     fix_tart_permissions
+    
+    # === TEMPORARY INSTALLATION STEP ===
+    # Add any temporary installations here before image operations
+    log "=== TEMPORARY INSTALLATIONS ==="
+    log "🔧 Running temporary installation steps..."
+    
+    # Example: Install or update required tools
+    # Uncomment and modify as needed:
+    
+    # Install/update Homebrew packages
+    # if command -v brew >/dev/null 2>&1; then
+    #     log "Updating Homebrew packages..."
+    #     brew update || log "⚠️ Homebrew update failed (continuing)"
+    #     brew install jq || log "⚠️ jq install failed (continuing)"
+    # fi
+    
+    # Install Node.js dependencies
+    # if [ -f "package.json" ]; then
+    #     log "Installing Node.js dependencies..."
+    #     npm install || log "⚠️ npm install failed (continuing)"
+    # fi
+    
+    # Install or check other dependencies
+    # log "Checking required tools..."
+    # for tool in tart sshpass jq; do
+    #     if command -v "$tool" >/dev/null 2>&1; then
+    #         log "✅ $tool is available"
+    #     else
+    #         log "⚠️ $tool is missing - attempting to install..."
+    #         # Add installation logic here if needed
+    #     fi
+    # done
+    
+    log "✅ Temporary installation steps completed"
+    log "=== END TEMPORARY INSTALLATIONS ==="
     
     # Clean up old VM images to free storage space (do this early!)
     cleanup_old_images
