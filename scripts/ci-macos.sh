@@ -40,6 +40,52 @@ get_bootstrap_version() {
 # SSH options for VM connectivity
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
 
+# Function to ensure VM image is available (lightweight registry check)
+ensure_vm_image_available() {
+    local base_vm_image="$1"
+    local release="$2"
+    
+    # Check if base image exists locally
+    if tart list | grep -q "^local.*$base_vm_image"; then
+        log "✅ Base image found locally: $base_vm_image"
+        return 0
+    fi
+    
+    log "🔍 Base image '$base_vm_image' not found locally"
+    
+    # Try to pull from registry (registry-first approach for distributed CI)
+    # Extract version info from image name: bun-build-macos-13-1.2.16-bootstrap-4.1
+    if [[ "$base_vm_image" =~ bun-build-macos-([0-9]+)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
+        local macos_release="${BASH_REMATCH[1]}"
+        local bun_version="${BASH_REMATCH[2]}"
+        local bootstrap_version="${BASH_REMATCH[3]}"
+        local registry_url="ghcr.io/build-archetype/client-oven-sh-bun/bun-build-macos-${macos_release}:${bun_version}-bootstrap-${bootstrap_version}"
+    else
+        # Fallback to latest if we can't parse the version
+        local registry_url="ghcr.io/build-archetype/client-oven-sh-bun/bun-build-macos-${release}:latest"
+    fi
+    
+    log "📥 Attempting to pull from registry: $registry_url"
+    if tart pull "$registry_url" 2>&1; then
+        log "✅ Successfully pulled from registry"
+        # Clone to expected local name
+        if tart clone "$registry_url" "$base_vm_image" 2>&1; then
+            log "✅ Successfully cloned to local name: $base_vm_image"
+            return 0
+        else
+            log "⚠️ Registry pull succeeded but local clone failed"
+        fi
+    else
+        log "⚠️ Registry pull failed or image not available"
+    fi
+    
+    # If we get here, both local and registry failed
+    log "❌ Base image '$base_vm_image' not available locally or in registry"
+    log "Please run the prep step to create base image first:"
+    log "Run: ./scripts/build-macos-vm.sh --release=$release"
+    return 1
+}
+
 # Function to get disk usage percentage
 get_disk_usage() {
     df -h . | tail -1 | awk '{print $5}' | sed 's/%//'
@@ -102,11 +148,10 @@ create_and_run_vm() {
         exit 1
     fi
     
-    # Check if base image exists (simple check - no validation)
-    if ! tart list | grep -q "^local.*$base_vm_image"; then
-        log "❌ Base image '$base_vm_image' not found!"
-        log "Please run the prep step to create base image first"
-        log "Run: ./scripts/build-macos-vm.sh --release=$release"
+    # Check if base image exists and ensure it's available (with registry fallback)
+    if ! ensure_vm_image_available "$base_vm_image" "$release"; then
+        log "❌ Unable to ensure base image '$base_vm_image' is available"
+        log "Both local and registry sources failed"
         exit 1
     fi
     
