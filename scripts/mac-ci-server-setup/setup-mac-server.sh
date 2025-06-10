@@ -498,25 +498,10 @@ if [ "$goto_privileged_setup" = false ]; then
       echo_color "$RED" "Tailscale is not in PATH after installation. Aborting."; exit 1;
     fi
     
-    # Install other CI tools (buildkite-agent moved to privileged section)
+    # Install other CI tools (Node.js and buildkite-agent moved to privileged section)
     echo_color "$BLUE" "Installing other CI dependencies..."
     
-    # Install Node.js first (critical for Bun CI)
-    echo_color "$BLUE" "Installing Node.js..."
-    if ! brew install node; then
-      echo_color "$RED" "Node.js installation failed. Aborting."
-      exit 1
-    fi
-    
-    # Verify Node.js installation immediately
-    if ! command -v node &> /dev/null; then
-      echo_color "$RED" "Node.js not found in PATH after installation. Aborting."
-      exit 1
-    fi
-    NODE_VERSION=$(node --version)
-    echo_color "$GREEN" "✅ Node.js installed (version: $NODE_VERSION)"
-    
-    # Install other tools (non-critical, can continue if some fail)
+    # Install other development tools (non-critical, can continue if some fail)
     echo_color "$BLUE" "Installing other development tools..."
     brew install terraform jq yq wget git wireguard-tools openvpn cmake ninja ccache pkg-config golang make python3 libtool ruby perl || echo_color "$YELLOW" "⚠️ Some development tools may have failed to install"
     
@@ -715,6 +700,52 @@ if sudo -u "$REAL_USER" bash -c '
   echo_color "$GREEN" "✅ Buildkite agent verified for $REAL_USER: $AGENT_VERSION"
 else
   echo_color "$RED" "❌ Buildkite agent not accessible for $REAL_USER after installation"
+  exit 1
+fi
+
+# --- Install Node.js as the CI user ---
+echo_color "$BLUE" "Installing Node.js for $REAL_USER..."
+
+# Install Node.js as the CI user
+echo_color "$BLUE" "Installing Node.js as $REAL_USER..."
+if sudo -u "$REAL_USER" bash -c '
+  # Load Homebrew environment
+  if [ -f "/opt/homebrew/bin/brew" ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [ -f "/usr/local/bin/brew" ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+  
+  # Install Node.js
+  brew install node
+'; then
+  echo_color "$GREEN" "✅ Node.js installed successfully for $REAL_USER"
+else
+  echo_color "$RED" "❌ Failed to install Node.js for $REAL_USER. Aborting."
+  exit 1
+fi
+
+# Verify Node.js installation as the CI user
+echo_color "$BLUE" "Verifying Node.js installation for $REAL_USER..."
+if sudo -u "$REAL_USER" bash -c '
+  if [ -f "/opt/homebrew/bin/brew" ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [ -f "/usr/local/bin/brew" ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+  command -v node
+' >/dev/null; then
+  NODE_VERSION=$(sudo -u "$REAL_USER" bash -c '
+    if [ -f "/opt/homebrew/bin/brew" ]; then
+      eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [ -f "/usr/local/bin/brew" ]; then
+      eval "$(/usr/local/bin/brew shellenv)"
+    fi
+    node --version
+  ')
+  echo_color "$GREEN" "✅ Node.js verified for $REAL_USER: $NODE_VERSION"
+else
+  echo_color "$RED" "❌ Node.js not accessible for $REAL_USER after installation"
   exit 1
 fi
 
