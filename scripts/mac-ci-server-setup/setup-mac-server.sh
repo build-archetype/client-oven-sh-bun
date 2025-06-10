@@ -1324,93 +1324,208 @@ fi
 # --- Start services as the real user ---
 echo_color "$BLUE" "Starting Buildkite agent as $REAL_USER..."
 
-# Verify buildkite-agent is installed before starting
-if ! command -v buildkite-agent &> /dev/null; then
-  echo_color "$RED" "❌ Buildkite agent not found! Cannot start service."
-  echo_color "$YELLOW" "Please ensure buildkite-agent is properly installed."
-  exit 1
+# First verify that buildkite-agent is accessible to the target user
+echo_color "$BLUE" "Verifying buildkite-agent access for user $REAL_USER..."
+if ! sudo -u "$REAL_USER" -i bash -c 'command -v buildkite-agent' &>/dev/null; then
+  echo_color "$RED" "❌ Buildkite agent not accessible to user $REAL_USER!"
+  echo_color "$YELLOW" "Checking if buildkite-agent exists in system paths..."
+  
+  # Check common locations
+  for path in "/opt/homebrew/bin/buildkite-agent" "/usr/local/bin/buildkite-agent"; do
+    if [ -f "$path" ]; then
+      echo_color "$BLUE" "Found buildkite-agent at: $path"
+      # Make sure it's executable by the user
+      chmod +x "$path" 2>/dev/null || true
+    fi
+  done
+  
+  # Try again with explicit PATH
+  if ! sudo -u "$REAL_USER" -i bash -c 'PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" command -v buildkite-agent' &>/dev/null; then
+    echo_color "$RED" "❌ Buildkite agent still not accessible. Installation may have failed."
+    exit 1
+  fi
 fi
 
-echo_color "$GREEN" "✅ Buildkite agent found: $(buildkite-agent --version | head -1)"
+# Get buildkite-agent version with proper user context
+AGENT_VERSION=$(sudo -u "$REAL_USER" -i bash -c 'PATH="/opt/homebrew/bin:/usr/local/bin:$PATH" buildkite-agent --version 2>/dev/null | head -1' || echo "unknown")
+echo_color "$GREEN" "✅ Buildkite agent found: $AGENT_VERSION"
 
-# Ensure proper ownership
-chown -R "$REAL_USER:staff" /opt/homebrew/var/buildkite-agent || true
-chown -R "$REAL_USER:staff" /opt/homebrew/var/log || true
+# Create and fix ownership of required directories before starting service
+echo_color "$BLUE" "Ensuring proper directory ownership..."
+HOMEBREW_DIRS=(
+  "/opt/homebrew/var"
+  "/opt/homebrew/var/log"
+  "/opt/homebrew/var/buildkite-agent"
+  "/usr/local/var" 
+  "/usr/local/var/log"
+  "/usr/local/var/buildkite-agent"
+)
 
-# Start the agent as the actual user
+for dir in "${HOMEBREW_DIRS[@]}"; do
+  if [ -d "$dir" ]; then
+    echo_color "$BLUE" "  Fixing ownership: $dir"
+    chown -R "$REAL_USER:staff" "$dir" 2>/dev/null || {
+      echo_color "$YELLOW" "  ⚠️  Could not change ownership of $dir (may not be critical)"
+    }
+  else
+    # Try to create directory if it doesn't exist
+    if mkdir -p "$dir" 2>/dev/null; then
+      echo_color "$BLUE" "  Created and set ownership: $dir"
+      chown -R "$REAL_USER:staff" "$dir" 2>/dev/null || true
+    else
+      echo_color "$YELLOW" "  ⚠️  Could not create $dir (may not be critical)"
+    fi
+  fi
+done
+
+# Start the agent as the actual user with proper environment
+echo_color "$BLUE" "Starting buildkite-agent service..."
+
+# Function to start service with retry
+start_buildkite_service() {
+  local brew_path="$1"
+  local attempts=3
+  local attempt=1
+  
+  while [ $attempt -le $attempts ]; do
+    echo_color "$BLUE" "  Attempt $attempt/$attempts: Starting service with $brew_path"
+    
+    # Use -i flag to get clean environment and explicit PATH
+    if sudo -u "$REAL_USER" -i bash -c "
+      export PATH=\"$brew_path/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\"
+      export HOMEBREW_NO_AUTO_UPDATE=1
+      cd '$REAL_HOME'
+      '$brew_path/bin/brew' services start buildkite-agent
+    " 2>/dev/null; then
+      echo_color "$GREEN" "  ✅ Service started successfully"
+      return 0
+    else
+      echo_color "$YELLOW" "  ⚠️  Attempt $attempt failed"
+      ((attempt++))
+      sleep 2
+    fi
+  done
+  
+  return 1
+}
+
+# Try with detected Homebrew path
+SERVICE_STARTED=false
 if [ -f "/opt/homebrew/bin/brew" ]; then
-  sudo -u "$REAL_USER" /opt/homebrew/bin/brew services start buildkite-agent
+  if start_buildkite_service "/opt/homebrew"; then
+    SERVICE_STARTED=true
+    HOMEBREW_PREFIX="/opt/homebrew"
+  fi
 elif [ -f "/usr/local/bin/brew" ]; then
-  sudo -u "$REAL_USER" /usr/local/bin/brew services start buildkite-agent
+  if start_buildkite_service "/usr/local"; then
+    SERVICE_STARTED=true
+    HOMEBREW_PREFIX="/usr/local"
+  fi
+fi
+
+if [ "$SERVICE_STARTED" != true ]; then
+  echo_color "$RED" "❌ Failed to start buildkite-agent service after multiple attempts"
+  echo_color "$YELLOW" "Manual start command:"
+  echo_color "$YELLOW" "  sudo -u $REAL_USER brew services start buildkite-agent"
+  
+  # Still continue with verification
+  HOMEBREW_PREFIX="/opt/homebrew"
+  [ -f "/usr/local/bin/brew" ] && HOMEBREW_PREFIX="/usr/local"
 else
-  echo_color "$RED" "Homebrew not found. Cannot start buildkite-agent service."
-  exit 1
+  echo_color "$GREEN" "✅ Buildkite agent service started successfully"
 fi
 
-# Verify it's running
+# Verify it's running with more robust check
+echo_color "$BLUE" "Verifying service status..."
 sleep 5
-if [ -f "/opt/homebrew/bin/brew" ]; then
-  if sudo -u "$REAL_USER" /opt/homebrew/bin/brew services list | grep -q "buildkite-agent.*started"; then
-    echo_color "$GREEN" "✅ Buildkite agent started successfully"
-  else
-    echo_color "$YELLOW" "⚠️  Buildkite agent may not have started correctly"
-    echo_color "$YELLOW" "Check logs at: /opt/homebrew/var/log/buildkite-agent.log"
+
+SERVICE_RUNNING=false
+for check_attempt in {1..3}; do
+  echo_color "$BLUE" "  Verification attempt $check_attempt/3..."
+  
+  # Check via brew services
+  if sudo -u "$REAL_USER" -i bash -c "
+    export PATH=\"$HOMEBREW_PREFIX/bin:\$PATH\"
+    '$HOMEBREW_PREFIX/bin/brew' services list
+  " 2>/dev/null | grep -q "buildkite-agent.*started"; then
+    echo_color "$GREEN" "  ✅ Buildkite agent service is running"
+    SERVICE_RUNNING=true
+    break
   fi
-elif [ -f "/usr/local/bin/brew" ]; then
-  if sudo -u "$REAL_USER" /usr/local/bin/brew services list | grep -q "buildkite-agent.*started"; then
-    echo_color "$GREEN" "✅ Buildkite agent started successfully"
-  else
-    echo_color "$YELLOW" "⚠️  Buildkite agent may not have started correctly"
-    echo_color "$YELLOW" "Check logs at: /usr/local/var/log/buildkite-agent.log"
+  
+  # Also check via process list as fallback
+  if pgrep -f "buildkite-agent" >/dev/null; then
+    echo_color "$GREEN" "  ✅ Buildkite agent process found running (via process check)"
+    SERVICE_RUNNING=true
+    break
   fi
+  
+  if [ $check_attempt -lt 3 ]; then
+    echo_color "$YELLOW" "  Service not detected yet, waiting..."
+    sleep 3
+  fi
+done
+
+if [ "$SERVICE_RUNNING" != true ]; then
+  echo_color "$YELLOW" "  ⚠️  Buildkite agent service status unclear"
+  echo_color "$YELLOW" "  Check logs at: $HOMEBREW_PREFIX/var/log/buildkite-agent.log"
+  echo_color "$YELLOW" "  Or try manual start: sudo -u $REAL_USER brew services start buildkite-agent"
 fi
 
 # --- Start monitoring services (if enabled) ---
 if [ "${MONITORING_ENABLED:-false}" = true ]; then
   echo_color "$BLUE" "Starting monitoring services as $REAL_USER..."
   
-  # Start Node Exporter
-  if [ -f "/opt/homebrew/bin/brew" ]; then
-    sudo -u "$REAL_USER" /opt/homebrew/bin/brew services start prometheus-node-exporter
-  elif [ -f "/usr/local/bin/brew" ]; then
-    sudo -u "$REAL_USER" /usr/local/bin/brew services start prometheus-node-exporter
+  # Start Node Exporter with proper environment
+  echo_color "$BLUE" "Starting Node Exporter..."
+  if sudo -u "$REAL_USER" -i bash -c "
+    export PATH=\"$HOMEBREW_PREFIX/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\"
+    export HOMEBREW_NO_AUTO_UPDATE=1
+    cd '$REAL_HOME'
+    '$HOMEBREW_PREFIX/bin/brew' services start prometheus-node-exporter
+  " 2>/dev/null; then
+    echo_color "$GREEN" "  ✅ Node Exporter started successfully"
+  else
+    echo_color "$YELLOW" "  ⚠️  Failed to start Node Exporter"
   fi
   
-  # Start Grafana Alloy
-  if [ -f "/opt/homebrew/bin/brew" ]; then
-    sudo -u "$REAL_USER" /opt/homebrew/bin/brew services start alloy
-  elif [ -f "/usr/local/bin/brew" ]; then
-    sudo -u "$REAL_USER" /usr/local/bin/brew services start alloy
+  # Start Grafana Alloy with proper environment
+  echo_color "$BLUE" "Starting Grafana Alloy..."
+  if sudo -u "$REAL_USER" -i bash -c "
+    export PATH=\"$HOMEBREW_PREFIX/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH\"
+    export HOMEBREW_NO_AUTO_UPDATE=1
+    cd '$REAL_HOME'
+    '$HOMEBREW_PREFIX/bin/brew' services start alloy
+  " 2>/dev/null; then
+    echo_color "$GREEN" "  ✅ Grafana Alloy started successfully"
+  else
+    echo_color "$YELLOW" "  ⚠️  Failed to start Grafana Alloy"
   fi
   
   # Verify monitoring services are running
+  echo_color "$BLUE" "Verifying monitoring service status..."
   sleep 5
   
   MONITORING_STATUS=""
-  if [ -f "/opt/homebrew/bin/brew" ]; then
-    if sudo -u "$REAL_USER" /opt/homebrew/bin/brew services list | grep -q "prometheus-node-exporter.*started"; then
-      MONITORING_STATUS+="✅ Node Exporter started\n"
-    else
-      MONITORING_STATUS+="⚠️  Node Exporter may not have started\n"
-    fi
-    
-    if sudo -u "$REAL_USER" /opt/homebrew/bin/brew services list | grep -q "alloy.*started"; then
-      MONITORING_STATUS+="✅ Grafana Alloy started\n"
-    else
-      MONITORING_STATUS+="⚠️  Grafana Alloy may not have started\n"
-    fi
-  elif [ -f "/usr/local/bin/brew" ]; then
-    if sudo -u "$REAL_USER" /usr/local/bin/brew services list | grep -q "prometheus-node-exporter.*started"; then
-      MONITORING_STATUS+="✅ Node Exporter started\n"
-    else
-      MONITORING_STATUS+="⚠️  Node Exporter may not have started\n"
-    fi
-    
-    if sudo -u "$REAL_USER" /usr/local/bin/brew services list | grep -q "alloy.*started"; then
-      MONITORING_STATUS+="✅ Grafana Alloy started\n"
-    else
-      MONITORING_STATUS+="⚠️  Grafana Alloy may not have started\n"
-    fi
+  
+  # Check Node Exporter
+  if sudo -u "$REAL_USER" -i bash -c "
+    export PATH=\"$HOMEBREW_PREFIX/bin:\$PATH\"
+    '$HOMEBREW_PREFIX/bin/brew' services list
+  " 2>/dev/null | grep -q "prometheus-node-exporter.*started"; then
+    MONITORING_STATUS+="✅ Node Exporter started\n"
+  else
+    MONITORING_STATUS+="⚠️  Node Exporter may not have started\n"
+  fi
+  
+  # Check Grafana Alloy
+  if sudo -u "$REAL_USER" -i bash -c "
+    export PATH=\"$HOMEBREW_PREFIX/bin:\$PATH\"
+    '$HOMEBREW_PREFIX/bin/brew' services list
+  " 2>/dev/null | grep -q "alloy.*started"; then
+    MONITORING_STATUS+="✅ Grafana Alloy started\n"
+  else
+    MONITORING_STATUS+="⚠️  Grafana Alloy may not have started\n"
   fi
   
   echo -e "$MONITORING_STATUS"
@@ -1418,7 +1533,7 @@ if [ "${MONITORING_ENABLED:-false}" = true ]; then
   echo_color "$BLUE" "Monitoring endpoints:"
   echo "  - Node Exporter metrics: http://localhost:9100/metrics"
   echo "  - Alloy status: http://localhost:12345"
-  echo_color "$YELLOW" "Check Alloy logs at: /opt/homebrew/var/log/alloy.log"
+  echo_color "$YELLOW" "Check Alloy logs at: $HOMEBREW_PREFIX/var/log/alloy.log"
 fi
 
 echo_color "$GREEN" "\n[3/3] Setup complete!"
@@ -1492,19 +1607,21 @@ done
 
 # Check Buildkite agent service
 echo_color "$BLUE" "\nServices:"
-if [ -f "/opt/homebrew/bin/brew" ]; then
-  if sudo -u "$REAL_USER" /opt/homebrew/bin/brew services list | grep -q "buildkite-agent.*started"; then
-    echo_color "$GREEN" "  ✅ Buildkite agent service running"
+
+# Check Buildkite agent with proper user context
+if sudo -u "$REAL_USER" -i bash -c "
+  export PATH=\"$HOMEBREW_PREFIX/bin:\$PATH\"
+  '$HOMEBREW_PREFIX/bin/brew' services list
+" 2>/dev/null | grep -q "buildkite-agent.*started"; then
+  echo_color "$GREEN" "  ✅ Buildkite agent service running"
+else
+  # Fallback check via process list
+  if pgrep -f "buildkite-agent" >/dev/null; then
+    echo_color "$GREEN" "  ✅ Buildkite agent process running (via process check)"
   else
     echo_color "$YELLOW" "  ⚠️  Buildkite agent service not running"
-    echo_color "$YELLOW" "     Check logs: /opt/homebrew/var/log/buildkite-agent.log"
-  fi
-elif [ -f "/usr/local/bin/brew" ]; then
-  if sudo -u "$REAL_USER" /usr/local/bin/brew services list | grep -q "buildkite-agent.*started"; then
-    echo_color "$GREEN" "  ✅ Buildkite agent service running"
-  else
-    echo_color "$YELLOW" "  ⚠️  Buildkite agent service not running"
-    echo_color "$YELLOW" "     Check logs: /usr/local/var/log/buildkite-agent.log"
+    echo_color "$YELLOW" "     Check logs: $HOMEBREW_PREFIX/var/log/buildkite-agent.log"
+    echo_color "$YELLOW" "     Manual start: sudo -u $REAL_USER brew services start buildkite-agent"
   fi
 fi
 
