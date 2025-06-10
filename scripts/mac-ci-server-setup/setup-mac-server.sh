@@ -510,14 +510,21 @@ if [ "$goto_privileged_setup" = false ]; then
     
     # Install Buildkite agent
     echo_color "$BLUE" "Installing Buildkite agent for $TARGET_CI_USER..."
-    run_as_ci_user 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew tap buildkite/buildkite'
-    run_as_ci_user 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew install buildkite/buildkite/buildkite-agent'
-    
-    if ! run_as_ci_user 'command -v buildkite-agent' &>/dev/null; then
-      echo_color "$RED" "Buildkite agent installation failed for $TARGET_CI_USER. Aborting."
+    if run_as_ci_user 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew tap buildkite/buildkite && brew install buildkite/buildkite/buildkite-agent'; then
+      echo_color "$GREEN" "✅ Buildkite agent tap and install completed"
+    else
+      echo_color "$RED" "❌ Buildkite agent installation failed for $TARGET_CI_USER. Aborting."
       exit 1
     fi
-    echo_color "$GREEN" "✅ Buildkite agent installed successfully for $TARGET_CI_USER"
+    
+    # Verify buildkite-agent is accessible
+    if ! run_as_ci_user 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && command -v buildkite-agent' &>/dev/null; then
+      echo_color "$RED" "❌ Buildkite agent not accessible after installation for $TARGET_CI_USER. Aborting."
+      echo_color "$YELLOW" "Debug: Checking brew list..."
+      run_as_ci_user 'eval "$(/opt/homebrew/bin/brew shellenv 2>/dev/null || /usr/local/bin/brew shellenv)" && brew list | grep buildkite || echo "No buildkite packages found"'
+      exit 1
+    fi
+    echo_color "$GREEN" "✅ Buildkite agent installed and accessible for $TARGET_CI_USER"
     
     # Install other CI tools
     echo_color "$BLUE" "Installing other CI dependencies for $TARGET_CI_USER..."
