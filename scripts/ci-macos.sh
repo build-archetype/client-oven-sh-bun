@@ -285,8 +285,39 @@ create_and_run_vm() {
     }
     trap cleanup_trap EXIT INT TERM
     
-    log "Starting VM with workspace: $workspace_dir"
-    tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" > vm.log 2>&1 &
+    # Validate workspace directory before VM start
+    log "🔍 Validating workspace directory: $workspace_dir"
+    local actual_workspace_dir="$workspace_dir"
+    
+    if [ ! -d "$workspace_dir" ]; then
+        log "❌ Workspace directory does not exist: $workspace_dir"
+        log "   This could indicate a BuildKite agent or path configuration issue"
+        log "   Attempting to create the directory..."
+        if ! mkdir -p "$workspace_dir"; then
+            log "❌ Failed to create workspace directory"
+            log "   Falling back to current directory: $PWD"
+            actual_workspace_dir="$PWD"
+        else
+            log "✅ Created workspace directory"
+        fi
+    fi
+    
+    if [ ! -r "$actual_workspace_dir" ]; then
+        log "❌ Workspace directory is not readable: $actual_workspace_dir"
+        log "   This indicates a permissions issue"
+        if [ "$actual_workspace_dir" != "$PWD" ]; then
+            log "   Falling back to current directory: $PWD"
+            actual_workspace_dir="$PWD"
+        else
+            log "   Even current directory is not readable - this is a serious issue"
+            exit 1
+        fi
+    fi
+    
+    log "✅ Workspace directory validated: $actual_workspace_dir"
+    
+    log "Starting VM with workspace: $actual_workspace_dir"
+    tart run "$vm_name" --no-graphics --dir=workspace:"$actual_workspace_dir" > vm.log 2>&1 &
     local vm_pid=$!
     
     # Wait for VM to be ready
@@ -296,14 +327,43 @@ create_and_run_vm() {
     # Verify VM actually started
     if ! tart list | grep "$vm_name" | grep -q "running"; then
         log "❌ VM failed to start - not in running state"
-        log "   This often indicates insufficient disk space or other system issues"
         log "   Checking vm.log for details..."
         if [ -f vm.log ]; then
             log "   VM log contents:"
             tail -20 vm.log | while read -r line; do
                 log "     $line"
             done
+            
+            # Check for specific error types
+            if grep -q "directory sharing device configuration is invalid" vm.log; then
+                log "🔍 Detected directory sharing configuration error"
+                log "   This is often caused by:"
+                log "   - Non-existent or inaccessible workspace directory"
+                log "   - Deep nested paths that macOS virtualization can't handle"
+                log "   - Permission issues with the shared directory"
+                log "   - Special characters or symlinks in the path"
+                
+                # Try to start without directory sharing as fallback
+                log "🔄 Attempting to restart VM without directory sharing..."
+                tart run "$vm_name" --no-graphics > vm.log 2>&1 &
+                local vm_pid_retry=$!
+                sleep 30
+                
+                if tart list | grep "$vm_name" | grep -q "running"; then
+                    log "✅ VM started successfully without directory sharing"
+                    log "⚠️  WARNING: VM started without workspace sharing"
+                    log "   Build may need to copy files manually via SSH"
+                    return 0  # Continue with the build
+                else
+                    log "❌ VM failed to start even without directory sharing"
+                fi
+            elif grep -q "insufficient disk space\|No space left" vm.log; then
+                log "🔍 Detected disk space issue"
+                log "   Even after cleanup, there may be insufficient space for VM startup"
+            fi
         fi
+        
+        log "   This often indicates insufficient disk space or other system issues"
         # The cleanup trap will handle VM deletion
         exit 1
     fi
