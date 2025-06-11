@@ -469,14 +469,15 @@ check_remote_image() {
     local remote_url="$1"
     log "🌐 Checking remote image: $remote_url" >&2
     
-    # Fix permissions before trying to use tart
+    # Fix permissions before trying to use tart (redirect output)
     fix_tart_permissions >&2
     
     # Show that download is starting since VM images are large (GB+) and can take 10-30+ minutes
     log "📥 Starting download of remote VM image (may be 5-15GB+, please wait)..." >&2
     
     # Run tart pull directly to show native progress output (percentages, etc.)
-    if tart pull "$remote_url" >&2; then
+    # Redirect to stderr to prevent pollution of decision output
+    if tart pull "$remote_url" > /dev/stderr 2>&1; then
         log "✅ Remote image found and downloaded successfully" >&2
         return 0
     else
@@ -490,15 +491,15 @@ validate_vm_image_tools() {
     local image_name="$1"
     log "🔬 Validating tools in VM image: $image_name" >&2
     
-    # Start the VM temporarily for validation
+    # Start the VM temporarily for validation (redirect all output to stderr)
     log "   Starting VM for validation..." >&2
-    tart run "$image_name" --no-graphics &
+    tart run "$image_name" --no-graphics >/dev/null 2>&1 &
     local vm_pid=$!
     
     # Wait for VM to boot
     sleep 30
     
-    # Get VM IP
+    # Get VM IP (redirect stderr to avoid pollution)
     local vm_ip=""
     for i in {1..10}; do
         vm_ip=$(tart ip "$image_name" 2>/dev/null || echo "")
@@ -510,7 +511,8 @@ validate_vm_image_tools() {
     
     if [ -z "$vm_ip" ]; then
         log "   ❌ Could not get VM IP for validation" >&2
-        kill $vm_pid 2>/dev/null || true
+        # Cleanup with output redirection
+        kill $vm_pid >/dev/null 2>&1 || true
         return 1
     fi
     
@@ -526,7 +528,8 @@ validate_vm_image_tools() {
     
     if [ "$ssh_ready" != "true" ]; then
         log "   ❌ SSH not available for validation" >&2
-        kill $vm_pid 2>/dev/null || true
+        # Cleanup with output redirection
+        kill $vm_pid >/dev/null 2>&1 || true
         return 1
     fi
     
@@ -572,15 +575,25 @@ validate_vm_image_tools() {
         validation_success=true
     fi
     
-    # Log validation output
+    # Log validation output (to stderr to avoid pollution)
     echo "$validation_result" | while read -r line; do
         log "   $line" >&2
     done
     
-    # Cleanup VM
+    # Cleanup VM with proper output redirection to prevent pollution
+    log "   Shutting down validation VM..." >&2
+    
+    # Try graceful shutdown first (redirect all output)
     sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
+    
+    # Wait a bit for graceful shutdown
     sleep 10
-    kill $vm_pid 2>/dev/null || true
+    
+    # Force kill if still running (redirect all output)
+    kill $vm_pid >/dev/null 2>&1 || true
+    
+    # Wait for complete cleanup
+    sleep 5
     
     if [ "$validation_success" = "true" ]; then
         log "   ✅ VM image validation passed" >&2
@@ -689,11 +702,24 @@ execute_caching_decision() {
     local target_image_name="$2"
     local remote_image_url="$3"
     
-    # Debug the decision string
-    log "⚡ Executing decision: '$decision'" >&2
+    # Clean up the decision string in case it got polluted with VM messages
+    # Extract the last line that looks like a valid decision
+    local clean_decision
+    if echo "$decision" | grep -q "guest has stopped\|virtual machine"; then
+        log "⚠️  Decision string appears polluted with VM messages, cleaning..." >&2
+        # Get the last line that looks like a decision (contains build_ or use_)
+        clean_decision=$(echo "$decision" | grep -E "(build_|use_)" | tail -1 || echo "$decision")
+        log "   Original: '$decision'" >&2
+        log "   Cleaned:  '$clean_decision'" >&2
+    else
+        clean_decision="$decision"
+    fi
     
-    local action="${decision%%|*}"
-    local target="${decision#*|}"
+    # Debug the decision string
+    log "⚡ Executing decision: '$clean_decision'" >&2
+    
+    local action="${clean_decision%%|*}"
+    local target="${clean_decision#*|}"
     
     log "  Action: '$action'" >&2
     log "  Target: '$target'" >&2
@@ -731,10 +757,14 @@ execute_caching_decision() {
             ;;
             
         *)
-            log "❌ Unknown decision: '$decision'" >&2
+            log "❌ Unknown decision: '$clean_decision'" >&2
             log "❌ Action was: '$action'" >&2
             log "❌ Target was: '$target'" >&2
             log "❌ This suggests a parsing error in the decision string" >&2
+            log "❌ Original decision was: '$decision'" >&2
+            # Fallback to build_new if we can't parse the decision
+            log "🔄 Falling back to build_new as safe default..." >&2
+            unset INCREMENTAL_BASE_IMAGE
             return 1
             ;;
     esac
