@@ -597,12 +597,73 @@ validate_vm_image_tools() {
             fi
         done
         
+        echo "======================="
+        echo ""
+        echo "=== CODESIGNING ENVIRONMENT CHECK ==="
+        echo "Verifying codesigning tools and SDK for Mach-O generation..."
+        
+        # Check codesigning tools
+        echo "🔐 Codesigning Tools:"
+        codesign_missing=""
+        for tool in codesign xcrun; do
+            if command -v "$tool" >/dev/null 2>&1; then
+                echo "  ✅ $tool: available"
+            else
+                echo "  ❌ $tool: MISSING"
+                codesign_missing="$codesign_missing $tool"
+            fi
+        done
+        
+        # Check SDK availability
+        echo ""
+        echo "📱 SDK Check:"
+        if command -v xcrun >/dev/null 2>&1; then
+            sdk_path=$(xcrun --show-sdk-path 2>/dev/null || echo "FAILED")
+            if [ "$sdk_path" != "FAILED" ] && [ -d "$sdk_path" ]; then
+                echo "  ✅ SDK path: $sdk_path"
+                
+                # Check key SDK components
+                if [ -d "$sdk_path/usr/include" ] && [ -d "$sdk_path/usr/lib" ]; then
+                    echo "  ✅ SDK components: headers and libraries present"
+                else
+                    echo "  ⚠️  SDK components: missing headers or libraries"
+                fi
+            else
+                echo "  ❌ SDK path: not accessible or missing"
+                codesign_missing="$codesign_missing SDK"
+            fi
+        else
+            echo "  ❌ xcrun: not available for SDK detection"
+            codesign_missing="$codesign_missing xcrun"
+        fi
+        
+        # Check Xcode tools
+        echo ""
+        echo "🛠️  Developer Tools:"
+        if command -v xcode-select >/dev/null 2>&1; then
+            xcode_path=$(xcode-select -p 2>/dev/null || echo "NOT SET")
+            if [ -d "$xcode_path" ]; then
+                echo "  ✅ Xcode developer path: $xcode_path"
+            else
+                echo "  ❌ Xcode developer path: invalid or missing"
+                codesign_missing="$codesign_missing xcode-select"
+            fi
+        else
+            echo "  ❌ xcode-select: not available"
+            codesign_missing="$codesign_missing xcode-select"
+        fi
+        
+        echo "============================================"
+        
         # Return status
         if [ -n "$missing_tools" ]; then
             echo "VALIDATION_FAILED: Missing tools:$missing_tools"
             exit 1
+        elif [ -n "$codesign_missing" ]; then
+            echo "VALIDATION_FAILED: Missing codesigning tools:$codesign_missing"
+            exit 1
         else
-            echo "VALIDATION_PASSED: All critical tools found"
+            echo "VALIDATION_PASSED: All critical tools and codesigning environment ready"
             exit 0
         fi
     '
@@ -634,10 +695,10 @@ validate_vm_image_tools() {
     sleep 5
     
     if [ "$validation_success" = "true" ]; then
-        log "   ✅ VM image validation passed" >&2
+        log "   ✅ VM image validation passed - tools and codesigning environment ready" >&2
         return 0
     else
-        log "   ❌ VM image validation failed - image needs rebuild" >&2
+        log "   ❌ VM image validation failed - missing tools or codesigning environment" >&2
         return 1
     fi
 }
