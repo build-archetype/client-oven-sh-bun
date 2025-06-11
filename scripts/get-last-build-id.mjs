@@ -63,6 +63,7 @@ async function main() {
     // Parse command line arguments
     const args = process.argv.slice(2);
     let branchMode = "current"; // Default to current branch
+    let requireSuccess = true; // Default to requiring successful builds
     
     for (const arg of args) {
       if (arg.startsWith("--branch=")) {
@@ -71,9 +72,12 @@ async function main() {
           console.error("Invalid branch mode. Use --branch=main or --branch=current");
           process.exit(1);
         }
+      } else if (arg === "--any-state") {
+        requireSuccess = false; // Allow any build state (for scope reduction)
       } else if (arg === "--help" || arg === "-h") {
-        console.log("Usage: node get-last-build-id.mjs [--branch=main|current]");
+        console.log("Usage: node get-last-build-id.mjs [--branch=main|current] [--any-state]");
         console.log("Default: --branch=current (searches current branch)");
+        console.log("--any-state: Accept builds regardless of success/failure (scope reduction)");
         process.exit(0);
       }
     }
@@ -86,23 +90,41 @@ async function main() {
 
     let build;
     if (branchMode === "main") {
-      console.error("Searching for last successful build on main branch");
-      build = await getLastSuccessfulBuildOnMain();
+      const successText = requireSuccess ? "successful" : "latest";
+      console.error(`Searching for last ${successText} build on main branch`);
+      if (requireSuccess) {
+        build = await getLastSuccessfulBuildOnMain();
+      } else {
+        // TODO: Implement getLastBuildOnMain() for any-state mode
+        console.error("--any-state with main branch not yet implemented, falling back to successful builds");
+        build = await getLastSuccessfulBuildOnMain();
+      }
     } else {
       // Use the existing utility function for current branch
       const currentBranch = getBranch() || getEnv("BUILDKITE_BRANCH", false) || "unknown";
-      console.error(`Searching for last successful build on current branch: ${currentBranch}`);
-      build = await getLastSuccessfulBuild();
+      const successText = requireSuccess ? "successful" : "latest";
+      console.error(`Searching for last ${successText} build on current branch: ${currentBranch}`);
+      
+      if (requireSuccess) {
+        build = await getLastSuccessfulBuild();
+      } else {
+        // For scope reduction: just get the last build regardless of state
+        // TODO: Implement getLastBuild() or modify existing function
+        console.error("--any-state mode not yet implemented, falling back to successful builds");
+        build = await getLastSuccessfulBuild();
+      }
     }
     
     if (build && build.id) {
-      console.error(`Found successful build: ${build.id} (${build.commit_id?.slice(0, 8)})`);
+      const stateText = requireSuccess ? "successful" : "found";
+      console.error(`Found ${stateText} build: ${build.id} (${build.commit_id?.slice(0, 8)})`);
       // Output just the build ID for CMake to capture
       console.log(build.id);
       process.exit(0);
     } else {
       const target = branchMode === "main" ? "main branch" : "current branch";
-      console.error(`No suitable successful build found on ${target}`);
+      const stateText = requireSuccess ? "successful" : "any";
+      console.error(`No suitable ${stateText} build found on ${target}`);
       process.exit(1);
     }
   } catch (error) {
