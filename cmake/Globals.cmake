@@ -966,6 +966,15 @@ message(STATUS "BUILDKITE: ${BUILDKITE}")
 message(STATUS "CACHE_STRATEGY: ${CACHE_STRATEGY}")
 message(STATUS "CACHE_PATH: ${CACHE_PATH}")
 message(STATUS "BUILD_PATH: ${BUILD_PATH}")
+
+# Ensure cache directories exist (create them if they don't)
+# This allows cache upload even when starting with empty cache
+if(BUILDKITE_CACHE AND BUILDKITE)
+  file(MAKE_DIRECTORY ${CACHE_PATH}/ccache)
+  file(MAKE_DIRECTORY ${CACHE_PATH}/zig/local)
+  file(MAKE_DIRECTORY ${CACHE_PATH}/zig/global)
+endif()
+
 if(IS_DIRECTORY ${CACHE_PATH}/ccache)
   message(STATUS "ccache directory exists: ${CACHE_PATH}/ccache")
 else()
