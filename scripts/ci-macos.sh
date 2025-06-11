@@ -134,22 +134,50 @@ cleanup_vm() {
         return 0
     fi
     
-    # Try to stop VM first if it's running
+    # Try to stop VM first if it's running (with timeout)
     if tart list | grep "$vm_name" | grep -q "running"; then
         log "🛑 Stopping running VM: $vm_name"
         tart stop "$vm_name" || log "⚠️ Failed to stop VM (may already be stopped)"
         sleep 2
+        
+        # Wait for VM to actually stop
+        local stop_attempts=0
+        while tart list | grep "$vm_name" | grep -q "running" && [ $stop_attempts -lt 10 ]; do
+            log "   Waiting for VM to stop... (attempt $((stop_attempts + 1))/10)"
+            sleep 2
+            stop_attempts=$((stop_attempts + 1))
+        done
+        
+        # Force kill if still running
+        if tart list | grep "$vm_name" | grep -q "running"; then
+            log "⚠️ VM still running after stop attempts, this may indicate a problem"
+        fi
     fi
     
-    # Delete the VM
-    log "🗑️  Deleting VM: $vm_name"
-    if tart delete "$vm_name"; then
-        log "✅ Successfully deleted VM: $vm_name"
-        return 0
-    else
-        log "❌ Failed to delete VM: $vm_name"
-        return 1
-    fi
+    # Delete the VM with retry logic
+    local delete_attempts=0
+    local max_delete_attempts=3
+    
+    while [ $delete_attempts -lt $max_delete_attempts ]; do
+        delete_attempts=$((delete_attempts + 1))
+        log "🗑️  Deleting VM: $vm_name (attempt $delete_attempts/$max_delete_attempts)"
+        
+        if tart delete "$vm_name" 2>/dev/null; then
+            log "✅ Successfully deleted VM: $vm_name"
+            return 0
+        else
+            log "❌ Failed to delete VM: $vm_name (attempt $delete_attempts)"
+            if [ $delete_attempts -lt $max_delete_attempts ]; then
+                log "   Retrying in 5 seconds..."
+                sleep 5
+            fi
+        fi
+    done
+    
+    # Final attempt with force if available
+    log "⚠️ All delete attempts failed, VM $vm_name may be orphaned"
+    log "   Manual cleanup may be required: tart delete $vm_name"
+    return 1
 }
 
 # Function to start logging
@@ -167,6 +195,13 @@ create_and_run_vm() {
     local workspace_dir="$3"
     local release="${4:-14}"  # Default to macOS 14 if not specified
 
+    # Fail-safe: Clean up any orphaned VMs from previous failed builds FIRST
+    log "🧹 Performing fail-safe cleanup of orphaned VMs..."
+    cleanup_orphaned_vms
+
+    # Make vm_name available globally for cleanup trap (only after cleanup is done)
+    VM_NAME_FOR_CLEANUP="$vm_name"
+
     # Determine the correct base VM image for this release
     local base_vm_image
     if [ -n "$BASE_VM_IMAGE" ]; then
@@ -182,13 +217,27 @@ create_and_run_vm() {
     tart list || log "Failed to list VMs"
     log "=========================="
 
-    # Monitor disk usage for awareness but take NO cleanup action during build phases
+    # Monitor disk usage and perform automatic cleanup if needed
     local current_usage=$(get_disk_usage)
     log "Current disk usage: ${current_usage}%"
     if [ "$current_usage" -gt "$DISK_USAGE_THRESHOLD" ]; then
         log "⚠️  WARNING: Disk usage at ${current_usage}% exceeds threshold (${DISK_USAGE_THRESHOLD}%)"
-        log "    Build phases perform NO cleanup - this is handled in VM preparation step"
-        log "    If needed, run cleanup manually: ./scripts/build-macos-vm.sh (includes cleanup)"
+        log "    Automatically cleaning up orphaned VMs to free space..."
+        
+        # Clean up orphaned temporary VMs automatically when disk usage is high
+        cleanup_orphaned_vms
+        
+        # Check disk usage again after cleanup
+        local usage_after_cleanup=$(get_disk_usage)
+        log "📊 Disk usage after cleanup: ${usage_after_cleanup}%"
+        
+        if [ "$usage_after_cleanup" -gt "$DISK_USAGE_THRESHOLD" ]; then
+            log "⚠️  WARNING: Disk usage still high after cleanup (${usage_after_cleanup}%)"
+            log "    This may indicate a deeper storage issue"
+            log "    Continuing with build, but consider manual investigation"
+        else
+            log "✅ Disk usage reduced to acceptable level (${usage_after_cleanup}%)"
+        fi
     fi
 
     # BUILD PHASES DO NO CLEANUP - this is handled in VM preparation step
@@ -217,22 +266,48 @@ create_and_run_vm() {
     fi
     
     log "✅ Base image found - cloning VM"
-    tart clone "$base_vm_image" "$vm_name"
+    if ! tart clone "$base_vm_image" "$vm_name"; then
+        log "❌ Failed to clone VM from base image: $base_vm_image"
+        log "   This could indicate disk space issues or corrupted base image"
+        exit 1
+    fi
+    log "✅ VM cloned successfully: $vm_name"
     
-    # Set up cleanup trap to ensure VM is deleted even if script exits early
+    # Set up cleanup trap IMMEDIATELY after VM creation to prevent orphaned VMs
     cleanup_trap() {
         local exit_code=$?
         log "🛡️  Cleanup trap triggered (exit code: $exit_code)"
-        cleanup_vm "$vm_name"
+        if [ -n "${VM_NAME_FOR_CLEANUP:-}" ]; then
+            cleanup_vm "$VM_NAME_FOR_CLEANUP"
+        else
+            log "⚠️  No VM name available for cleanup"
+        fi
     }
     trap cleanup_trap EXIT INT TERM
     
     log "Starting VM with workspace: $workspace_dir"
     tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" > vm.log 2>&1 &
+    local vm_pid=$!
     
     # Wait for VM to be ready
     log "Waiting for VM to be ready..."
     sleep 30
+
+    # Verify VM actually started
+    if ! tart list | grep "$vm_name" | grep -q "running"; then
+        log "❌ VM failed to start - not in running state"
+        log "   This often indicates insufficient disk space or other system issues"
+        log "   Checking vm.log for details..."
+        if [ -f vm.log ]; then
+            log "   VM log contents:"
+            tail -20 vm.log | while read -r line; do
+                log "     $line"
+            done
+        fi
+        # The cleanup trap will handle VM deletion
+        exit 1
+    fi
+    log "✅ VM is running successfully"
 
     # Make run-vm-command.sh executable
     chmod +x ./scripts/run-vm-command.sh
@@ -318,6 +393,10 @@ main() {
         cleanup_orphaned_vms
         exit 0
     fi
+    
+    # Start with a clean slate: Clean up any orphaned VMs before any operations
+    log "🧹 Initial cleanup: Removing any orphaned VMs from previous builds..."
+    cleanup_orphaned_vms
     
     # BUILD PHASES ONLY - no cleanup functionality
     # All cleanup is handled by VM preparation step (build-macos-vm.sh)
