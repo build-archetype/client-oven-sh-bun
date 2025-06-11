@@ -36,8 +36,39 @@ set(BUILDKITE_PATH ${BUILD_PATH}/buildkite)
 set(BUILDKITE_BUILDS_PATH ${BUILDKITE_PATH}/builds)
 
 if(NOT BUILDKITE_BUILD_ID)
-  # TODO: find the latest build on the main branch that passed
-  return()
+  # Try to find the latest successful build automatically
+  message(STATUS "No BUILDKITE_BUILD_ID provided, searching for latest successful build...")
+  
+  find_command(
+    VARIABLE NODE_EXECUTABLE
+    COMMAND node
+    REQUIRED OFF
+  )
+  
+  if(NODE_EXECUTABLE)
+    execute_process(
+      COMMAND ${NODE_EXECUTABLE} ${CWD}/scripts/get-last-build-id.mjs --branch=current
+      WORKING_DIRECTORY ${CWD}
+      OUTPUT_VARIABLE DETECTED_BUILD_ID
+      ERROR_VARIABLE BUILD_ID_ERROR
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      RESULT_VARIABLE DETECTION_RESULT
+    )
+    
+    if(DETECTION_RESULT EQUAL 0 AND DETECTED_BUILD_ID)
+      setx(BUILDKITE_BUILD_ID ${DETECTED_BUILD_ID})
+      message(STATUS "Found latest successful build: ${BUILDKITE_BUILD_ID}")
+    else()
+      message(STATUS "Could not find a suitable build for cache restoration")
+      if(BUILD_ID_ERROR)
+        message(STATUS "Error: ${BUILD_ID_ERROR}")
+      endif()
+      return()
+    endif()
+  else()
+    message(STATUS "Node.js not found, cannot auto-detect build ID")
+    return()
+  endif()
 endif()
 
 setx(BUILDKITE_BUILD_URL https://buildkite.com/${BUILDKITE_ORGANIZATION_SLUG}/${BUILDKITE_PIPELINE_SLUG}/builds/${BUILDKITE_BUILD_ID})
