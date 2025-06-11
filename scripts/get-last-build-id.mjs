@@ -7,17 +7,16 @@
  * Usage:
  *   node get-last-build-id.mjs [--branch=main|current]
  *   
- * Default: --branch=current (searches current branch)
+ * Default: --branch=current (searches current branch using existing utils)
  */
 
 import { getLastSuccessfulBuild, isBuildkite, getEnv, getBranch, curlSafe } from "./utils.mjs";
 
 /**
- * Find the last successful build on a specific branch
- * @param {string} targetBranch - The branch to search (e.g., "main", "feat/my-feature")
+ * Find the last successful build on main branch specifically
  * @returns {Promise<object|undefined>} - Build object with id, or undefined if not found
  */
-async function getLastSuccessfulBuildOnBranch(targetBranch) {
+async function getLastSuccessfulBuildOnMain() {
   if (!isBuildkite) {
     return undefined;
   }
@@ -25,8 +24,8 @@ async function getLastSuccessfulBuildOnBranch(targetBranch) {
   const orgSlug = getEnv("BUILDKITE_ORGANIZATION_SLUG", false) || "bun";
   const pipelineSlug = getEnv("BUILDKITE_PIPELINE_SLUG", false) || "bun";
   
-  // Search for builds on the target branch
-  const buildsUrl = `https://buildkite.com/${orgSlug}/${pipelineSlug}/builds?branch=${encodeURIComponent(targetBranch)}&state=passed&state=failed&state=canceled`;
+  // Search for builds on main branch
+  const buildsUrl = `https://buildkite.com/${orgSlug}/${pipelineSlug}/builds?branch=main&state=passed&state=failed&state=canceled`;
   
   try {
     const response = await curlSafe(buildsUrl, { json: true });
@@ -35,7 +34,7 @@ async function getLastSuccessfulBuildOnBranch(targetBranch) {
       return undefined;
     }
 
-    // Look through recent builds on this branch
+    // Look through recent builds on main branch
     for (const build of response) {
       const { state, steps, id } = build;
       
@@ -53,7 +52,7 @@ async function getLastSuccessfulBuildOnBranch(targetBranch) {
       }
     }
   } catch (error) {
-    console.error(`Error searching builds on branch ${targetBranch}:`, error.message);
+    console.error(`Error searching builds on main branch:`, error.message);
   }
   
   return undefined;
@@ -85,23 +84,16 @@ async function main() {
       process.exit(1);
     }
 
-    // Determine target branch
-    let targetBranch;
+    let build;
     if (branchMode === "main") {
-      targetBranch = "main";
+      console.error("Searching for last successful build on main branch");
+      build = await getLastSuccessfulBuildOnMain();
     } else {
-      // Use current branch
-      targetBranch = getBranch() || getEnv("BUILDKITE_BRANCH", false);
-      if (!targetBranch) {
-        console.error("Could not determine current branch");
-        process.exit(1);
-      }
+      // Use the existing utility function for current branch
+      const currentBranch = getBranch() || getEnv("BUILDKITE_BRANCH", false) || "unknown";
+      console.error(`Searching for last successful build on current branch: ${currentBranch}`);
+      build = await getLastSuccessfulBuild();
     }
-
-    console.error(`Searching for last successful build on branch: ${targetBranch}`);
-
-    // Search for successful build on the target branch
-    const build = await getLastSuccessfulBuildOnBranch(targetBranch);
     
     if (build && build.id) {
       console.error(`Found successful build: ${build.id} (${build.commit_id?.slice(0, 8)})`);
@@ -109,7 +101,8 @@ async function main() {
       console.log(build.id);
       process.exit(0);
     } else {
-      console.error(`No suitable successful build found on branch: ${targetBranch}`);
+      const target = branchMode === "main" ? "main branch" : "current branch";
+      console.error(`No suitable successful build found on ${target}`);
       process.exit(1);
     }
   } catch (error) {
