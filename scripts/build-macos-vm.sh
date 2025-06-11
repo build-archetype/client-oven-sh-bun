@@ -467,18 +467,56 @@ check_local_image_version() {
 # Check if remote image exists
 check_remote_image() {
     local remote_url="$1"
+    local force_remote_refresh="${2:-false}"
     log "🌐 Checking remote image: $remote_url" >&2
     
     # Fix permissions before trying to use tart (redirect output)
     fix_tart_permissions >&2
     
-    # Show that download is starting since VM images are large (GB+) and can take 10-30+ minutes
+    # Extract the image name from the URL for local checking
+    # URL format: ghcr.io/org/repo/image:tag
+    local remote_image_name
+    if [[ "$remote_url" =~ ([^/]+):([^:]+)$ ]]; then
+        remote_image_name="${BASH_REMATCH[1]}:${BASH_REMATCH[2]}"
+    else
+        # Fallback parsing
+        remote_image_name=$(basename "$remote_url")
+    fi
+    
+    # Skip cache checking if force refresh is requested
+    if [ "$force_remote_refresh" = "true" ]; then
+        log "   Force remote refresh requested - skipping cache check" >&2
+    else
+        # First check if this remote image is already cached locally
+        log "   Checking if remote image is already cached locally..." >&2
+        local tart_output=$(tart list 2>&1)
+        
+        # Check for cached remote image
+        if echo "$tart_output" | grep -q "^remote.*${remote_url}"; then
+            log "✅ Remote image already cached locally - no download needed" >&2
+            log "   Use --force-remote-refresh to force re-download latest version" >&2
+            return 0
+        fi
+        
+        # Also check if there's a local image with matching tag that might be from this remote
+        local image_tag="${remote_url##*:}"
+        if echo "$tart_output" | grep -q "remote.*${image_tag}"; then
+            log "✅ Found cached remote image with matching tag - no download needed" >&2
+            log "   Use --force-remote-refresh to force re-download latest version" >&2
+            return 0
+        fi
+        
+        log "   Remote image not found in local cache - downloading..." >&2
+    fi
+    
+    # Not cached or force refresh - need to pull
     log "📥 Starting download of remote VM image (may be 5-15GB+, please wait)..." >&2
     
     # Run tart pull directly to show native progress output (percentages, etc.)
     # Redirect to stderr to prevent pollution of decision output
     if tart pull "$remote_url" > /dev/stderr 2>&1; then
         log "✅ Remote image found and downloaded successfully" >&2
+        log "   Cached for future use - subsequent pulls will be instant" >&2
         return 0
     else
         log "❌ Remote image not found or download failed" >&2
@@ -612,16 +650,18 @@ make_caching_decision() {
     local remote_image_url="$4"
     local force_refresh="$5"
     local distributed_mode="$6"
+    local force_remote_refresh="${7:-false}"
     
     log "🧠 Making smart caching decision..." >&2
     log "  Target: Bun $target_bun_version, Bootstrap $target_bootstrap_version" >&2
     log "  Force refresh: $force_refresh" >&2
+    log "  Force remote refresh: $force_remote_refresh" >&2
     log "  Distributed mode: $distributed_mode" >&2
     
     # If force refresh, skip all local checks
     if [ "$force_refresh" = true ]; then
         log "🔄 Force refresh requested - will check remote then build" >&2
-        if check_remote_image "$remote_image_url"; then
+        if check_remote_image "$remote_image_url" "$force_remote_refresh"; then
             echo "use_remote"
         else
             echo "build_new"
@@ -632,7 +672,7 @@ make_caching_decision() {
     # In distributed mode, prioritize registry over local images
     if [ "$distributed_mode" = true ]; then
         log "🌐 Distributed mode: Checking registry first..." >&2
-        if check_remote_image "$remote_image_url"; then
+        if check_remote_image "$remote_image_url" "$force_remote_refresh"; then
             log "🎯 Decision: Use remote image (distributed mode)" >&2
             echo "use_remote|$remote_image_url"
             return
@@ -684,7 +724,7 @@ make_caching_decision() {
     # Priority 3: Check remote for perfect match (if not already done in distributed mode)
     if [ "$distributed_mode" != true ]; then
         log "🌐 No valid local matches, checking remote..." >&2
-        if check_remote_image "$remote_image_url"; then
+        if check_remote_image "$remote_image_url" "$force_remote_refresh"; then
             log "🎯 Decision: Use remote perfect match" >&2
             echo "use_remote|$remote_image_url"
             return
@@ -813,10 +853,15 @@ main() {
     local cleanup_only=false
     local distributed_mode=false
     local force_rebuild_all=false
+    local force_remote_refresh=false
     for arg in "$@"; do
         case $arg in
             --force-refresh)
                 force_refresh=true
+                shift
+                ;;
+            --force-remote-refresh)
+                force_remote_refresh=true
                 shift
                 ;;
             --cleanup-only)
@@ -839,12 +884,20 @@ main() {
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
                 echo "Options:"
-                echo "  --force-refresh      Force refresh of base image"
-                echo "  --cleanup-only       Clean up old VM images and exit"
-                echo "  --distributed        Enable distributed CI mode (registry-first)"
-                echo "  --force-rebuild-all  Delete all local VM images and rebuild from scratch"
-                echo "  --release=VERSION    macOS release version (13, 14) [default: 14]"
-                echo "  --help, -h           Show this help message"
+                echo "  --force-refresh         Force refresh of base image"
+                echo "  --force-remote-refresh  Force re-download of remote images (ignore cache)"
+                echo "  --cleanup-only          Clean up old VM images and exit"
+                echo "  --distributed           Enable distributed CI mode (registry-first)"
+                echo "  --force-rebuild-all     Delete all local VM images and rebuild from scratch"
+                echo "  --release=VERSION       macOS release version (13, 14) [default: 14]"
+                echo "  --help, -h              Show this help message"
+                echo ""
+                echo "Caching Behavior:"
+                echo "  • Local images are automatically cached and reused"
+                echo "  • Remote images are cached after first download"
+                echo "  • Use --force-remote-refresh to get latest remote versions"
+                echo "  • Use --force-refresh to skip all caching and rebuild"
+                echo "  • VM validation ensures cached images have required tools"
                 echo ""
                 echo "Environment Variables:"
                 echo "  MACOS_RELEASE       macOS release version (default: 14)"
@@ -855,12 +908,13 @@ main() {
                 echo "  REPOSITORY          Repository name (default: client-oven-sh-bun)"
                 echo ""
                 echo "Examples:"
-                echo "  $0                     # Build macOS 14 base image"
-                echo "  $0 --release=13        # Build macOS 13 base image"
-                echo "  $0 --distributed       # Enable distributed CI mode"
-                echo "  $0 --force-refresh     # Force rebuild of base image"
-                echo "  $0 --force-rebuild-all # Delete all local VMs and rebuild"
-                echo "  $0 --cleanup-only      # Clean up old images and exit"
+                echo "  $0                        # Build macOS 14 base image (use cache)"
+                echo "  $0 --release=13           # Build macOS 13 base image"
+                echo "  $0 --distributed          # Enable distributed CI mode"
+                echo "  $0 --force-refresh        # Force rebuild of base image"
+                echo "  $0 --force-remote-refresh # Force re-download of remote images"
+                echo "  $0 --force-rebuild-all    # Delete all local VMs and rebuild"
+                echo "  $0 --cleanup-only         # Clean up old images and exit"
                 exit 0
                 ;;
         esac
@@ -989,7 +1043,7 @@ main() {
     log "=== SMART CACHING ANALYSIS ==="
     
     # Make intelligent caching decision
-    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh" "$distributed_mode")
+    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh" "$distributed_mode" "$force_remote_refresh")
     
     log "Caching decision: $caching_decision"
     
