@@ -959,51 +959,62 @@ endfunction()
 # Upload cache artifacts after builds complete
 # These targets are always created but become no-ops when conditions aren't met
 
-# Helper function to create conditional cache upload targets
-function(create_cache_upload_target)
-  set(args TARGET CACHE_DIR ARCHIVE_NAME COMMENT)
-  cmake_parse_arguments(CACHE "" "${args}" "" ${ARGN})
-  
-  if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_DIR})
-    # Cache enabled and directory exists - create real upload target
-    register_command(
-      TARGET ${CACHE_TARGET}
-      COMMENT ${CACHE_COMMENT}
-      COMMAND ${CMAKE_COMMAND} -E tar czf ${CACHE_ARCHIVE_NAME} -C ${CACHE_DIR} .
-      COMMAND buildkite-agent artifact upload ${CACHE_ARCHIVE_NAME}
-      CWD ${BUILD_PATH}
-      ARTIFACTS ${BUILD_PATH}/${CACHE_ARCHIVE_NAME}
-    )
-  else()
-    # Cache disabled or directory missing - create no-op target
-    add_custom_target(${CACHE_TARGET}
-      COMMAND ${CMAKE_COMMAND} -E echo "Skipping ${CACHE_COMMENT} (cache disabled or directory missing)"
-      COMMENT "Skipping ${CACHE_COMMENT}"
-    )
-  endif()
-endfunction()
+# ccache upload target (always exists)
+if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/ccache)
+  # Cache enabled and directory exists - create real upload target
+  register_command(
+    TARGET upload-ccache-cache
+    COMMENT "Uploading ccache cache"
+    COMMAND ${CMAKE_COMMAND} -E tar czf ccache-cache.tar.gz -C ${CACHE_PATH}/ccache .
+    COMMAND buildkite-agent artifact upload ccache-cache.tar.gz
+    CWD ${BUILD_PATH}
+    ARTIFACTS ${BUILD_PATH}/ccache-cache.tar.gz
+  )
+else()
+  # Cache disabled or directory missing - create no-op target
+  add_custom_target(upload-ccache-cache
+    COMMAND ${CMAKE_COMMAND} -E echo "Skipping ccache cache upload \\(cache disabled or directory missing\\)"
+    COMMENT "Skipping ccache cache upload"
+  )
+endif()
 
-# Create cache upload targets (always exist, but may be no-ops)
-create_cache_upload_target(
-  TARGET upload-ccache-cache
-  CACHE_DIR ${CACHE_PATH}/ccache
-  ARCHIVE_NAME ccache-cache.tar.gz
-  COMMENT "Uploading ccache cache"
-)
+# Zig local cache upload target (always exists)
+if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/zig/local)
+  # Cache enabled and directory exists - create real upload target
+  register_command(
+    TARGET upload-zig-local-cache
+    COMMENT "Uploading Zig local cache"
+    COMMAND ${CMAKE_COMMAND} -E tar czf zig-local-cache.tar.gz -C ${CACHE_PATH}/zig/local .
+    COMMAND buildkite-agent artifact upload zig-local-cache.tar.gz
+    CWD ${BUILD_PATH}
+    ARTIFACTS ${BUILD_PATH}/zig-local-cache.tar.gz
+  )
+else()
+  # Cache disabled or directory missing - create no-op target
+  add_custom_target(upload-zig-local-cache
+    COMMAND ${CMAKE_COMMAND} -E echo "Skipping Zig local cache upload \\(cache disabled or directory missing\\)"
+    COMMENT "Skipping Zig local cache upload"
+  )
+endif()
 
-create_cache_upload_target(
-  TARGET upload-zig-local-cache
-  CACHE_DIR ${CACHE_PATH}/zig/local
-  ARCHIVE_NAME zig-local-cache.tar.gz
-  COMMENT "Uploading Zig local cache"
-)
-
-create_cache_upload_target(
-  TARGET upload-zig-global-cache
-  CACHE_DIR ${CACHE_PATH}/zig/global
-  ARCHIVE_NAME zig-global-cache.tar.gz
-  COMMENT "Uploading Zig global cache"
-)
+# Zig global cache upload target (always exists)
+if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/zig/global)
+  # Cache enabled and directory exists - create real upload target
+  register_command(
+    TARGET upload-zig-global-cache
+    COMMENT "Uploading Zig global cache"
+    COMMAND ${CMAKE_COMMAND} -E tar czf zig-global-cache.tar.gz -C ${CACHE_PATH}/zig/global .
+    COMMAND buildkite-agent artifact upload zig-global-cache.tar.gz
+    CWD ${BUILD_PATH}
+    ARTIFACTS ${BUILD_PATH}/zig-global-cache.tar.gz
+  )
+else()
+  # Cache disabled or directory missing - create no-op target
+  add_custom_target(upload-zig-global-cache
+    COMMAND ${CMAKE_COMMAND} -E echo "Skipping Zig global cache upload \\(cache disabled or directory missing\\)"
+    COMMENT "Skipping Zig global cache upload"
+  )
+endif()
 
 # Meta target to upload all cache types (always exists)
 add_custom_target(upload-all-caches
