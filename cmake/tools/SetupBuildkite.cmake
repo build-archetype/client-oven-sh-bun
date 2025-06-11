@@ -179,7 +179,6 @@ if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CA
     TARGET upload-ccache-cache
     COMMENT "Uploading ccache cache"
     COMMAND ${CMAKE_COMMAND} -E tar czf ccache-cache.tar.gz -C ${CACHE_PATH}/ccache .
-    COMMAND buildkite-agent artifact upload ccache-cache.tar.gz
     CWD ${BUILD_PATH}
     ARTIFACTS ${BUILD_PATH}/ccache-cache.tar.gz
   )
@@ -200,7 +199,6 @@ if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CA
     TARGET upload-zig-local-cache
     COMMENT "Uploading Zig local cache"
     COMMAND ${CMAKE_COMMAND} -E tar czf zig-local-cache.tar.gz -C ${CACHE_PATH}/zig/local .
-    COMMAND buildkite-agent artifact upload zig-local-cache.tar.gz
     CWD ${BUILD_PATH}
     ARTIFACTS ${BUILD_PATH}/zig-local-cache.tar.gz
   )
@@ -221,7 +219,6 @@ if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CA
     TARGET upload-zig-global-cache
     COMMENT "Uploading Zig global cache"
     COMMAND ${CMAKE_COMMAND} -E tar czf zig-global-cache.tar.gz -C ${CACHE_PATH}/zig/global .
-    COMMAND buildkite-agent artifact upload zig-global-cache.tar.gz
     CWD ${BUILD_PATH}
     ARTIFACTS ${BUILD_PATH}/zig-global-cache.tar.gz
   )
