@@ -509,19 +509,77 @@ check_remote_image() {
         log "   Remote image not found in local cache - downloading..." >&2
     fi
     
+    # Set up registry authentication before pulling
+    log "🔐 Setting up registry authentication..." >&2
+    local auth_setup=false
+    local original_username="${TART_REGISTRY_USERNAME:-}"
+    local original_password="${TART_REGISTRY_PASSWORD:-}"
+    
+    # Check if we have credentials
+    if [ -n "${GITHUB_TOKEN:-}" ] && [ -n "${GITHUB_USERNAME:-}" ]; then
+        log "   Using GitHub credentials from environment" >&2
+        export TART_REGISTRY_USERNAME="$GITHUB_USERNAME"
+        export TART_REGISTRY_PASSWORD="$GITHUB_TOKEN"
+        auth_setup=true
+    elif [ -f /tmp/github-token.txt ] && [ -f /tmp/github-username.txt ]; then
+        log "   Using GitHub credentials from legacy files" >&2
+        local file_token=$(cat /tmp/github-token.txt 2>/dev/null || echo "")
+        local file_username=$(cat /tmp/github-username.txt 2>/dev/null || echo "")
+        if [ -n "$file_token" ] && [ -n "$file_username" ]; then
+            export TART_REGISTRY_USERNAME="$file_username"
+            export TART_REGISTRY_PASSWORD="$file_token"
+            auth_setup=true
+        fi
+    fi
+    
+    if [ "$auth_setup" = false ]; then
+        log "   ⚠️  No credentials found - attempting unauthenticated pull" >&2
+    else
+        log "   ✅ Registry authentication configured" >&2
+    fi
+    
     # Not cached or force refresh - need to pull
     log "📥 Starting download of remote VM image (may be 5-15GB+, please wait)..." >&2
     
     # Run tart pull directly to show native progress output (percentages, etc.)
     # Redirect to stderr to prevent pollution of decision output
+    local pull_result=0
     if tart pull "$remote_url" > /dev/stderr 2>&1; then
         log "✅ Remote image found and downloaded successfully" >&2
         log "   Cached for future use - subsequent pulls will be instant" >&2
-        return 0
+        pull_result=0
     else
         log "❌ Remote image not found or download failed" >&2
-        return 1
+        if [ "$auth_setup" = false ]; then
+            log "   Possible causes:" >&2
+            log "   - Image doesn't exist in registry" >&2
+            log "   - Registry requires authentication (set GITHUB_TOKEN and GITHUB_USERNAME)" >&2
+        else
+            log "   Possible causes:" >&2
+            log "   - Image doesn't exist in registry" >&2
+            log "   - Authentication failed (check GITHUB_TOKEN permissions)" >&2
+            log "   - Network connectivity issues" >&2
+        fi
+        pull_result=1
     fi
+    
+    # Clean up authentication (restore original values if they existed)
+    if [ "$auth_setup" = true ]; then
+        if [ -n "$original_username" ]; then
+            export TART_REGISTRY_USERNAME="$original_username"
+        else
+            unset TART_REGISTRY_USERNAME 2>/dev/null || true
+        fi
+        
+        if [ -n "$original_password" ]; then
+            export TART_REGISTRY_PASSWORD="$original_password"
+        else
+            unset TART_REGISTRY_PASSWORD 2>/dev/null || true
+        fi
+        log "   🧹 Registry authentication cleaned up" >&2
+    fi
+    
+    return $pull_result
 }
 
 # Validate that a VM image has all required tools installed
@@ -710,19 +768,22 @@ make_caching_decision() {
     local target_image_name="$3"
     local remote_image_url="$4"
     local force_refresh="$5"
-    local distributed_mode="$6"
-    local force_remote_refresh="${7:-false}"
+    local force_remote_refresh="${6:-false}"
+    local local_dev_mode="${7:-false}"
     
     log "🧠 Making smart caching decision..." >&2
     log "  Target: Bun $target_bun_version, Bootstrap $target_bootstrap_version" >&2
     log "  Force refresh: $force_refresh" >&2
     log "  Force remote refresh: $force_remote_refresh" >&2
-    log "  Distributed mode: $distributed_mode" >&2
+    log "  Local dev mode: $local_dev_mode" >&2
     
     # If force refresh, skip all local checks
     if [ "$force_refresh" = true ]; then
         log "🔄 Force refresh requested - will check remote then build" >&2
-        if check_remote_image "$remote_image_url" "$force_remote_refresh"; then
+        if [ "$local_dev_mode" = true ]; then
+            log "🏠 Local dev mode: Skipping remote check, will build from base" >&2
+            echo "build_new"
+        elif check_remote_image "$remote_image_url" "$force_remote_refresh"; then
             echo "use_remote"
         else
             echo "build_new"
@@ -730,19 +791,7 @@ make_caching_decision() {
         return
     fi
     
-    # In distributed mode, prioritize registry over local images
-    if [ "$distributed_mode" = true ]; then
-        log "🌐 Distributed mode: Checking registry first..." >&2
-        if check_remote_image "$remote_image_url" "$force_remote_refresh"; then
-            log "🎯 Decision: Use remote image (distributed mode)" >&2
-            echo "use_remote|$remote_image_url"
-            return
-        fi
-        
-        log "❌ No remote image found, checking local as fallback..." >&2
-    fi
-    
-    # Check local images (skip in distributed mode if remote was found)
+    # Check local images first (always do this regardless of mode)
     local local_analysis=$(check_local_image_version "$target_bun_version" "$target_bootstrap_version" "$target_image_name")
     
     # Parse the enhanced results: exact|compatible|usable|all
@@ -782,14 +831,20 @@ make_caching_decision() {
         fi
     fi
     
-    # Priority 3: Check remote for perfect match (if not already done in distributed mode)
-    if [ "$distributed_mode" != true ]; then
-        log "🌐 No valid local matches, checking remote..." >&2
+    # Priority 3: Check remote registry (skip only in local dev mode)
+    if [ "$local_dev_mode" = true ]; then
+        log "🏠 Local dev mode: Skipping remote registry checks" >&2
+        log "🎯 Decision: Build new image from local base (local dev mode)" >&2
+        echo "build_new"
+        return
+    else
+        log "🌐 Checking remote registry..." >&2
         if check_remote_image "$remote_image_url" "$force_remote_refresh"; then
-            log "🎯 Decision: Use remote perfect match" >&2
+            log "🎯 Decision: Use remote image" >&2
             echo "use_remote|$remote_image_url"
             return
         fi
+        log "❌ No remote image found, will build new" >&2
     fi
     
     # Priority 4: Build from scratch
@@ -912,9 +967,9 @@ main() {
     # Parse arguments
     local force_refresh=false
     local cleanup_only=false
-    local distributed_mode=false
     local force_rebuild_all=false
     local force_remote_refresh=false
+    local local_dev_mode=false
     for arg in "$@"; do
         case $arg in
             --force-refresh)
@@ -929,12 +984,12 @@ main() {
                 cleanup_only=true
                 shift
                 ;;
-            --distributed)
-                distributed_mode=true
-                shift
-                ;;
             --force-rebuild-all)
                 force_rebuild_all=true
+                shift
+                ;;
+            --local-dev)
+                local_dev_mode=true
                 shift
                 ;;
             --release=*)
@@ -948,16 +1003,21 @@ main() {
                 echo "  --force-refresh         Force refresh of base image"
                 echo "  --force-remote-refresh  Force re-download of remote images (ignore cache)"
                 echo "  --cleanup-only          Clean up old VM images and exit"
-                echo "  --distributed           Enable distributed CI mode (registry-first)"
+                echo "  --local-dev             Enable local development mode (skip remote registry)"
                 echo "  --force-rebuild-all     Delete all local VM images and rebuild from scratch"
                 echo "  --release=VERSION       macOS release version (13, 14) [default: 14]"
                 echo "  --help, -h              Show this help message"
                 echo ""
+                echo "Local Development:"
+                echo "  Use --local-dev to skip remote registry checks and work offline"
+                echo "  This mode focuses on local image caching and base image reuse"
+                echo ""
                 echo "Caching Behavior:"
                 echo "  • Local images are automatically cached and reused"
-                echo "  • Remote images are cached after first download"
+                echo "  • Remote images are checked and cached after first download"
                 echo "  • Use --force-remote-refresh to get latest remote versions"
                 echo "  • Use --force-refresh to skip all caching and rebuild"
+                echo "  • Use --local-dev to skip remote registry entirely (offline mode)"
                 echo "  • VM validation ensures cached images have required tools"
                 echo ""
                 echo "Environment Variables:"
@@ -967,11 +1027,13 @@ main() {
                 echo "  REGISTRY            Container registry (default: ghcr.io)"
                 echo "  ORGANIZATION        Organization name (default: build-archetype)"
                 echo "  REPOSITORY          Repository name (default: client-oven-sh-bun)"
+                echo "  GITHUB_TOKEN        GitHub token for registry authentication"
+                echo "  GITHUB_USERNAME     GitHub username for registry authentication"
                 echo ""
                 echo "Examples:"
-                echo "  $0                        # Build macOS 14 base image (use cache)"
+                echo "  $0                        # Build macOS 14 image (check local → remote → build)"
+                echo "  $0 --local-dev            # Local development mode (skip remote registry)"
                 echo "  $0 --release=13           # Build macOS 13 base image"
-                echo "  $0 --distributed          # Enable distributed CI mode"
                 echo "  $0 --force-refresh        # Force rebuild of base image"
                 echo "  $0 --force-remote-refresh # Force re-download of remote images"
                 echo "  $0 --force-rebuild-all    # Delete all local VMs and rebuild"
@@ -1104,7 +1166,7 @@ main() {
     log "=== SMART CACHING ANALYSIS ==="
     
     # Make intelligent caching decision
-    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh" "$distributed_mode" "$force_remote_refresh")
+    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh" "$force_remote_refresh" "$local_dev_mode")
     
     log "Caching decision: $caching_decision"
     
