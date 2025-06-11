@@ -6,6 +6,7 @@
  */
 
 import { join } from "node:path";
+import os from "node:os";
 import {
   getBootstrapVersion,
   getBuildkiteEmoji,
@@ -1153,7 +1154,6 @@ const MAC_OS_VM_RESOURCES = {
 
 // Auto-detect optimal configuration based on system resources
 function getOptimalMacOSVMResources() {
-  const os = require('os');
   const totalMemoryGB = Math.round(os.totalmem() / (1024 ** 3));
   const totalCores = os.cpus().length;
   
