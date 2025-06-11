@@ -178,7 +178,7 @@ if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CA
   register_command(
     TARGET upload-ccache-cache
     COMMENT "Uploading ccache cache"
-    COMMAND ${CMAKE_COMMAND} -E tar czf ccache-cache.tar.gz -C ${CACHE_PATH}/ccache .
+    COMMAND ${CMAKE_COMMAND} -E chdir ${CACHE_PATH}/ccache ${CMAKE_COMMAND} -E tar czf ${BUILD_PATH}/ccache-cache.tar.gz .
     CWD ${BUILD_PATH}
     ARTIFACTS ${BUILD_PATH}/ccache-cache.tar.gz
   )
@@ -198,7 +198,7 @@ if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CA
   register_command(
     TARGET upload-zig-local-cache
     COMMENT "Uploading Zig local cache"
-    COMMAND ${CMAKE_COMMAND} -E tar czf zig-local-cache.tar.gz -C ${CACHE_PATH}/zig/local .
+    COMMAND ${CMAKE_COMMAND} -E chdir ${CACHE_PATH}/zig/local ${CMAKE_COMMAND} -E tar czf ${BUILD_PATH}/zig-local-cache.tar.gz .
     CWD ${BUILD_PATH}
     ARTIFACTS ${BUILD_PATH}/zig-local-cache.tar.gz
   )
@@ -218,7 +218,7 @@ if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CA
   register_command(
     TARGET upload-zig-global-cache
     COMMENT "Uploading Zig global cache"
-    COMMAND ${CMAKE_COMMAND} -E tar czf zig-global-cache.tar.gz -C ${CACHE_PATH}/zig/global .
+    COMMAND ${CMAKE_COMMAND} -E chdir ${CACHE_PATH}/zig/global ${CMAKE_COMMAND} -E tar czf ${BUILD_PATH}/zig-global-cache.tar.gz .
     CWD ${BUILD_PATH}
     ARTIFACTS ${BUILD_PATH}/zig-global-cache.tar.gz
   )
