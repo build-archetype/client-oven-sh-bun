@@ -959,6 +959,30 @@ endfunction()
 # Upload cache artifacts after builds complete
 # These targets are always created but become no-ops when conditions aren't met
 
+# Debug cache upload conditions
+message(STATUS "=== CACHE UPLOAD DEBUG ===")
+message(STATUS "BUILDKITE_CACHE: ${BUILDKITE_CACHE}")
+message(STATUS "BUILDKITE: ${BUILDKITE}")
+message(STATUS "CACHE_STRATEGY: ${CACHE_STRATEGY}")
+message(STATUS "CACHE_PATH: ${CACHE_PATH}")
+message(STATUS "BUILD_PATH: ${BUILD_PATH}")
+if(IS_DIRECTORY ${CACHE_PATH}/ccache)
+  message(STATUS "ccache directory exists: ${CACHE_PATH}/ccache")
+else()
+  message(STATUS "ccache directory missing: ${CACHE_PATH}/ccache")
+endif()
+if(IS_DIRECTORY ${CACHE_PATH}/zig/local)
+  message(STATUS "zig/local directory exists: ${CACHE_PATH}/zig/local")
+else()
+  message(STATUS "zig/local directory missing: ${CACHE_PATH}/zig/local")
+endif()
+if(IS_DIRECTORY ${CACHE_PATH}/zig/global)
+  message(STATUS "zig/global directory exists: ${CACHE_PATH}/zig/global")
+else()
+  message(STATUS "zig/global directory missing: ${CACHE_PATH}/zig/global")
+endif()
+message(STATUS "=== END CACHE UPLOAD DEBUG ===")
+
 # ccache upload target (always exists)
 if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/ccache)
   # Cache enabled and directory exists - create real upload target
