@@ -958,9 +958,9 @@ endfunction()
 # === BUILDKITE CACHE UPLOAD TARGETS ===
 # Upload cache artifacts after builds complete
 
-if(BUILDKITE_CACHE AND BUILDKITE AND BUN_LINK_ONLY AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only"))
+if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only"))
   
-  # ccache upload
+  # ccache upload - should happen after C++ build step
   if(IS_DIRECTORY ${CACHE_PATH}/ccache)
     register_command(
       TARGET upload-ccache-cache
@@ -972,7 +972,7 @@ if(BUILDKITE_CACHE AND BUILDKITE AND BUN_LINK_ONLY AND (CACHE_STRATEGY STREQUAL 
     )
   endif()
 
-  # Zig local cache upload
+  # Zig local cache upload - should happen after Zig build step
   if(IS_DIRECTORY ${CACHE_PATH}/zig/local)
     register_command(
       TARGET upload-zig-local-cache
@@ -984,7 +984,7 @@ if(BUILDKITE_CACHE AND BUILDKITE AND BUN_LINK_ONLY AND (CACHE_STRATEGY STREQUAL 
     )
   endif()
 
-  # Zig global cache upload
+  # Zig global cache upload - should happen after Zig build step
   if(IS_DIRECTORY ${CACHE_PATH}/zig/global)
     register_command(
       TARGET upload-zig-global-cache
