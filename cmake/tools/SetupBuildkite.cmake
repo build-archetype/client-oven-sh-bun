@@ -6,7 +6,9 @@ endif()
 
 optionx(BUILDKITE_CACHE BOOL "If the build can use Buildkite caches, even if not running in Buildkite" DEFAULT ${DEFAULT_BUILDKITE_CACHE})
 
-if(NOT BUILDKITE_CACHE OR NOT BUN_LINK_ONLY)
+# Cache restoration should happen for all build types (cpp, zig, link)
+# Only skip if BUILDKITE_CACHE is disabled
+if(NOT BUILDKITE_CACHE)
   return()
 endif()
 
@@ -99,6 +101,15 @@ else()
 endif()
 
 # === END CACHE RESTORATION ===
+
+# === BUILD ARTIFACT DOWNLOADING ===
+# Only download build artifacts (libbun-*.a) for linking step
+# Cache restoration above should run for all build types
+
+if(NOT BUN_LINK_ONLY)
+  message(STATUS "Skipping build artifact downloading - only needed for linking step")
+  return()
+endif()
 
 file(
   DOWNLOAD ${BUILDKITE_BUILD_URL}
