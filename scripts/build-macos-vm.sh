@@ -219,23 +219,25 @@ cleanup_old_images() {
     fi
     
     # Mark all others for deletion
-    for image in "${all_bun_images[@]}"; do
-        local should_keep=false
-        
-        # Keep if it's the latest for macOS 13
-        if [ -n "${latest_macos13_image:-}" ] && [ "$image" = "${latest_macos13_image}" ]; then
-            should_keep=true
-        fi
-        
-        # Keep if it's the latest for macOS 14
-        if [ -n "${latest_macos14_image:-}" ] && [ "$image" = "${latest_macos14_image}" ]; then
-            should_keep=true
-        fi
-        
-        if [ "$should_keep" = false ]; then
-            images_to_delete+=("$image")
-        fi
-    done
+    if [ ${#all_bun_images[@]} -gt 0 ]; then
+        for image in "${all_bun_images[@]}"; do
+            local should_keep=false
+            
+            # Keep if it's the latest for macOS 13
+            if [ -n "${latest_macos13_image:-}" ] && [ "$image" = "${latest_macos13_image}" ]; then
+                should_keep=true
+            fi
+            
+            # Keep if it's the latest for macOS 14
+            if [ -n "${latest_macos14_image:-}" ] && [ "$image" = "${latest_macos14_image}" ]; then
+                should_keep=true
+            fi
+            
+            if [ "$should_keep" = false ]; then
+                images_to_delete+=("$image")
+            fi
+        done
+    fi
     
     # Delete old images
     if [ ${#images_to_delete[@]} -gt 0 ]; then
@@ -713,6 +715,39 @@ main() {
     # Add any temporary installations here before image operations
     log "=== TEMPORARY INSTALLATIONS ==="
     log "🔧 Running temporary installation steps..."
+    
+    # Check and install sshpass (required for VM SSH operations)
+    log "Checking for sshpass..."
+    if ! command -v sshpass >/dev/null 2>&1; then
+        log "🔧 sshpass is required but not found - installing automatically..."
+        
+        # Try to use Homebrew to install sshpass
+        if command -v brew >/dev/null 2>&1; then
+            log "   Installing sshpass via Homebrew..."
+            if brew install sshpass; then
+                log "✅ sshpass installed successfully"
+            else
+                log "❌ Failed to install sshpass via Homebrew"
+                log "   Please install sshpass manually:"
+                log "   brew install sshpass"
+                exit 1
+            fi
+        else
+            log "❌ Homebrew not found - cannot auto-install sshpass"
+            log "   Please install sshpass manually:"
+            log "   1. Install Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            log "   2. Install sshpass: brew install sshpass"
+            exit 1
+        fi
+        
+        # Verify installation
+        if ! command -v sshpass >/dev/null 2>&1; then
+            log "❌ sshpass installation failed - still not available"
+            exit 1
+        fi
+    else
+        log "✅ sshpass is available"
+    fi
     
     # Example: Install or update required tools
     # Uncomment and modify as needed:
