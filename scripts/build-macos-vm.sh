@@ -1131,6 +1131,13 @@ main() {
         tart clone "$INCREMENTAL_BASE_IMAGE" "$LOCAL_IMAGE_NAME"
         log "✅ Incremental base cloned"
         
+        # Allocate VM resources for build performance
+        log "Allocating VM resources for build performance..."
+        log "  Setting memory: ${MACOS_VM_MEMORY:-16384}MB (${MACOS_VM_CONFIG_DESCRIPTION:-default configuration})"
+        log "  Setting CPUs: ${MACOS_VM_CPU:-8} cores"
+        tart set "$LOCAL_IMAGE_NAME" --memory "${MACOS_VM_MEMORY:-16384}" --cpu "${MACOS_VM_CPU:-8}"
+        log "✅ VM resources allocated"
+        
         IS_INCREMENTAL_BUILD=true
     else
         log "=== BUILDING NEW BASE IMAGE ==="

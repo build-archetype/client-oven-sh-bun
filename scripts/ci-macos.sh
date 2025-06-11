@@ -273,6 +273,13 @@ create_and_run_vm() {
     fi
     log "✅ VM cloned successfully: $vm_name"
     
+    # Allocate VM resources for build performance
+    log "Allocating VM resources for build performance..."
+    log "  Setting memory: ${MACOS_VM_MEMORY:-16384}MB (${MACOS_VM_CONFIG_DESCRIPTION:-default configuration})"
+    log "  Setting CPUs: ${MACOS_VM_CPU:-8} cores"
+    tart set "$vm_name" --memory "${MACOS_VM_MEMORY:-16384}" --cpu "${MACOS_VM_CPU:-8}"
+    log "✅ VM resources allocated"
+    
     # Set up cleanup trap IMMEDIATELY after VM creation to prevent orphaned VMs
     cleanup_trap() {
         local exit_code=$?

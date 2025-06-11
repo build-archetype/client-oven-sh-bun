@@ -401,6 +401,10 @@ function getBuildEnv(target, options) {
     ABI: abi === "musl" ? "musl" : undefined,
     CMAKE_VERBOSE_MAKEFILE: "ON",
     CMAKE_TLS_VERIFY: "0",
+    // macOS VM Resource Configuration (centralized)
+    MACOS_VM_MEMORY: macOSVmResources.memory.toString(),
+    MACOS_VM_CPU: macOSVmResources.cpu.toString(),
+    MACOS_VM_CONFIG_DESCRIPTION: macOSVmResources.description,
   };
 }
 
@@ -1120,6 +1124,83 @@ function getMacOSVMBuildStep(platform, options) {
     timeout_in_minutes: 720,
   };
 }
+
+// === MAC_OS_VM_RESOURCE_CONFIGURATION ===
+// Centralized configuration for Tart macOS VM resources
+// Adjust these based on your build machine specs
+const MAC_OS_VM_RESOURCES = {
+  // For Mac Mini M4 (24GB RAM, ~10 cores)
+  macMiniM4: {
+    memory: 16384,  // 16GB - leaves 8GB for host + overhead
+    cpu: 8,         // 8 cores - leaves 2 for host
+    description: "Mac Mini M4 (24GB RAM, ~10 cores)"
+  },
+  
+  // For Mac Studio M2 Max (64GB RAM, ~12 cores) 
+  macStudioM2Max: {
+    memory: 32768,  // 32GB - leaves 32GB for host + overhead
+    cpu: 10,        // 10 cores - leaves 2 for host
+    description: "Mac Studio M2 Max (64GB RAM, ~12 cores)"
+  },
+  
+  // Conservative default for unknown hardware
+  default: {
+    memory: 12288,  // 12GB
+    cpu: 6,         // 6 cores
+    description: "Conservative default"
+  }
+};
+
+// Auto-detect optimal configuration based on system resources
+function getOptimalMacOSVMResources() {
+  const os = require('os');
+  const totalMemoryGB = Math.round(os.totalmem() / (1024 ** 3));
+  const totalCores = os.cpus().length;
+  
+  console.log(`🔍 Detected system: ${totalMemoryGB}GB RAM, ${totalCores} cores`);
+  
+  // Auto-select configuration based on detected specs
+  if (totalMemoryGB >= 24 && totalCores >= 10) {
+    if (totalMemoryGB >= 64) {
+      console.log(`📊 Using Mac Studio M2 Max configuration`);
+      return MAC_OS_VM_RESOURCES.macStudioM2Max;
+    } else {
+      console.log(`📊 Using Mac Mini M4 configuration`);
+      return MAC_OS_VM_RESOURCES.macMiniM4;
+    }
+  } else {
+    console.log(`📊 Using conservative default configuration`);
+    return MAC_OS_VM_RESOURCES.default;
+  }
+}
+
+// Get macOS VM resources (can be overridden via environment variables)
+function getMacOSVMResources() {
+  // Allow environment variable override
+  if (process.env.MACOS_VM_MEMORY && process.env.MACOS_VM_CPU) {
+    return {
+      memory: parseInt(process.env.MACOS_VM_MEMORY),
+      cpu: parseInt(process.env.MACOS_VM_CPU),
+      description: "Environment override"
+    };
+  }
+  
+  // Allow profile override
+  const profile = process.env.MACOS_VM_PROFILE;
+  if (profile && MAC_OS_VM_RESOURCES[profile]) {
+    console.log(`📊 Using macOS VM profile: ${profile}`);
+    return MAC_OS_VM_RESOURCES[profile];
+  }
+  
+  // Auto-detect optimal configuration
+  return getOptimalMacOSVMResources();
+}
+
+// Export macOS VM resource configuration for shell scripts
+const macOSVmResources = getMacOSVMResources();
+console.log(`🖥️  macOS VM Configuration: ${macOSVmResources.memory}MB RAM, ${macOSVmResources.cpu} CPUs (${macOSVmResources.description})`);
+
+// === END MAC_OS_VM_RESOURCE_CONFIGURATION ===
 
 /**
  * @param {PipelineOptions} [options]
