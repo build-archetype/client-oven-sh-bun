@@ -518,6 +518,8 @@ check_remote_image() {
     # Check if we have credentials
     if [ -n "${GITHUB_TOKEN:-}" ] && [ -n "${GITHUB_USERNAME:-}" ]; then
         log "   Using GitHub credentials from environment" >&2
+        log "   Username: $GITHUB_USERNAME" >&2
+        log "   Token: ${GITHUB_TOKEN:0:8}... (${#GITHUB_TOKEN} chars)" >&2
         export TART_REGISTRY_USERNAME="$GITHUB_USERNAME"
         export TART_REGISTRY_PASSWORD="$GITHUB_TOKEN"
         auth_setup=true
@@ -526,6 +528,8 @@ check_remote_image() {
         local file_token=$(cat /tmp/github-token.txt 2>/dev/null || echo "")
         local file_username=$(cat /tmp/github-username.txt 2>/dev/null || echo "")
         if [ -n "$file_token" ] && [ -n "$file_username" ]; then
+            log "   Username: $file_username" >&2
+            log "   Token: ${file_token:0:8}... (${#file_token} chars)" >&2
             export TART_REGISTRY_USERNAME="$file_username"
             export TART_REGISTRY_PASSWORD="$file_token"
             auth_setup=true
