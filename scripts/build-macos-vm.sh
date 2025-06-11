@@ -1221,6 +1221,168 @@ main() {
         exit 1
     fi
 
+    # TEMPORARY: Run codesigning environment diagnostics
+    log "=== CODESIGNING ENVIRONMENT DIAGNOSTICS (TEMPORARY) ==="
+    log "Running codesigning environment check for debugging..."
+    
+    local codesigning_check='
+        echo ""
+        echo "=== CODESIGNING & SDK ENVIRONMENT DIAGNOSTICS ==="
+        echo "Checking environment for '"'"'bun build --compile'"'"' / Mach-O generation issues..."
+        echo ""
+        
+        # Check Xcode tools
+        echo "📋 Xcode Developer Tools:"
+        if command -v xcode-select >/dev/null 2>&1; then
+            xcode_path=$(xcode-select -p 2>/dev/null || echo "NOT SET")
+            echo "  ✅ xcode-select: $xcode_path"
+            
+            # Check if the path actually exists
+            if [ -d "$xcode_path" ]; then
+                echo "  ✅ Developer directory exists: $xcode_path"
+            else
+                echo "  ❌ Developer directory missing: $xcode_path"
+            fi
+        else
+            echo "  ❌ xcode-select: NOT FOUND"
+        fi
+        
+        # Check codesigning tools
+        echo ""
+        echo "🔐 Codesigning Tools:"
+        codesign_tools="codesign notarytool xcrun security"
+        for tool in $codesign_tools; do
+            if command -v "$tool" >/dev/null 2>&1; then
+                tool_path=$(which "$tool")
+                echo "  ✅ $tool: $tool_path"
+                
+                # Try to get version if possible
+                case "$tool" in
+                    codesign)
+                        version=$(codesign --version 2>/dev/null || echo "version unknown")
+                        echo "     Version: $version"
+                        ;;
+                    xcrun)
+                        version=$(xcrun --version 2>/dev/null || echo "version unknown")  
+                        echo "     Version: $version"
+                        ;;
+                esac
+            else
+                echo "  ❌ $tool: NOT FOUND"
+            fi
+        done
+        
+        # Check SDK paths and environment variables
+        echo ""
+        echo "🛠️  SDK Environment Variables:"
+        sdk_vars="SDK_PATH XCODE_SDK_PATH DEVELOPER_DIR SDKROOT MACOSX_DEPLOYMENT_TARGET"
+        for var in $sdk_vars; do
+            value=$(eval echo \$"$var")
+            if [ -n "$value" ]; then
+                echo "  ✅ $var: $value"
+                
+                # Check if SDK path actually exists
+                if [[ "$var" == *"SDK"* ]] && [ -n "$value" ]; then
+                    if [ -d "$value" ]; then
+                        echo "     Directory exists: YES"
+                    else
+                        echo "     Directory exists: NO"
+                    fi
+                fi
+            else
+                echo "  ⚠️  $var: NOT SET"
+            fi
+        done
+        
+        # Check SDK using xcrun
+        echo ""
+        echo "📱 macOS SDK Information:"
+        if command -v xcrun >/dev/null 2>&1; then
+            sdk_path=$(xcrun --show-sdk-path 2>/dev/null || echo "FAILED")
+            echo "  SDK Path: $sdk_path"
+            
+            if [ "$sdk_path" != "FAILED" ] && [ -d "$sdk_path" ]; then
+                echo "  ✅ SDK directory exists"
+                
+                sdk_version=$(xcrun --show-sdk-version 2>/dev/null || echo "unknown")
+                echo "  SDK Version: $sdk_version"
+                
+                sdk_platform=$(xcrun --show-sdk-platform-path 2>/dev/null || echo "unknown")
+                echo "  SDK Platform: $sdk_platform"
+                
+                # List some key SDK contents
+                if [ -d "$sdk_path/usr/include" ]; then
+                    echo "  ✅ Headers directory exists: $sdk_path/usr/include"
+                else
+                    echo "  ❌ Headers directory missing: $sdk_path/usr/include"
+                fi
+                
+                if [ -d "$sdk_path/usr/lib" ]; then
+                    echo "  ✅ Libraries directory exists: $sdk_path/usr/lib"
+                else
+                    echo "  ❌ Libraries directory missing: $sdk_path/usr/lib"
+                fi
+            else
+                echo "  ❌ SDK directory does not exist or xcrun failed"
+            fi
+        else
+            echo "  ❌ xcrun not available"
+        fi
+        
+        # Check Command Line Tools
+        echo ""
+        echo "⚒️  Command Line Tools:"
+        if [ -d "/Library/Developer/CommandLineTools" ]; then
+            echo "  ✅ Command Line Tools installed: /Library/Developer/CommandLineTools"
+            
+            if [ -f "/Library/Developer/CommandLineTools/usr/bin/codesign" ]; then
+                echo "  ✅ CommandLineTools codesign: /Library/Developer/CommandLineTools/usr/bin/codesign"
+            else
+                echo "  ❌ CommandLineTools codesign: NOT FOUND"
+            fi
+        else
+            echo "  ❌ Command Line Tools: NOT INSTALLED"
+        fi
+        
+        # Check for potential environment fixes
+        echo ""
+        echo "🔧 Suggested Environment Setup:"
+        if command -v xcrun >/dev/null 2>&1; then
+            suggested_sdk=$(xcrun --show-sdk-path 2>/dev/null)
+            suggested_dev=$(xcode-select -p 2>/dev/null)
+            
+            if [ -n "$suggested_sdk" ]; then
+                echo "  export SDK_PATH=\"$suggested_sdk\""
+                echo "  export XCODE_SDK_PATH=\"$suggested_sdk\""
+                echo "  export SDKROOT=\"$suggested_sdk\""
+            fi
+            
+            if [ -n "$suggested_dev" ]; then
+                echo "  export DEVELOPER_DIR=\"$suggested_dev\""
+            fi
+            
+            echo "  export MACOSX_DEPLOYMENT_TARGET=\"13.0\""
+        else
+            echo "  ❌ Cannot determine proper SDK paths - xcrun not available"
+        fi
+        
+        echo ""
+        echo "=== END CODESIGNING DIAGNOSTICS ==="
+        echo ""
+    '
+    
+    local codesigning_result
+    if codesigning_result=$(sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "$codesigning_check" 2>/dev/null); then
+        echo "$codesigning_result" | while read line; do
+            log "$line"
+        done
+        log "✅ Codesigning environment diagnostics completed"
+    else
+        log "❌ Failed to run codesigning diagnostics in VM"
+    fi
+    
+    log "=== END CODESIGNING DIAGNOSTICS ==="
+
     # Stop the VM gracefully
     log "Shutting down VM..."
     sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "sudo shutdown -h now" || true
