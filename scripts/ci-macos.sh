@@ -285,33 +285,34 @@ create_and_run_vm() {
     }
     trap cleanup_trap EXIT INT TERM
     
-    # Validate workspace directory before VM start
+    # Validate workspace directory before VM start - prefer current directory for reliability
     log "🔍 Validating workspace directory: $workspace_dir"
     local actual_workspace_dir="$workspace_dir"
     
-    if [ ! -d "$workspace_dir" ]; then
-        log "❌ Workspace directory does not exist: $workspace_dir"
-        log "   This could indicate a BuildKite agent or path configuration issue"
-        log "   Attempting to create the directory..."
-        if ! mkdir -p "$workspace_dir"; then
-            log "❌ Failed to create workspace directory"
-            log "   Falling back to current directory: $PWD"
-            actual_workspace_dir="$PWD"
-        else
-            log "✅ Created workspace directory"
-        fi
+    # If we have a complex/long path, prefer current directory for reliability (like C++ build)
+    if [[ "$workspace_dir" =~ /builds/.*/build-archetype.*/ ]] || [ "${#workspace_dir}" -gt 100 ]; then
+        log "🔄 Detected complex BuildKite workspace path, using current directory for reliability"
+        log "   Complex path: $workspace_dir"
+        log "   Using instead: $PWD"
+        actual_workspace_dir="$PWD"
+    fi
+    
+    if [ ! -d "$actual_workspace_dir" ]; then
+        log "❌ Workspace directory does not exist: $actual_workspace_dir"
+        log "   Falling back to current directory: $PWD"
+        actual_workspace_dir="$PWD"
     fi
     
     if [ ! -r "$actual_workspace_dir" ]; then
         log "❌ Workspace directory is not readable: $actual_workspace_dir"
-        log "   This indicates a permissions issue"
-        if [ "$actual_workspace_dir" != "$PWD" ]; then
-            log "   Falling back to current directory: $PWD"
-            actual_workspace_dir="$PWD"
-        else
-            log "   Even current directory is not readable - this is a serious issue"
-            exit 1
-        fi
+        log "   Falling back to current directory: $PWD"
+        actual_workspace_dir="$PWD"
+    fi
+    
+    # Final validation
+    if [ ! -d "$actual_workspace_dir" ] || [ ! -r "$actual_workspace_dir" ]; then
+        log "❌ Even current directory has issues - this is a serious problem"
+        exit 1
     fi
     
     log "✅ Workspace directory validated: $actual_workspace_dir"
