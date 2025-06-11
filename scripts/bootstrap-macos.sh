@@ -194,8 +194,26 @@ retry_command() {
 
 # Package management
 install_packages() {
-    execute_as_user brew install --force --formula "$@"
-    execute_as_user brew link --force --overwrite "$@"
+    print "Installing packages: $*"
+    
+    # Install each package individually with timeout to avoid hanging on problematic packages
+    for package in "$@"; do
+        print "  Installing $package..."
+        if timeout 900 brew install --force --formula "$package" >/dev/null 2>&1; then
+            print "  ✅ $package installed successfully"
+            # Try to link, but don't fail if it doesn't work
+            if timeout 60 brew link --force --overwrite "$package" >/dev/null 2>&1; then
+                print "  ✅ $package linked successfully"
+            else
+                print "  ⚠️  $package linking failed (may already be linked)"
+            fi
+        else
+            print "  ❌ $package installation failed or timed out"
+            print "     Continuing with other packages..."
+        fi
+    done
+    
+    print "Package installation batch completed"
 }
 
 # Install Homebrew if not present
@@ -203,13 +221,43 @@ install_brew() {
     if ! command -v brew >/dev/null 2>&1; then
         print "Installing Homebrew..."
         
-        # Use the standard Homebrew installation method
+        # Use the standard Homebrew installation method with timeout
         print "Downloading and running Homebrew installer..."
         local curl="$(require curl)"
         
-        print "$ curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | NONINTERACTIVE=1 bash"
-        if ! NONINTERACTIVE=1 "$curl" -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | bash; then
-            error "Homebrew installation failed"
+        print "$ curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | NONINTERACTIVE=1 timeout 1800 bash"
+        
+        # Set environment variables to speed up installation and prevent hangs
+        export HOMEBREW_NO_AUTO_UPDATE=1
+        export HOMEBREW_NO_INSTALL_CLEANUP=1
+        export HOMEBREW_NO_ANALYTICS=1
+        export NONINTERACTIVE=1
+        
+        # Download installer with timeout
+        local installer_script
+        if ! installer_script=$("$curl" -fsSL --connect-timeout 60 --max-time 300 https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh); then
+            error "Failed to download Homebrew installer"
+        fi
+        
+        # Run installer with timeout (30 minute max)
+        print "Running Homebrew installer with 30-minute timeout..."
+        if ! echo "$installer_script" | timeout 1800 bash; then
+            print "⚠️  Homebrew installation timed out or failed"
+            print "Checking if Homebrew was partially installed..."
+            
+            # Check if brew binary exists even if installation "failed"
+            local brew_paths="/opt/homebrew/bin/brew /usr/local/bin/brew"
+            for brew_path in $brew_paths; do
+                if [ -x "$brew_path" ]; then
+                    print "✅ Found Homebrew at $brew_path - continuing"
+                    break
+                fi
+            done
+            
+            # If still no brew, fail
+            if ! command -v brew >/dev/null 2>&1; then
+                error "Homebrew installation failed and no brew binary found"
+            fi
         fi
         
         # Add Homebrew to PATH based on architecture
@@ -222,7 +270,7 @@ install_brew() {
             ;;
         esac
         
-        # Set CI-friendly environment variables
+        # Set CI-friendly environment variables (persistent)
         append_to_profile "export HOMEBREW_NO_INSTALL_CLEANUP=1"
         append_to_profile "export HOMEBREW_NO_AUTO_UPDATE=1"
         append_to_profile "export HOMEBREW_NO_ANALYTICS=1"
@@ -245,6 +293,11 @@ install_brew() {
         print "✅ Homebrew installed successfully"
     else
         print "✅ Homebrew already installed"
+        
+        # Set environment variables even if already installed
+        export HOMEBREW_NO_AUTO_UPDATE=1
+        export HOMEBREW_NO_INSTALL_CLEANUP=1
+        export HOMEBREW_NO_ANALYTICS=1
         
         # Ensure locale is set for consistent date/time formatting (fixes toLocaleDateString tests)
         append_to_profile "export LANG=en_US.UTF-8"
@@ -587,9 +640,14 @@ main() {
     # Install Homebrew first
     install_brew
     
-    # Update Homebrew
-    print "Updating Homebrew..."
-    execute_as_user brew update
+    # Update Homebrew with timeout (this often hangs in VMs)
+    print "Updating Homebrew (with timeout to prevent hangs)..."
+    if timeout 600 brew update >/dev/null 2>&1; then
+        print "✅ Homebrew updated successfully"
+    else
+        print "⚠️  Homebrew update timed out or failed - continuing with existing formulae"
+        print "   This is often normal in VM environments and won't affect package installation"
+    fi
     
     # Install software in stages
     install_common_software
