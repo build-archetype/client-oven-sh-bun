@@ -368,10 +368,11 @@ parse_image_name() {
     local bootstrap_version=""
     
     # Extract Bun version and bootstrap version from image name
-    # Format: bun-build-macos-X.Y.Z-bootstrap-N.M
-    if [[ "$image_name" =~ bun-build-macos-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
-        bun_version="${BASH_REMATCH[1]}"
-        bootstrap_version="${BASH_REMATCH[2]}"
+    # Format: bun-build-macos-[MACOS_RELEASE]-[BUN_VERSION]-bootstrap-[BOOTSTRAP_VERSION]
+    # Example: bun-build-macos-13-1.2.16-bootstrap-4.1
+    if [[ "$image_name" =~ bun-build-macos-([0-9]+)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
+        bun_version="${BASH_REMATCH[2]}"      # Second capture group is Bun version
+        bootstrap_version="${BASH_REMATCH[3]}" # Third capture group is Bootstrap version
     fi
     
     echo "$bun_version|$bootstrap_version"
@@ -484,7 +485,113 @@ check_remote_image() {
     fi
 }
 
-# Make smart caching decision
+# Validate that a VM image has all required tools installed
+validate_vm_image_tools() {
+    local image_name="$1"
+    log "🔬 Validating tools in VM image: $image_name" >&2
+    
+    # Start the VM temporarily for validation
+    log "   Starting VM for validation..." >&2
+    tart run "$image_name" --no-graphics &
+    local vm_pid=$!
+    
+    # Wait for VM to boot
+    sleep 30
+    
+    # Get VM IP
+    local vm_ip=""
+    for i in {1..10}; do
+        vm_ip=$(tart ip "$image_name" 2>/dev/null || echo "")
+        if [ -n "$vm_ip" ]; then
+            break
+        fi
+        sleep 5
+    done
+    
+    if [ -z "$vm_ip" ]; then
+        log "   ❌ Could not get VM IP for validation" >&2
+        kill $vm_pid 2>/dev/null || true
+        return 1
+    fi
+    
+    # Wait for SSH to be available
+    local ssh_ready=false
+    for i in {1..10}; do
+        if sshpass -p "admin" ssh $SSH_OPTS -o ConnectTimeout=2 admin@"$vm_ip" "echo 'test'" >/dev/null 2>&1; then
+            ssh_ready=true
+            break
+        fi
+        sleep 3
+    done
+    
+    if [ "$ssh_ready" != "true" ]; then
+        log "   ❌ SSH not available for validation" >&2
+        kill $vm_pid 2>/dev/null || true
+        return 1
+    fi
+    
+    # Check critical tools
+    log "   Checking critical tools..." >&2
+    local validation_cmd='
+        export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+        
+        echo "=== TOOL VALIDATION ==="
+        missing_tools=""
+        
+        # Check bun (most critical)
+        if command -v bun >/dev/null 2>&1; then
+            echo "✅ bun: $(bun --version)"
+        else
+            echo "❌ bun: MISSING"
+            missing_tools="$missing_tools bun"
+        fi
+        
+        # Check other critical tools
+        for tool in cargo cmake clang ninja; do
+            if command -v "$tool" >/dev/null 2>&1; then
+                echo "✅ $tool: available"
+            else
+                echo "❌ $tool: MISSING"
+                missing_tools="$missing_tools $tool"
+            fi
+        done
+        
+        # Return status
+        if [ -n "$missing_tools" ]; then
+            echo "VALIDATION_FAILED: Missing tools:$missing_tools"
+            exit 1
+        else
+            echo "VALIDATION_PASSED: All critical tools found"
+            exit 0
+        fi
+    '
+    
+    local validation_result
+    local validation_success=false
+    if validation_result=$(sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$validation_cmd" 2>&1); then
+        validation_success=true
+    fi
+    
+    # Log validation output
+    echo "$validation_result" | while read -r line; do
+        log "   $line" >&2
+    done
+    
+    # Cleanup VM
+    sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
+    sleep 10
+    kill $vm_pid 2>/dev/null || true
+    
+    if [ "$validation_success" = "true" ]; then
+        log "   ✅ VM image validation passed" >&2
+        return 0
+    else
+        log "   ❌ VM image validation failed - image needs rebuild" >&2
+        return 1
+    fi
+}
+
+# Enhanced caching decision that includes tool validation
 make_caching_decision() {
     local target_bun_version="$1"
     local target_bootstrap_version="$2"
@@ -532,24 +639,38 @@ make_caching_decision() {
     local usable_images="${remaining%%|*}"
     local all_images="${remaining#*|}"
     
-    # Priority 1: Exact local match (only if not distributed mode or remote failed)
+    # Priority 1: Exact local match - but validate it has required tools
     if [ -n "$exact_match" ]; then
-        log "🎯 Decision: Use exact local match ($exact_match)" >&2
-        echo "use_local_exact|$exact_match"
-        return
+        log "🔍 Found exact local match: $exact_match - validating tools..." >&2
+        if validate_vm_image_tools "$exact_match"; then
+            log "🎯 Decision: Use exact local match ($exact_match)" >&2
+            echo "use_local_exact|$exact_match"
+            return
+        else
+            log "⚠️  Exact match failed validation - deleting corrupted image" >&2
+            tart delete "$exact_match" 2>/dev/null || log "   Failed to delete corrupted image" >&2
+            # Continue to other options
+        fi
     fi
     
     # Priority 2: Compatible local match (same minor version - incremental update)
     if [ -n "$compatible_match" ]; then
-        log "🔄 Compatible local image found: $compatible_match" >&2
-        log "🎯 Decision: Build incrementally from compatible local base" >&2
-        echo "build_incremental|$compatible_match"
-        return
+        log "🔍 Found compatible local match: $compatible_match - validating tools..." >&2
+        if validate_vm_image_tools "$compatible_match"; then
+            log "🔄 Compatible local image found: $compatible_match" >&2
+            log "🎯 Decision: Build incrementally from compatible local base" >&2
+            echo "build_incremental|$compatible_match"
+            return
+        else
+            log "⚠️  Compatible match failed validation - deleting corrupted image" >&2
+            tart delete "$compatible_match" 2>/dev/null || log "   Failed to delete corrupted image" >&2
+            # Continue to remote check
+        fi
     fi
     
     # Priority 3: Check remote for perfect match (if not already done in distributed mode)
     if [ "$distributed_mode" != true ]; then
-        log "🌐 No local matches, checking remote..." >&2
+        log "🌐 No valid local matches, checking remote..." >&2
         if check_remote_image "$remote_image_url"; then
             log "🎯 Decision: Use remote perfect match" >&2
             echo "use_remote|$remote_image_url"
@@ -558,7 +679,7 @@ make_caching_decision() {
     fi
     
     # Priority 4: Build from scratch
-    log "🎯 Decision: Build new image from scratch (no compatible options found)" >&2
+    log "🎯 Decision: Build new image from scratch (no valid options found)" >&2
     echo "build_new"
 }
 
@@ -661,6 +782,7 @@ main() {
     local force_refresh=false
     local cleanup_only=false
     local distributed_mode=false
+    local force_rebuild_all=false
     for arg in "$@"; do
         case $arg in
             --force-refresh)
@@ -675,6 +797,10 @@ main() {
                 distributed_mode=true
                 shift
                 ;;
+            --force-rebuild-all)
+                force_rebuild_all=true
+                shift
+                ;;
             --release=*)
                 MACOS_RELEASE="${arg#*=}"
                 shift
@@ -683,11 +809,12 @@ main() {
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
                 echo "Options:"
-                echo "  --force-refresh     Force refresh of base image"
-                echo "  --cleanup-only      Clean up old VM images and exit"
-                echo "  --distributed       Enable distributed CI mode (registry-first)"
-                echo "  --release=VERSION   macOS release version (13, 14) [default: 14]"
-                echo "  --help, -h          Show this help message"
+                echo "  --force-refresh      Force refresh of base image"
+                echo "  --cleanup-only       Clean up old VM images and exit"
+                echo "  --distributed        Enable distributed CI mode (registry-first)"
+                echo "  --force-rebuild-all  Delete all local VM images and rebuild from scratch"
+                echo "  --release=VERSION    macOS release version (13, 14) [default: 14]"
+                echo "  --help, -h           Show this help message"
                 echo ""
                 echo "Environment Variables:"
                 echo "  MACOS_RELEASE       macOS release version (default: 14)"
@@ -698,11 +825,12 @@ main() {
                 echo "  REPOSITORY          Repository name (default: client-oven-sh-bun)"
                 echo ""
                 echo "Examples:"
-                echo "  $0                    # Build macOS 14 base image"
-                echo "  $0 --release=13       # Build macOS 13 base image"
-                echo "  $0 --distributed      # Enable distributed CI mode"
-                echo "  $0 --force-refresh    # Force rebuild of base image"
-                echo "  $0 --cleanup-only     # Clean up old images and exit"
+                echo "  $0                     # Build macOS 14 base image"
+                echo "  $0 --release=13        # Build macOS 13 base image"
+                echo "  $0 --distributed       # Enable distributed CI mode"
+                echo "  $0 --force-refresh     # Force rebuild of base image"
+                echo "  $0 --force-rebuild-all # Delete all local VMs and rebuild"
+                echo "  $0 --cleanup-only      # Clean up old images and exit"
                 exit 0
                 ;;
         esac
@@ -749,35 +877,35 @@ main() {
         log "✅ sshpass is available"
     fi
     
-    # Example: Install or update required tools
-    # Uncomment and modify as needed:
-    
-    # Install/update Homebrew packages
-    # if command -v brew >/dev/null 2>&1; then
-    #     log "Updating Homebrew packages..."
-    #     brew update || log "⚠️ Homebrew update failed (continuing)"
-    #     brew install jq || log "⚠️ jq install failed (continuing)"
-    # fi
-    
-    # Install Node.js dependencies
-    # if [ -f "package.json" ]; then
-    #     log "Installing Node.js dependencies..."
-    #     npm install || log "⚠️ npm install failed (continuing)"
-    # fi
-    
-    # Install or check other dependencies
-    # log "Checking required tools..."
-    # for tool in tart sshpass jq; do
-    #     if command -v "$tool" >/dev/null 2>&1; then
-    #         log "✅ $tool is available"
-    #     else
-    #         log "⚠️ $tool is missing - attempting to install..."
-    #         # Add installation logic here if needed
-    #     fi
-    # done
-    
     log "✅ Temporary installation steps completed"
     log "=== END TEMPORARY INSTALLATIONS ==="
+    
+    # Handle force rebuild all - delete all bun-build VMs
+    if [ "$force_rebuild_all" = true ]; then
+        log "=== FORCE REBUILD ALL ==="
+        log "🗑️  Deleting all local bun-build VM images..."
+        
+        local tart_output=$(tart list 2>&1)
+        local deleted_count=0
+        
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+) ]]; then
+                local image_name="${BASH_REMATCH[1]}"
+                if [[ "$image_name" =~ ^bun-build- ]]; then
+                    log "  Deleting: $image_name"
+                    if tart delete "$image_name" 2>/dev/null; then
+                        log "    ✅ Deleted successfully"
+                        deleted_count=$((deleted_count + 1))
+                    else
+                        log "    ⚠️  Failed to delete (may not exist)"
+                    fi
+                fi
+            fi
+        done <<< "$tart_output"
+        
+        log "✅ Deleted $deleted_count VM images - will rebuild from scratch"
+        log "=== END FORCE REBUILD ALL ==="
+    fi
     
     # Clean up old VM images to free storage space (do this early!)
     cleanup_old_images
@@ -882,7 +1010,7 @@ main() {
     # Start VM with shared directory
     log "Starting VM: $LOCAL_IMAGE_NAME"
     tart run "$LOCAL_IMAGE_NAME" --dir=workspace:"$PWD" --no-graphics &
-VM_PID=$!
+    VM_PID=$!
 
     # Wait for VM to boot
     log "Waiting for VM to boot (60 seconds)..."
@@ -945,7 +1073,7 @@ VM_PID=$!
     if [ "$SSH_SUCCESS" != "true" ]; then
         log "❌ Bootstrap failed after 30 SSH attempts"
         kill $VM_PID 2>/dev/null || true
-    exit 1
+        exit 1
     fi
 
     # Validate that all required tools are installed
