@@ -81,6 +81,10 @@ async function buildHasCacheArtifacts(buildId, orgSlug, pipelineSlug) {
  */
 async function getLastBuildWithCache(orgSlug, pipelineSlug, branch = "main") {
   try {
+    // Get current build ID to exclude it from search
+    const currentBuildId = getEnv("BUILDKITE_BUILD_ID", false);
+    console.error(`Current build ID: ${currentBuildId} (will be excluded from cache search)`);
+    
     // Get recent builds on the branch
     const buildsUrl = `https://buildkite.com/${orgSlug}/${pipelineSlug}/builds?branch=${branch}&state=passed&per_page=10`;
     const buildsResponse = await curlSafe(buildsUrl, { json: true });
@@ -89,9 +93,15 @@ async function getLastBuildWithCache(orgSlug, pipelineSlug, branch = "main") {
       return undefined;
     }
 
-    // Check each recent build for cache artifacts
+    // Check each recent build for cache artifacts (excluding current build)
     for (const build of buildsResponse) {
       if (build.state === "passed" && build.id) {
+        // Skip the current build - we can't download cache from ourselves!
+        if (currentBuildId && build.id === currentBuildId) {
+          console.error(`Skipping current build ${build.id} (can't download cache from running build)`);
+          continue;
+        }
+        
         console.error(`Checking build ${build.id} for cache artifacts...`);
         
         if (await buildHasCacheArtifacts(build.id, orgSlug, pipelineSlug)) {
@@ -163,6 +173,12 @@ async function main() {
         const orgSlug = getEnv("BUILDKITE_ORGANIZATION_SLUG", false) || "bun";
         const pipelineSlug = getEnv("BUILDKITE_PIPELINE_SLUG", false) || "bun";
         build = await getLastBuildWithCache(orgSlug, pipelineSlug, currentBranch);
+        
+        // If no cache found on current branch, try main branch as fallback
+        if (!build && currentBranch !== "main") {
+          console.error(`No cache found on ${currentBranch}, trying main branch as fallback...`);
+          build = await getLastBuildWithCache(orgSlug, pipelineSlug, "main");
+        }
       } else {
         // For scope reduction: just get the last build regardless of state
         // TODO: Implement getLastBuild() or modify existing function
@@ -170,6 +186,12 @@ async function main() {
         const orgSlug = getEnv("BUILDKITE_ORGANIZATION_SLUG", false) || "bun";
         const pipelineSlug = getEnv("BUILDKITE_PIPELINE_SLUG", false) || "bun";
         build = await getLastBuildWithCache(orgSlug, pipelineSlug, currentBranch);
+        
+        // If no cache found on current branch, try main branch as fallback
+        if (!build && currentBranch !== "main") {
+          console.error(`No cache found on ${currentBranch}, trying main branch as fallback...`);
+          build = await getLastBuildWithCache(orgSlug, pipelineSlug, "main");
+        }
       }
     }
     
