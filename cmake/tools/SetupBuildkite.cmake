@@ -35,38 +35,57 @@ endif()
 set(BUILDKITE_PATH ${BUILD_PATH}/buildkite)
 set(BUILDKITE_BUILDS_PATH ${BUILDKITE_PATH}/builds)
 
-if(NOT BUILDKITE_BUILD_ID)
-  # Try to find the latest successful build automatically
-  message(STATUS "No BUILDKITE_BUILD_ID provided, searching for latest successful build...")
-  
-  find_command(
-    VARIABLE NODE_EXECUTABLE
-    COMMAND node
-    REQUIRED OFF
+# Store the current build ID for exclusion from cache search
+set(CURRENT_BUILD_ID $ENV{BUILDKITE_BUILD_ID})
+
+# Always search for the latest successful build with cache artifacts
+# Don't use the current build ID - it hasn't uploaded cache yet!
+message(STATUS "Searching for latest successful build with cache artifacts...")
+
+find_command(
+  VARIABLE NODE_EXECUTABLE
+  COMMAND node
+  REQUIRED OFF
+)
+
+if(NODE_EXECUTABLE)
+  execute_process(
+    COMMAND ${NODE_EXECUTABLE} ${CWD}/scripts/get-last-build-id.mjs --branch=current
+    WORKING_DIRECTORY ${CWD}
+    OUTPUT_VARIABLE DETECTED_BUILD_ID
+    ERROR_VARIABLE BUILD_ID_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE DETECTION_RESULT
   )
   
-  if(NODE_EXECUTABLE)
-    execute_process(
-      COMMAND ${NODE_EXECUTABLE} ${CWD}/scripts/get-last-build-id.mjs --branch=current
-      WORKING_DIRECTORY ${CWD}
-      OUTPUT_VARIABLE DETECTED_BUILD_ID
-      ERROR_VARIABLE BUILD_ID_ERROR
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      RESULT_VARIABLE DETECTION_RESULT
-    )
-    
-    if(DETECTION_RESULT EQUAL 0 AND DETECTED_BUILD_ID)
-      setx(BUILDKITE_BUILD_ID ${DETECTED_BUILD_ID})
-      message(STATUS "Found latest successful build: ${BUILDKITE_BUILD_ID}")
-    else()
-      message(STATUS "Could not find a suitable build for cache restoration")
-      if(BUILD_ID_ERROR)
-        message(STATUS "Error: ${BUILD_ID_ERROR}")
-      endif()
-      return()
+  if(DETECTION_RESULT EQUAL 0 AND DETECTED_BUILD_ID)
+    setx(BUILDKITE_BUILD_ID ${DETECTED_BUILD_ID})
+    message(STATUS "Found latest successful build with cache: ${BUILDKITE_BUILD_ID}")
+    if(CURRENT_BUILD_ID)
+      message(STATUS "Current build ID ${CURRENT_BUILD_ID} excluded from cache search")
     endif()
   else()
-    message(STATUS "Node.js not found, cannot auto-detect build ID")
+    message(STATUS "Could not find a suitable build for cache restoration")
+    if(BUILD_ID_ERROR)
+      message(STATUS "Error: ${BUILD_ID_ERROR}")
+    endif()
+    
+    # Fallback: try manual override if provided
+    if(BUILDKITE_BUILD_ID_OVERRIDE)
+      setx(BUILDKITE_BUILD_ID ${BUILDKITE_BUILD_ID_OVERRIDE})
+      message(STATUS "Using manual build ID override: ${BUILDKITE_BUILD_ID}")
+    else()
+      return()
+    endif()
+  endif()
+else()
+  message(STATUS "Node.js not found, cannot auto-detect build ID")
+  
+  # Fallback: try manual override if provided
+  if(BUILDKITE_BUILD_ID_OVERRIDE)
+    setx(BUILDKITE_BUILD_ID ${BUILDKITE_BUILD_ID_OVERRIDE})
+    message(STATUS "Using manual build ID override: ${BUILDKITE_BUILD_ID}")
+  else()
     return()
   endif()
 endif()

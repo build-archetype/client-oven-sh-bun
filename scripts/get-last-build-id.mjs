@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 
 /**
- * Helper script to get the last successful build ID for cache restoration
+ * Helper script to get the last build with cache artifacts for cache restoration
  * Used by CMake when BUILDKITE_BUILD_ID is not provided
+ * 
+ * Searches for builds where cache-generating steps (build-cpp, build-zig) succeeded
+ * and uploaded cache artifacts, regardless of overall build success.
+ * This is because compilation cache validity is independent of test results.
  * 
  * Usage:
  *   node get-last-build-id.mjs [--branch=main|current]
  *   
- * Default: --branch=current (searches current branch using existing utils)
+ * Default: --branch=current (searches current branch for cache artifacts)
  */
 
 import { getLastSuccessfulBuild, isBuildkite, getEnv, getBranch, curlSafe } from "./utils.mjs";
@@ -85,8 +89,9 @@ async function getLastBuildWithCache(orgSlug, pipelineSlug, branch = "main") {
     const currentBuildId = getEnv("BUILDKITE_BUILD_ID", false);
     console.error(`Current build ID: ${currentBuildId} (will be excluded from cache search)`);
     
-    // Get recent builds on the branch
-    const buildsUrl = `https://buildkite.com/${orgSlug}/${pipelineSlug}/builds?branch=${branch}&state=passed&per_page=10`;
+    // Get recent builds on the branch - include ALL builds, not just successful ones
+    // Cache validity depends on build step success, not overall build success
+    const buildsUrl = `https://buildkite.com/${orgSlug}/${pipelineSlug}/builds?branch=${branch}&per_page=20`;
     const buildsResponse = await curlSafe(buildsUrl, { json: true });
     
     if (!buildsResponse || !Array.isArray(buildsResponse)) {
@@ -95,14 +100,16 @@ async function getLastBuildWithCache(orgSlug, pipelineSlug, branch = "main") {
 
     // Check each recent build for cache artifacts (excluding current build)
     for (const build of buildsResponse) {
-      if (build.state === "passed" && build.id) {
+      if (build.id) {
         // Skip the current build - we can't download cache from ourselves!
         if (currentBuildId && build.id === currentBuildId) {
           console.error(`Skipping current build ${build.id} (can't download cache from running build)`);
           continue;
         }
         
-        console.error(`Checking build ${build.id} for cache artifacts...`);
+        // Check for cache regardless of overall build state
+        // What matters is whether the cache-generating steps succeeded
+        console.error(`Checking build ${build.id} (state: ${build.state}) for cache artifacts...`);
         
         if (await buildHasCacheArtifacts(build.id, orgSlug, pipelineSlug)) {
           return build;
@@ -122,7 +129,6 @@ async function main() {
     // Parse command line arguments
     const args = process.argv.slice(2);
     let branchMode = "current"; // Default to current branch
-    let requireSuccess = true; // Default to requiring successful builds
     
     for (const arg of args) {
       if (arg.startsWith("--branch=")) {
@@ -131,12 +137,10 @@ async function main() {
           console.error("Invalid branch mode. Use --branch=main or --branch=current");
           process.exit(1);
         }
-      } else if (arg === "--any-state") {
-        requireSuccess = false; // Allow any build state (for scope reduction)
       } else if (arg === "--help" || arg === "-h") {
-        console.log("Usage: node get-last-build-id.mjs [--branch=main|current] [--any-state]");
+        console.log("Usage: node get-last-build-id.mjs [--branch=main|current]");
         console.log("Default: --branch=current (searches current branch)");
-        console.log("--any-state: Accept builds regardless of success/failure (scope reduction)");
+        console.log("Searches for builds where cache-generating steps succeeded, regardless of overall build state.");
         process.exit(0);
       }
     }
@@ -149,67 +153,39 @@ async function main() {
 
     let build;
     if (branchMode === "main") {
-      const successText = requireSuccess ? "successful" : "latest";
-      console.error(`Searching for last ${successText} build on main branch`);
-      if (requireSuccess) {
-        const orgSlug = getEnv("BUILDKITE_ORGANIZATION_SLUG", false) || "bun";
-        const pipelineSlug = getEnv("BUILDKITE_PIPELINE_SLUG", false) || "bun";
-        build = await getLastBuildWithCache(orgSlug, pipelineSlug, "main");
-      } else {
-        // TODO: Implement getLastBuildOnMain() for any-state mode
-        console.error("--any-state with main branch not yet implemented, falling back to successful builds");
-        const orgSlug = getEnv("BUILDKITE_ORGANIZATION_SLUG", false) || "bun";
-        const pipelineSlug = getEnv("BUILDKITE_PIPELINE_SLUG", false) || "bun";
-        build = await getLastBuildWithCache(orgSlug, pipelineSlug, "main");
-      }
+      console.error(`Searching for last build with cache artifacts on main branch`);
+      const orgSlug = getEnv("BUILDKITE_ORGANIZATION_SLUG", false) || "bun";
+      const pipelineSlug = getEnv("BUILDKITE_PIPELINE_SLUG", false) || "bun";
+      build = await getLastBuildWithCache(orgSlug, pipelineSlug, "main");
     } else {
       // Use the existing utility function for current branch
       const currentBranch = getBranch() || getEnv("BUILDKITE_BRANCH", false) || "unknown";
-      const successText = requireSuccess ? "successful" : "latest";
-      console.error(`Searching for last ${successText} build on current branch: ${currentBranch}`);
+      console.error(`Searching for last build with cache artifacts on current branch: ${currentBranch}`);
       
-      if (requireSuccess) {
-        // Use our improved cache-aware build detection instead of the flawed getLastSuccessfulBuild
-        const orgSlug = getEnv("BUILDKITE_ORGANIZATION_SLUG", false) || "bun";
-        const pipelineSlug = getEnv("BUILDKITE_PIPELINE_SLUG", false) || "bun";
-        build = await getLastBuildWithCache(orgSlug, pipelineSlug, currentBranch);
-        
-        // If no cache found on current branch, try main branch as fallback
-        if (!build && currentBranch !== "main") {
-          console.error(`No cache found on ${currentBranch}, trying main branch as fallback...`);
-          build = await getLastBuildWithCache(orgSlug, pipelineSlug, "main");
-        }
-      } else {
-        // For scope reduction: just get the last build regardless of state
-        // TODO: Implement getLastBuild() or modify existing function
-        console.error("--any-state mode not yet implemented, falling back to successful builds");
-        const orgSlug = getEnv("BUILDKITE_ORGANIZATION_SLUG", false) || "bun";
-        const pipelineSlug = getEnv("BUILDKITE_PIPELINE_SLUG", false) || "bun";
-        build = await getLastBuildWithCache(orgSlug, pipelineSlug, currentBranch);
-        
-        // If no cache found on current branch, try main branch as fallback
-        if (!build && currentBranch !== "main") {
-          console.error(`No cache found on ${currentBranch}, trying main branch as fallback...`);
-          build = await getLastBuildWithCache(orgSlug, pipelineSlug, "main");
-        }
+      const orgSlug = getEnv("BUILDKITE_ORGANIZATION_SLUG", false) || "bun";
+      const pipelineSlug = getEnv("BUILDKITE_PIPELINE_SLUG", false) || "bun";
+      build = await getLastBuildWithCache(orgSlug, pipelineSlug, currentBranch);
+      
+      // If no cache found on current branch, try main branch as fallback
+      if (!build && currentBranch !== "main") {
+        console.error(`No cache found on ${currentBranch}, trying main branch as fallback...`);
+        build = await getLastBuildWithCache(orgSlug, pipelineSlug, "main");
       }
     }
     
     if (build && build.id) {
-      const stateText = requireSuccess ? "successful" : "found";
-      console.error(`Found ${stateText} build: ${build.id} (${build.commit_id?.slice(0, 8)})`);
+      console.error(`Found build with cache artifacts: ${build.id} (${build.commit_id?.slice(0, 8)}) [overall state: ${build.state}]`);
       // Output just the build ID for CMake to capture
       console.log(build.id);
       process.exit(0);
     } else {
       const target = branchMode === "main" ? "main branch" : "current branch";
-      const stateText = requireSuccess ? "successful" : "any";
-      console.error(`No suitable ${stateText} build found on ${target}`);
+      console.error(`No build with cache artifacts found on ${target}`);
       process.exit(1);
     }
   } catch (error) {
     // Error occurred during search
-    console.error(`Error finding last successful build: ${error.message}`);
+    console.error(`Error finding last build with cache: ${error.message}`);
     process.exit(1);
   }
 }
