@@ -94,7 +94,7 @@ if(BUILDKITE)
     
     # Download cache artifact if available
     execute_process(
-      COMMAND buildkite-agent artifact download ${cache_artifact} ${BUILD_PATH}
+      COMMAND buildkite-agent artifact download ${cache_artifact} ${BUILD_PATH} --build ${BUILDKITE_BUILD_ID}
       WORKING_DIRECTORY ${BUILD_PATH}
       RESULT_VARIABLE download_result
       OUTPUT_QUIET
