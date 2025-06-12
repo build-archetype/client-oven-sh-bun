@@ -820,6 +820,20 @@ export async function curl(url, options = {}) {
       if (githubToken) {
         headers["Authorization"] = `Bearer ${githubToken}`;
       }
+    } else if (hostname === "api.buildkite.com") {
+      // Add Buildkite API authentication
+      let buildkiteToken = getEnv("BUILDKITE_API_TOKEN", false);
+      if (!buildkiteToken && isBuildkite) {
+        // Try to get token as a secret in Buildkite CI
+        try {
+          buildkiteToken = getSecret("BUILDKITE_API_TOKEN", { required: false });
+        } catch (error) {
+          console.warn("Failed to get BUILDKITE_API_TOKEN secret:", error.message);
+        }
+      }
+      if (buildkiteToken) {
+        headers["Authorization"] = `Bearer ${buildkiteToken}`;
+      }
     }
   }
 

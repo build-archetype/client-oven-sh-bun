@@ -25,8 +25,8 @@ import { getLastSuccessfulBuild, isBuildkite, getEnv, getBranch, curlSafe } from
  */
 async function buildHasCacheArtifacts(buildId, orgSlug, pipelineSlug) {
   try {
-    // Get build details
-    const buildUrl = `https://buildkite.com/${orgSlug}/${pipelineSlug}/builds/${buildId}.json`;
+    // Get build details using REST API
+    const buildUrl = `https://api.buildkite.com/v2/organizations/${orgSlug}/pipelines/${pipelineSlug}/builds/${buildId}`;
     const buildResponse = await curlSafe(buildUrl, { json: true });
     
     if (!buildResponse || !buildResponse.jobs) {
@@ -44,11 +44,11 @@ async function buildHasCacheArtifacts(buildId, orgSlug, pipelineSlug) {
       return false;
     }
 
-    // Check if any of these jobs have cache artifacts
+    // Check if any of these jobs have cache artifacts using REST API
     const cacheArtifactNames = ["ccache-cache.tar.gz", "zig-local-cache.tar.gz", "zig-global-cache.tar.gz"];
     
     for (const job of cacheUploadSteps) {
-      const artifactsUrl = `https://buildkite.com/organizations/${orgSlug}/pipelines/${pipelineSlug}/builds/${buildId}/jobs/${job.id}/artifacts.json`;
+      const artifactsUrl = `https://api.buildkite.com/v2/organizations/${orgSlug}/pipelines/${pipelineSlug}/builds/${buildId}/jobs/${job.id}/artifacts`;
       
       try {
         const artifactsResponse = await curlSafe(artifactsUrl, { json: true });
@@ -89,9 +89,9 @@ async function getLastBuildWithCache(orgSlug, pipelineSlug, branch = "main") {
     const currentBuildId = getEnv("BUILDKITE_BUILD_ID", false);
     console.error(`Current build ID: ${currentBuildId} (will be excluded from cache search)`);
     
-    // Get recent builds on the branch - include ALL builds, not just successful ones
+    // Get recent builds on the branch using REST API - include ALL builds, not just successful ones
     // Cache validity depends on build step success, not overall build success
-    const buildsUrl = `https://buildkite.com/${orgSlug}/${pipelineSlug}/builds?branch=${branch}&per_page=20`;
+    const buildsUrl = `https://api.buildkite.com/v2/organizations/${orgSlug}/pipelines/${pipelineSlug}/builds?branch=${branch}&per_page=20`;
     const buildsResponse = await curlSafe(buildsUrl, { json: true });
     
     if (!buildsResponse || !Array.isArray(buildsResponse)) {
@@ -100,18 +100,21 @@ async function getLastBuildWithCache(orgSlug, pipelineSlug, branch = "main") {
 
     // Check each recent build for cache artifacts (excluding current build)
     for (const build of buildsResponse) {
-      if (build.id) {
+      if (build.id || build.number) {
+        // Use build number for artifact checking (consistent with other API usage)
+        const buildId = build.number || build.id;
+        
         // Skip the current build - we can't download cache from ourselves!
-        if (currentBuildId && build.id === currentBuildId) {
-          console.error(`Skipping current build ${build.id} (can't download cache from running build)`);
+        if (currentBuildId && (build.id === currentBuildId || build.number?.toString() === currentBuildId)) {
+          console.error(`Skipping current build ${buildId} (can't download cache from running build)`);
           continue;
         }
         
         // Check for cache regardless of overall build state
         // What matters is whether the cache-generating steps succeeded
-        console.error(`Checking build ${build.id} (state: ${build.state}) for cache artifacts...`);
+        console.error(`Checking build ${buildId} (state: ${build.state}) for cache artifacts...`);
         
-        if (await buildHasCacheArtifacts(build.id, orgSlug, pipelineSlug)) {
+        if (await buildHasCacheArtifacts(buildId, orgSlug, pipelineSlug)) {
           return build;
         }
       }
