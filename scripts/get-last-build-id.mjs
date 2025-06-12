@@ -12,6 +12,8 @@
  *   node get-last-build-id.mjs [--branch=main|current]
  *   
  * Default: --branch=current (searches current branch for cache artifacts)
+ * 
+ * Version: Enhanced with detailed logging for transparent cache detection
  */
 
 import { getLastSuccessfulBuild, isBuildkite, getEnv, getBranch, curlSafe } from "./utils.mjs";
