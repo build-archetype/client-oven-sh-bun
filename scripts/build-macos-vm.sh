@@ -596,8 +596,8 @@ validate_vm_image_tools() {
     tart run "$image_name" --no-graphics >/dev/null 2>&1 &
     local vm_pid=$!
     
-    # Wait for VM to boot
-    sleep 30
+    # Wait for VM to boot (reduced from 30s to 2s - modern VMs boot faster)
+    sleep 2
     
     # Get VM IP (redirect stderr to avoid pollution)
     local vm_ip=""
@@ -606,7 +606,7 @@ validate_vm_image_tools() {
         if [ -n "$vm_ip" ]; then
             break
         fi
-        sleep 5
+        sleep 2
     done
     
     if [ -z "$vm_ip" ]; then
@@ -623,7 +623,7 @@ validate_vm_image_tools() {
             ssh_ready=true
             break
         fi
-        sleep 3
+        sleep 2
     done
     
     if [ "$ssh_ready" != "true" ]; then
@@ -747,14 +747,14 @@ validate_vm_image_tools() {
     # Try graceful shutdown first (redirect all output)
     sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
     
-    # Wait a bit for graceful shutdown
-    sleep 10
+    # Wait for VM to stop (reduced from 30s to 2s)
+    sleep 2
     
     # Force kill if still running (redirect all output)
     kill $vm_pid >/dev/null 2>&1 || true
     
-    # Wait for complete cleanup
-    sleep 5
+    # Wait for complete cleanup (reduced from 5s to 2s)
+    sleep 2
     
     if [ "$validation_success" = "true" ]; then
         log "   ✅ VM image validation passed - tools and codesigning environment ready" >&2
@@ -1231,8 +1231,8 @@ main() {
     VM_PID=$!
 
     # Wait for VM to boot
-    log "Waiting for VM to boot (60 seconds)..."
-    sleep 60
+    log "Waiting for VM to boot (reduced from 60s to 2s - retry logic handles slow boots)..."
+    sleep 2
     
     # Get VM IP
     log "Getting VM IP address..."
@@ -1244,7 +1244,7 @@ main() {
             break
         fi
         log "Attempt $i: waiting for VM IP..."
-        sleep 10
+        sleep 2
     done
     
     if [ -z "$VM_IP" ]; then
@@ -1283,9 +1283,9 @@ main() {
                 log "❌ Bootstrap failed on attempt $i"
             fi
         else
-            log "SSH attempt $i failed, retrying in 30 seconds..."
+            log "SSH attempt $i failed, retrying in 2 seconds..."
         fi
-        sleep 30
+        sleep 2
     done
     
     if [ "$SSH_SUCCESS" != "true" ]; then
@@ -1300,7 +1300,7 @@ main() {
     
     # Wait for VM to be ready for validation
     log "Waiting for VM to be ready for validation..."
-    sleep 10
+    sleep 2
     
     # Get VM IP for validation
     VM_IP=""
@@ -1311,7 +1311,7 @@ main() {
             break
         fi
         log "Attempt $i: waiting for VM IP..."
-        sleep 10
+        sleep 2
     done
     
     if [ -z "$VM_IP" ]; then
@@ -1521,8 +1521,8 @@ main() {
     log "Shutting down VM..."
     sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "sudo shutdown -h now" || true
     
-    # Wait for VM to stop
-    sleep 30
+    # Wait for VM to stop (reduced from 30s to 2s)
+    sleep 2
     kill $VM_PID 2>/dev/null || true
     
     log "✅ Bootstrap completed successfully"

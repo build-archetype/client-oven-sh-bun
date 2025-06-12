@@ -330,7 +330,7 @@ create_and_run_vm() {
     
     # Wait for VM to be ready
     log "Waiting for VM to be ready..."
-    sleep 30
+    sleep 2
 
     # Verify VM actually started
     if ! tart list | grep "$vm_name" | grep -q "running"; then
@@ -355,7 +355,7 @@ create_and_run_vm() {
                 log "🔄 Attempting to restart VM without directory sharing..."
                 tart run "$vm_name" --no-graphics > vm.log 2>&1 &
                 local vm_pid_retry=$!
-                sleep 30
+                sleep 2
                 
                 if tart list | grep "$vm_name" | grep -q "running"; then
                     log "✅ VM started successfully without directory sharing"
