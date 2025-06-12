@@ -93,12 +93,13 @@ if(BUILDKITE)
     endif()
     
     # Download cache artifact if available
+    message(STATUS "  Attempting to download ${cache_artifact} from build ${BUILDKITE_BUILD_ID}")
     execute_process(
       COMMAND buildkite-agent artifact download ${cache_artifact} ${BUILD_PATH} --build ${BUILDKITE_BUILD_ID}
       WORKING_DIRECTORY ${BUILD_PATH}
       RESULT_VARIABLE download_result
-      OUTPUT_QUIET
-      ERROR_QUIET
+      OUTPUT_VARIABLE download_output
+      ERROR_VARIABLE download_error
     )
     
     if(download_result EQUAL 0 AND EXISTS ${BUILD_PATH}/${cache_artifact})
@@ -124,7 +125,13 @@ if(BUILDKITE)
       # Clean up downloaded archive
       file(REMOVE ${BUILD_PATH}/${cache_artifact})
     else()
-      message(STATUS "  📭 No ${cache_artifact} found (normal for first builds)")
+      message(STATUS "  📭 No ${cache_artifact} found (exit code: ${download_result})")
+      if(download_output)
+        message(STATUS "    Output: ${download_output}")
+      endif()
+      if(download_error)
+        message(STATUS "    Error: ${download_error}")
+      endif()
     endif()
   endforeach()
 else()
