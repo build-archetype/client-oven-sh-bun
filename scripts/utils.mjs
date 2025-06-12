@@ -826,9 +826,9 @@ export async function curl(url, options = {}) {
       if (!buildkiteToken && isBuildkite) {
         // Try to get token as a secret in Buildkite CI
         try {
-          buildkiteToken = getSecret("BUILDKITE_API_TOKEN", { required: false });
+          buildkiteToken = getSecret("BUN_CACHE_API_TOKEN", { required: false });
         } catch (error) {
-          console.warn("Failed to get BUILDKITE_API_TOKEN secret:", error.message);
+          console.warn("Failed to get BUN_CACHE_API_TOKEN secret:", error.message);
         }
       }
       if (buildkiteToken) {
