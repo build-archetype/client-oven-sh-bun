@@ -822,9 +822,11 @@ export async function curl(url, options = {}) {
       }
     } else if (hostname === "api.buildkite.com") {
       // Add Buildkite API authentication
-      let buildkiteToken = getEnv("BUILDKITE_API_TOKEN", false);
+      // Prefer environment variable (set by host) over secret retrieval (in VM)
+      let buildkiteToken = getEnv("BUN_CACHE_API_TOKEN", false) || getEnv("BUILDKITE_API_TOKEN", false);
       if (!buildkiteToken && isBuildkite) {
-        // Try to get token as a secret in Buildkite CI
+        // Fallback: Try to get token as a secret in Buildkite CI
+        // (This may not work in VM environments without proper agent config)
         try {
           buildkiteToken = getSecret("BUN_CACHE_API_TOKEN", { required: false });
         } catch (error) {

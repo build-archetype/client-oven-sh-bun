@@ -188,6 +188,28 @@ start_logging() {
     trap 'if [ -n "$TART_LOG_PID" ]; then kill $TART_LOG_PID 2>/dev/null || true; fi; buildkite-agent artifact upload tart.log || true' EXIT
 }
 
+# Function to setup cache environment
+setup_cache_environment() {
+    log "🔑 Setting up cache environment..."
+    
+    # Try to get the BUN_CACHE_API_TOKEN secret if we're in Buildkite
+    if command -v buildkite-agent >/dev/null 2>&1; then
+        log "Retrieving BUN_CACHE_API_TOKEN from Buildkite secrets..."
+        
+        if BUN_CACHE_TOKEN=$(buildkite-agent secret get BUN_CACHE_API_TOKEN 2>/dev/null); then
+            export BUN_CACHE_API_TOKEN="$BUN_CACHE_TOKEN"
+            log "✅ BUN_CACHE_API_TOKEN retrieved successfully"
+        else
+            log "⚠️  BUN_CACHE_API_TOKEN secret not found or inaccessible"
+            log "   Cache detection will be limited to environment variables only"
+            log "   To enable full cache detection, create secret: BUN_CACHE_API_TOKEN"
+        fi
+    else
+        log "⚠️  buildkite-agent not available on host"
+        log "   Cache detection will use environment variables only"
+    fi
+}
+
 # Function to create and run VM
 create_and_run_vm() {
     local vm_name="$1"
@@ -486,6 +508,9 @@ main() {
     log "VM Name: $vm_name"
     log "Command: $command"
     log "Workspace: $workspace_dir"
+
+    # Setup cache environment
+    setup_cache_environment
 
     create_and_run_vm "$vm_name" "$command" "$workspace_dir" "$release"
 }
