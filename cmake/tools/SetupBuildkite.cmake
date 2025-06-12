@@ -137,6 +137,7 @@ endif()
 # Upload cache artifacts after builds complete
 # These targets are created here after all BUILDKITE variables are properly set
 # NOTE: This must be BEFORE the BUN_LINK_ONLY check so it runs for all build types
+# HOWEVER: Only create cache upload targets for build steps that generate cache content
 
 # Debug cache upload conditions
 message(STATUS "=== CACHE UPLOAD DEBUG ===")
@@ -145,6 +146,25 @@ message(STATUS "BUILDKITE: ${BUILDKITE}")
 message(STATUS "CACHE_STRATEGY: ${CACHE_STRATEGY}")
 message(STATUS "CACHE_PATH: ${CACHE_PATH}")
 message(STATUS "BUILD_PATH: ${BUILD_PATH}")
+message(STATUS "BUN_CPP_ONLY: ${BUN_CPP_ONLY}")
+message(STATUS "BUN_LINK_ONLY: ${BUN_LINK_ONLY}")
+
+# Determine which caches this build step should upload
+set(UPLOAD_CCACHE OFF)
+set(UPLOAD_ZIG_CACHES OFF)
+
+if(BUN_CPP_ONLY)
+  # C++ build step - upload ccache (generated during C++ compilation)
+  set(UPLOAD_CCACHE ON)
+  message(STATUS "C++ build step - will upload ccache")
+elseif(NOT BUN_LINK_ONLY)
+  # Zig build step - upload Zig caches (generated during Zig compilation)
+  set(UPLOAD_ZIG_CACHES ON)
+  message(STATUS "Zig build step - will upload Zig caches")
+else()
+  # Link step - no cache uploads (just links, doesn't generate new cache)
+  message(STATUS "Link step - no cache uploads needed")
+endif()
 
 # Ensure cache directories exist (create them if they don't)
 # This allows cache upload even when starting with empty cache
@@ -172,8 +192,8 @@ else()
 endif()
 message(STATUS "=== END CACHE UPLOAD DEBUG ===")
 
-# ccache upload target (always exists)
-if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/ccache)
+# ccache upload target (only created in C++ build step)
+if(UPLOAD_CCACHE AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/ccache)
   # Cache enabled and directory exists - create real upload target
   register_command(
     TARGET upload-ccache-cache
@@ -183,7 +203,7 @@ if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CA
     ARTIFACTS ${BUILD_PATH}/ccache-cache.tar.gz
   )
   message(STATUS "Created real ccache upload target")
-else()
+elseif(UPLOAD_CCACHE)
   # Cache disabled or directory missing - create no-op target
   add_custom_target(upload-ccache-cache
     COMMAND ${CMAKE_COMMAND} -E echo "Skipping ccache cache upload \\(cache disabled or directory missing\\)"
@@ -192,8 +212,8 @@ else()
   message(STATUS "Created no-op ccache upload target")
 endif()
 
-# Zig local cache upload target (always exists)
-if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/zig/local)
+# Zig local cache upload target (only created in Zig build step)
+if(UPLOAD_ZIG_CACHES AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/zig/local)
   # Cache enabled and directory exists - create real upload target
   register_command(
     TARGET upload-zig-local-cache
@@ -203,7 +223,7 @@ if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CA
     ARTIFACTS ${BUILD_PATH}/zig-local-cache.tar.gz
   )
   message(STATUS "Created real zig-local upload target")
-else()
+elseif(UPLOAD_ZIG_CACHES)
   # Cache disabled or directory missing - create no-op target
   add_custom_target(upload-zig-local-cache
     COMMAND ${CMAKE_COMMAND} -E echo "Skipping Zig local cache upload \\(cache disabled or directory missing\\)"
@@ -212,8 +232,8 @@ else()
   message(STATUS "Created no-op zig-local upload target")
 endif()
 
-# Zig global cache upload target (always exists)
-if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/zig/global)
+# Zig global cache upload target (only created in Zig build step)
+if(UPLOAD_ZIG_CACHES AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/zig/global)
   # Cache enabled and directory exists - create real upload target
   register_command(
     TARGET upload-zig-global-cache
@@ -223,7 +243,7 @@ if(BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CA
     ARTIFACTS ${BUILD_PATH}/zig-global-cache.tar.gz
   )
   message(STATUS "Created real zig-global upload target")
-else()
+elseif(UPLOAD_ZIG_CACHES)
   # Cache disabled or directory missing - create no-op target
   add_custom_target(upload-zig-global-cache
     COMMAND ${CMAKE_COMMAND} -E echo "Skipping Zig global cache upload \\(cache disabled or directory missing\\)"
@@ -232,12 +252,30 @@ else()
   message(STATUS "Created no-op zig-global upload target")
 endif()
 
-# Meta target to upload all cache types (always exists)
-add_custom_target(upload-all-caches
-  COMMENT "Upload all cache artifacts"
-  DEPENDS upload-ccache-cache upload-zig-local-cache upload-zig-global-cache
-)
-message(STATUS "Created upload-all-caches meta target")
+# Meta target to upload all cache types (always exists for CI compatibility)
+# Create appropriate dependencies based on which build step this is
+set(UPLOAD_DEPENDENCIES)
+if(UPLOAD_CCACHE)
+  list(APPEND UPLOAD_DEPENDENCIES upload-ccache-cache)
+endif()
+if(UPLOAD_ZIG_CACHES)
+  list(APPEND UPLOAD_DEPENDENCIES upload-zig-local-cache upload-zig-global-cache)
+endif()
+
+if(UPLOAD_DEPENDENCIES)
+  add_custom_target(upload-all-caches
+    COMMENT "Upload all cache artifacts"
+    DEPENDS ${UPLOAD_DEPENDENCIES}
+  )
+  message(STATUS "Created upload-all-caches meta target with dependencies: ${UPLOAD_DEPENDENCIES}")
+else()
+  # Create no-op target for link step
+  add_custom_target(upload-all-caches
+    COMMAND ${CMAKE_COMMAND} -E echo "No caches to upload from this build step"
+    COMMENT "No cache uploads needed"
+  )
+  message(STATUS "Created no-op upload-all-caches target")
+endif()
 
 # === BUILD ARTIFACT DOWNLOADING ===
 # Only download build artifacts (libbun-*.a) for linking step
