@@ -19,15 +19,16 @@
 import { getLastSuccessfulBuild, isBuildkite, getEnv, getBranch, curlSafe } from "./utils.mjs";
 
 /**
- * Check if a build has cache artifacts uploaded
+ * Check if a build has cache artifacts uploaded for the specific build step type
  * @param {string} buildId - Build ID to check
  * @param {string} orgSlug - Organization slug
  * @param {string} pipelineSlug - Pipeline slug
- * @returns {Promise<boolean>} - True if build has cache artifacts
+ * @param {string[]} neededCacheTypes - Array of cache artifact names needed (e.g., ["ccache-cache.tar.gz"])
+ * @returns {Promise<boolean>} - True if build has the needed cache artifacts
  */
-async function buildHasCacheArtifacts(buildId, orgSlug, pipelineSlug) {
+async function buildHasCacheArtifacts(buildId, orgSlug, pipelineSlug, neededCacheTypes = []) {
   try {
-    console.error(`    🔍 Checking build ${buildId} for cache artifacts...`);
+    console.error(`    🔍 Checking build ${buildId} for cache artifacts: ${neededCacheTypes.join(', ')}`);
     
     // Get build details using REST API
     const buildUrl = `https://api.buildkite.com/v2/organizations/${orgSlug}/pipelines/${pipelineSlug}/builds/${buildId}`;
@@ -68,8 +69,8 @@ async function buildHasCacheArtifacts(buildId, orgSlug, pipelineSlug) {
       console.error(`      - ${job.step_key}: ${job.state}`);
     });
 
-    // Check if any of these jobs have cache artifacts using REST API
-    const cacheArtifactNames = ["ccache-cache.tar.gz", "zig-local-cache.tar.gz", "zig-global-cache.tar.gz"];
+    // Check if any of these jobs have the specific cache artifacts we need
+    const foundCacheTypes = new Set();
     
     for (const job of cacheUploadSteps) {
       console.error(`    🔎 Checking artifacts for job: ${job.step_key} (id: ${job.id})`);
@@ -81,21 +82,24 @@ async function buildHasCacheArtifacts(buildId, orgSlug, pipelineSlug) {
         if (artifactsResponse && Array.isArray(artifactsResponse)) {
           console.error(`    📦 Job ${job.step_key}: Found ${artifactsResponse.length} artifacts`);
           
-          const foundCacheArtifacts = [];
-          const hasCache = artifactsResponse.some(artifact => {
+          // Check which needed cache types are present
+          for (const artifact of artifactsResponse) {
             const filename = artifact.filename || artifact.file_name || artifact.path;
-            if (cacheArtifactNames.includes(filename)) {
-              foundCacheArtifacts.push(filename);
-              return true;
+            if (neededCacheTypes.includes(filename)) {
+              // Verify the artifact has actual size (not empty)
+              const fileSize = artifact.file_size || artifact.size || 0;
+              if (fileSize > 0) {
+                foundCacheTypes.add(filename);
+                console.error(`    ✅ Job ${job.step_key}: Found ${filename} (${fileSize} bytes)`);
+              } else {
+                console.error(`    ⚠️  Job ${job.step_key}: Found ${filename} but it's empty (${fileSize} bytes)`);
+              }
             }
-            return false;
-          });
+          }
           
-          if (hasCache) {
-            console.error(`    ✅ Build ${buildId}, job ${job.step_key}: Found cache artifacts: ${foundCacheArtifacts.join(', ')}`);
-            return true;
-          } else {
-            console.error(`    ❌ Job ${job.step_key}: No cache artifacts found (artifacts: ${artifactsResponse.map(a => a.filename || a.file_name || a.path).join(', ')})`);
+          if (foundCacheTypes.size === 0) {
+            const allArtifacts = artifactsResponse.map(a => a.filename || a.file_name || a.path).join(', ');
+            console.error(`    ❌ Job ${job.step_key}: No needed cache artifacts found (has: ${allArtifacts})`);
           }
         } else {
           console.error(`    ❌ Job ${job.step_key}: Invalid artifacts response`);
@@ -106,7 +110,22 @@ async function buildHasCacheArtifacts(buildId, orgSlug, pipelineSlug) {
       }
     }
     
-    console.error(`    ❌ Build ${buildId}: No cache artifacts found in any passed cache-generating jobs`);
+    // Check if we found all needed cache types
+    if (foundCacheTypes.size > 0) {
+      const found = Array.from(foundCacheTypes);
+      const missing = neededCacheTypes.filter(cache => !foundCacheTypes.has(cache));
+      
+      if (missing.length === 0) {
+        console.error(`    ✅ Build ${buildId}: Found ALL needed cache artifacts: ${found.join(', ')}`);
+        return true;
+      } else {
+        console.error(`    ⚠️  Build ${buildId}: Found SOME cache artifacts: ${found.join(', ')}, missing: ${missing.join(', ')}`);
+        // For now, accept partial cache (better than no cache)
+        return true;
+      }
+    }
+    
+    console.error(`    ❌ Build ${buildId}: No needed cache artifacts found`);
     return false;
   } catch (error) {
     console.error(`    💥 Build ${buildId}: Failed to check for cache artifacts - ${error.message}`);
@@ -115,13 +134,41 @@ async function buildHasCacheArtifacts(buildId, orgSlug, pipelineSlug) {
 }
 
 /**
+ * Determine which cache types are needed based on current build step
+ * @returns {string[]} Array of cache artifact names needed
+ */
+function getNeededCacheTypes() {
+  const bunCppOnly = getEnv("BUN_CPP_ONLY", false) === "ON" || getEnv("BUN_CPP_ONLY", false) === "1";
+  const bunLinkOnly = getEnv("BUN_LINK_ONLY", false) === "ON" || getEnv("BUN_LINK_ONLY", false) === "1";
+  
+  let needed = [];
+  
+  if (bunCppOnly) {
+    // C++ step needs ccache
+    needed.push("ccache-cache.tar.gz");
+    console.error(`🎯 C++ build step detected - looking for: ccache-cache.tar.gz`);
+  } else if (!bunLinkOnly) {
+    // Zig step needs zig caches  
+    needed.push("zig-local-cache.tar.gz", "zig-global-cache.tar.gz");
+    console.error(`🎯 Zig build step detected - looking for: zig-local-cache.tar.gz, zig-global-cache.tar.gz`);
+  } else {
+    // Link step - accept any cache type for maximum benefit
+    needed.push("ccache-cache.tar.gz", "zig-local-cache.tar.gz", "zig-global-cache.tar.gz");
+    console.error(`🎯 Link step detected - looking for any available cache`);
+  }
+  
+  return needed;
+}
+
+/**
  * Find the last build with actual cache artifacts (not just "successful")
  * @param {string} orgSlug - Organization slug  
  * @param {string} pipelineSlug - Pipeline slug
  * @param {string} branch - Branch to search
+ * @param {string[]} neededCacheTypes - Array of cache artifact names needed
  * @returns {Promise<object|undefined>} - Build object with cache artifacts
  */
-async function getLastBuildWithCache(orgSlug, pipelineSlug, branch = "main") {
+async function getLastBuildWithCache(orgSlug, pipelineSlug, branch = "main", neededCacheTypes = []) {
   try {
     // Get current build ID to exclude it from search
     const currentBuildId = getEnv("BUILDKITE_BUILD_ID", false);
@@ -164,12 +211,12 @@ async function getLastBuildWithCache(orgSlug, pipelineSlug, branch = "main") {
         console.error(`🔎 Checking build ${buildId} (${shortCommit}) - state: ${build.state}, created: ${build.created_at}`);
         checkedCount++;
         
-        if (await buildHasCacheArtifacts(buildId, orgSlug, pipelineSlug)) {
+        if (await buildHasCacheArtifacts(buildId, orgSlug, pipelineSlug, neededCacheTypes)) {
           console.error(`✅ Found build with cache artifacts: ${buildId} (${shortCommit})`);
           console.error(`📈 Search summary: checked ${checkedCount} builds, skipped ${skippedCount} builds on branch '${branch}'`);
           return build;
         } else {
-          console.error(`❌ Build ${buildId} (${shortCommit}) has no cache artifacts`);
+          console.error(`❌ Build ${buildId} (${shortCommit}) has no needed cache artifacts`);
         }
       } else {
         console.error(`⚠️  Skipping malformed build entry: ${JSON.stringify(build)}`);
@@ -178,7 +225,7 @@ async function getLastBuildWithCache(orgSlug, pipelineSlug, branch = "main") {
     }
     
     console.error(`📈 Search complete: checked ${checkedCount} builds, skipped ${skippedCount} builds on branch '${branch}'`);
-    console.error(`❌ No builds with cache artifacts found on branch '${branch}'`);
+    console.error(`❌ No builds with needed cache artifacts found on branch '${branch}'`);
     return undefined;
   } catch (error) {
     console.error(`💥 Error searching for builds with cache on branch '${branch}': ${error.message}`);
@@ -221,22 +268,25 @@ async function main() {
     console.error(`🏢 Organization: ${orgSlug}`);
     console.error(`🔧 Pipeline: ${pipelineSlug}`);
 
+    // Determine what cache types we need
+    const neededCacheTypes = getNeededCacheTypes();
+
     let build;
     if (branchMode === "main") {
       console.error(`📋 Searching main branch for cache artifacts...`);
-      build = await getLastBuildWithCache(orgSlug, pipelineSlug, "main");
+      build = await getLastBuildWithCache(orgSlug, pipelineSlug, "main", neededCacheTypes);
     } else {
       // Use the existing utility function for current branch
       const currentBranch = getBranch() || getEnv("BUILDKITE_BRANCH", false) || "unknown";
       console.error(`📋 Step 1: Searching current branch '${currentBranch}' for cache artifacts...`);
       
-      build = await getLastBuildWithCache(orgSlug, pipelineSlug, currentBranch);
+      build = await getLastBuildWithCache(orgSlug, pipelineSlug, currentBranch, neededCacheTypes);
       
       // If no cache found on current branch, try main branch as fallback
       if (!build && currentBranch !== "main") {
         console.error(`🔄 Step 2: No cache found on '${currentBranch}', falling back to main branch...`);
         console.error(`📋 Searching main branch for cache artifacts...`);
-        build = await getLastBuildWithCache(orgSlug, pipelineSlug, "main");
+        build = await getLastBuildWithCache(orgSlug, pipelineSlug, "main", neededCacheTypes);
         
         if (build) {
           console.error(`✅ Fallback successful: Found cache artifacts on main branch`);
@@ -281,4 +331,4 @@ async function main() {
   }
 }
 
-await main(); 
+await main();
