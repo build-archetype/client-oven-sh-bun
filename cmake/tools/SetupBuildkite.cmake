@@ -103,12 +103,44 @@ if(UPLOAD_CCACHE AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL 
       echo '=== CCACHE UPLOAD DEBUG ==='
       echo 'Checking ccache content before upload...'
       echo 'Cache directory: ${CACHE_PATH}/ccache'
+      echo 'Build directory: ${BUILD_PATH}'
+      echo 'Current working directory:' && pwd
+      echo ''
+      echo '--- Environment Variables ---'
+      echo 'CCACHE_DIR=' && echo \$CCACHE_DIR
+      echo 'CCACHE_BASEDIR=' && echo \$CCACHE_BASEDIR
+      echo 'CCACHE_LOGFILE=' && echo \$CCACHE_LOGFILE
+      echo 'CCACHE_STATSLOG=' && echo \$CCACHE_STATSLOG
+      echo ''
+      echo '--- Directory Structure ---'
       echo 'Listing cache directory contents:'
-      ls -la '${CACHE_PATH}/ccache'
+      ls -la '${CACHE_PATH}/ccache' || echo 'ERROR: Cache directory does not exist or is not accessible'
+      echo ''
+      echo 'Checking if cache directory exists:'
+      if [ -d '${CACHE_PATH}/ccache' ]; then
+        echo '✅ Cache directory exists'
+        echo 'Directory size:' && du -sh '${CACHE_PATH}/ccache' 2>/dev/null || echo 'Could not get directory size'
+        echo 'Subdirectory count:' && find '${CACHE_PATH}/ccache' -type d | wc -l | tr -d ' '
+        echo 'Sample subdirectories:' && find '${CACHE_PATH}/ccache' -type d | head -5
+      else
+        echo '❌ Cache directory does not exist'
+      fi
+      echo ''
+      echo '--- ccache Statistics ---'
       echo 'Checking ccache statistics:'
-      ${CCACHE_PROGRAM} -s
+      ${CCACHE_PROGRAM} -s || echo 'ERROR: ccache command failed'
+      echo ''
+      echo '--- File Count Analysis ---'
       file_count=$(find '${CACHE_PATH}/ccache' -type f | wc -l | tr -d ' ')
       echo \"Found $file_count ccache files\"
+      if [ \"$file_count\" -gt 0 ]; then
+        echo 'Sample cache files:'
+        find '${CACHE_PATH}/ccache' -type f | head -10
+        echo 'File types in cache:'
+        find '${CACHE_PATH}/ccache' -type f -name '*' | sed 's/.*\\.//' | sort | uniq -c | head -10
+      fi
+      echo ''
+      echo '--- Upload Decision ---'
       if [ \"$file_count\" -gt 10 ]; then
         echo '✅ ccache has sufficient content ('$file_count' files), creating archive...'
         cd '${CACHE_PATH}/ccache' && tar czf '${BUILD_PATH}/ccache-cache.tar.gz' .
