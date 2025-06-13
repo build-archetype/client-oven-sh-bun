@@ -476,13 +476,11 @@ function getBuildCppStep(platform, options) {
       `${command} --target upload-all-caches || echo "Cache upload failed (non-fatal)"`
     ],
   };
-  // If macOS, run in VM
+  // If macOS, run in VM - combine all commands in single VM to preserve ccache
   if (platform.os === "darwin") {
     step.command = [
       `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target bun" "${process.cwd()}"`,
-      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target dependencies" "${process.cwd()}"`,
-      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target upload-all-caches || echo 'Cache upload failed (non-fatal)'" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target bun && ${command} --target dependencies && (${command} --target upload-all-caches || echo 'Cache upload failed (non-fatal)')" "${process.cwd()}"`
     ];
   }
   return step;
@@ -528,12 +526,11 @@ function getBuildZigStep(platform, options) {
     ],
     timeout_in_minutes: 35,
   };
-  // If macOS, run in VM
+  // If macOS, run in VM - combine all commands in single VM to preserve zig cache
   if (platform.os === "darwin") {
     step.command = [
       `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}\" "${process.cwd()}"`,
-      `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target upload-all-caches || echo 'Cache upload failed (non-fatal)'" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain} && (${getBuildCommand(platform, options)} --target upload-all-caches || echo 'Cache upload failed (non-fatal)')" "${process.cwd()}"`
     ];
   }
   return step;
