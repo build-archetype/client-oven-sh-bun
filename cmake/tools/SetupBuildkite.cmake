@@ -217,6 +217,16 @@ if(UPLOAD_DEPENDENCIES)
     DEPENDS ${UPLOAD_DEPENDENCIES}
   )
   message(STATUS "Created upload-all-caches meta target with dependencies: ${UPLOAD_DEPENDENCIES}")
+  
+  # Add post-build command to check ccache stats if ccache is enabled
+  if(ENABLE_CCACHE AND CCACHE_PROGRAM)
+    add_custom_command(
+      TARGET upload-all-caches
+      POST_BUILD
+      COMMAND ${CCACHE_PROGRAM} -s
+      COMMENT "Checking ccache statistics"
+    )
+  endif()
 else()
   # Create no-op target for link step
   add_custom_target(upload-all-caches

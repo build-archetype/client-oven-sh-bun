@@ -70,11 +70,3 @@ else()
 endif()
 
 message(STATUS "=== END CCACHE CONFIGURATION ===")
-
-# Add a post-build command to check ccache stats
-add_custom_command(
-  TARGET upload-all-caches
-  POST_BUILD
-  COMMAND ${CCACHE_PROGRAM} -s
-  COMMENT "Checking ccache statistics"
-)
