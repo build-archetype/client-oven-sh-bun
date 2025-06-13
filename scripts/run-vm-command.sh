@@ -55,34 +55,61 @@ echo "🔍 ===== WAITING FOR VM ====="
 # Required for ssh access to the VM
 wait_for_vm() {
     local vm_name="$1"
-    local max_attempts=30
-    local attempt=0
     
     echo "Waiting for VM '$vm_name' to be ready..."
     
-    while [ $attempt -lt $max_attempts ]; do
+    # Get VM IP with more reliable retry logic
+    echo "Waiting for VM to get an IP address..."
+    for i in {1..15}; do
         # Check if VM is running
         if ! tart list | grep -q "$vm_name.*running"; then
             echo "Error: VM '$vm_name' is not running"
             return 1
         fi
         
-        # Try to get IP
         VM_IP=$(tart ip "$vm_name" 2>/dev/null || echo "")
         if [ -n "$VM_IP" ]; then
-            # Test SSH connectivity with comprehensive options
-            if sshpass -p admin ssh $SSH_OPTS -o ConnectTimeout=2 "admin@$VM_IP" echo "test" &>/dev/null; then
-                echo "VM is ready at $VM_IP"
-                return 0
-            fi
+            echo "VM IP: $VM_IP"
+            break
         fi
-        
-        attempt=$((attempt + 1))
-        echo "Attempt $attempt/$max_attempts: Waiting for VM..."
-        sleep 2
+        echo "Attempt $i/15: waiting for VM IP..."
+        sleep 5
     done
     
-    echo "Error: VM did not become ready within timeout"
+    if [ -z "$VM_IP" ]; then
+        echo "Error: Could not get VM IP after 15 attempts"
+        return 1
+    fi
+
+    # Wait for SSH to be available
+    echo "Waiting for SSH service to be ready..."
+    
+    # First wait for SSH service to be ready by checking port
+    for i in {1..10}; do
+        if nc -z "$VM_IP" 22 >/dev/null 2>&1; then
+            echo "✅ SSH port is open"
+            break
+        fi
+        if [ $i -eq 10 ]; then
+            echo "Error: SSH port 22 did not open on VM"
+            return 1
+        fi
+        echo "SSH port not ready, attempt $i/10..."
+        sleep 5
+    done
+    
+    # Now try SSH connection with more reliable retry logic
+    for i in {1..30}; do
+        echo "SSH attempt $i/30..."
+        if sshpass -p admin ssh $SSH_OPTS -o ConnectTimeout=10 "admin@$VM_IP" "echo 'SSH connection successful'" &>/dev/null; then
+            echo "✅ SSH connection established"
+            return 0
+        fi
+        echo "SSH attempt $i failed, retrying in 5 seconds..."
+        sleep 5
+    done
+    
+    echo "Error: VM SSH did not become ready within timeout"
     return 1
 }
 
