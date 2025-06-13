@@ -35,163 +35,10 @@ endif()
 set(BUILDKITE_PATH ${BUILD_PATH}/buildkite)
 set(BUILDKITE_BUILDS_PATH ${BUILDKITE_PATH}/builds)
 
-# Store the current build ID for exclusion from cache search
-set(CURRENT_BUILD_ID $ENV{BUILDKITE_BUILD_ID})
-
-# Always search for the latest successful build with cache artifacts
-# Don't use the current build ID - it hasn't uploaded cache yet!
-message(STATUS "Searching for latest successful build with cache artifacts...")
-
-find_command(
-  VARIABLE NODE_EXECUTABLE
-  COMMAND node
-  REQUIRED OFF
-)
-
-if(NODE_EXECUTABLE)
-  execute_process(
-    COMMAND ${NODE_EXECUTABLE} ${CWD}/scripts/get-last-build-id.mjs --branch=current
-    WORKING_DIRECTORY ${CWD}
-    OUTPUT_VARIABLE DETECTED_BUILD_ID
-    ERROR_VARIABLE BUILD_ID_ERROR
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    RESULT_VARIABLE DETECTION_RESULT
-  )
-  
-  if(DETECTION_RESULT EQUAL 0 AND DETECTED_BUILD_ID)
-    setx(BUILDKITE_BUILD_ID ${DETECTED_BUILD_ID})
-    message(STATUS "Found latest successful build with cache: ${BUILDKITE_BUILD_ID}")
-    if(CURRENT_BUILD_ID)
-      message(STATUS "Current build ID ${CURRENT_BUILD_ID} excluded from cache search")
-    endif()
-    # Always show detailed cache detection logging (from stderr)
-    if(BUILD_ID_ERROR)
-      # Split the error output into lines and display each line
-      string(REPLACE "\n" ";" BUILD_ID_ERROR_LINES "${BUILD_ID_ERROR}")
-      foreach(LOG_LINE ${BUILD_ID_ERROR_LINES})
-        if(LOG_LINE)
-          message(STATUS "${LOG_LINE}")
-        endif()
-      endforeach()
-    endif()
-  else()
-    message(STATUS "Could not find a suitable build for cache restoration")
-    if(BUILD_ID_ERROR)
-      message(STATUS "Error: ${BUILD_ID_ERROR}")
-    endif()
-    
-    # Fallback: try manual override if provided
-    if(BUILDKITE_BUILD_ID_OVERRIDE)
-      setx(BUILDKITE_BUILD_ID ${BUILDKITE_BUILD_ID_OVERRIDE})
-      message(STATUS "Using manual build ID override: ${BUILDKITE_BUILD_ID}")
-    else()
-      return()
-    endif()
-  endif()
-else()
-  message(STATUS "Node.js not found, cannot auto-detect build ID")
-  
-  # Fallback: try manual override if provided
-  if(BUILDKITE_BUILD_ID_OVERRIDE)
-    setx(BUILDKITE_BUILD_ID ${BUILDKITE_BUILD_ID_OVERRIDE})
-    message(STATUS "Using manual build ID override: ${BUILDKITE_BUILD_ID}")
-  else()
-    return()
-  endif()
-endif()
-
-setx(BUILDKITE_BUILD_URL https://buildkite.com/${BUILDKITE_ORGANIZATION_SLUG}/${BUILDKITE_PIPELINE_SLUG}/builds/${BUILDKITE_BUILD_ID})
-setx(BUILDKITE_BUILD_PATH ${BUILDKITE_BUILDS_PATH}/builds/${BUILDKITE_BUILD_ID})
-
-# === CACHE RESTORATION ===
-# Restore cache files immediately during CMake configuration
-# This avoids dependency cycles and provides cache for all build steps
-
-message(STATUS "Restoring Buildkite cache artifacts...")
-
-if(BUILDKITE)
-  set(CACHE_ARTIFACTS "ccache-cache.tar.gz" "zig-local-cache.tar.gz" "zig-global-cache.tar.gz")
-  foreach(cache_artifact ${CACHE_ARTIFACTS})
-    # Determine cache directory based on artifact name
-    if(cache_artifact STREQUAL "ccache-cache.tar.gz")
-      set(cache_dir ${CACHE_PATH}/ccache)
-    elseif(cache_artifact STREQUAL "zig-local-cache.tar.gz")
-      set(cache_dir ${CACHE_PATH}/zig/local)
-    elseif(cache_artifact STREQUAL "zig-global-cache.tar.gz")
-      set(cache_dir ${CACHE_PATH}/zig/global)
-    endif()
-    
-    # Download cache artifact if available
-    message(STATUS "  Attempting to download ${cache_artifact} from build ${BUILDKITE_BUILD_ID}")
-    execute_process(
-      COMMAND buildkite-agent artifact download ${cache_artifact} ${BUILD_PATH} --build ${BUILDKITE_BUILD_ID}
-      WORKING_DIRECTORY ${BUILD_PATH}
-      RESULT_VARIABLE download_result
-      OUTPUT_VARIABLE download_output
-      ERROR_VARIABLE download_error
-    )
-    
-    if(download_result EQUAL 0 AND EXISTS ${BUILD_PATH}/${cache_artifact})
-      # Extract cache to target directory
-      file(MAKE_DIRECTORY ${cache_dir})
-      execute_process(
-        COMMAND ${CMAKE_COMMAND} -E tar xzf ${BUILD_PATH}/${cache_artifact}
-        WORKING_DIRECTORY ${cache_dir}
-        RESULT_VARIABLE extract_result
-        OUTPUT_QUIET
-        ERROR_QUIET
-      )
-      
-      if(extract_result EQUAL 0)
-        # Count files for reporting and validation
-        file(GLOB_RECURSE cache_files ${cache_dir}/*)
-        list(LENGTH cache_files file_count)
-        
-        # Validate that we actually got meaningful cache content
-        if(file_count GREATER 0)
-          if(cache_artifact STREQUAL "ccache-cache.tar.gz" AND file_count GREATER 10)
-            message(STATUS "  ✅ Restored ${cache_artifact}: ${file_count} files")
-          elseif(NOT cache_artifact STREQUAL "ccache-cache.tar.gz" AND file_count GREATER 5)
-            message(STATUS "  ✅ Restored ${cache_artifact}: ${file_count} files")
-          else()
-            message(STATUS "  ⚠️  ${cache_artifact} has insufficient content (${file_count} files) - treating as cache miss")
-            # Clean up the insufficient cache content
-            file(REMOVE_RECURSE ${cache_dir})
-            file(MAKE_DIRECTORY ${cache_dir})
-          endif()
-        else()
-          message(STATUS "  ❌ ${cache_artifact} is empty or corrupted (${file_count} files) - treating as cache miss")
-          # Clean up the empty cache directory
-          file(REMOVE_RECURSE ${cache_dir})
-          file(MAKE_DIRECTORY ${cache_dir})
-        endif()
-      else()
-        message(STATUS "  ⚠️  Failed to extract ${cache_artifact}")
-      endif()
-      
-      # Clean up downloaded archive
-      file(REMOVE ${BUILD_PATH}/${cache_artifact})
-    else()
-      message(STATUS "  📭 No ${cache_artifact} found (exit code: ${download_result})")
-      if(download_output)
-        message(STATUS "    Output: ${download_output}")
-      endif()
-      if(download_error)
-        message(STATUS "    Error: ${download_error}")
-      endif()
-    endif()
-  endforeach()
-else()
-  message(STATUS "  ⚠️  Not running in Buildkite, skipping cache restoration")
-endif()
-
-# === END CACHE RESTORATION ===
-
 # === BUILDKITE CACHE UPLOAD TARGETS ===
 # Upload cache artifacts after builds complete
-# These targets are created here after all BUILDKITE variables are properly set
-# NOTE: This must be BEFORE the BUN_LINK_ONLY check so it runs for all build types
-# HOWEVER: Only create cache upload targets for build steps that generate cache content
+# These targets are created here EARLY to ensure they always exist
+# Cache upload doesn't need build ID detection - only cache restoration does
 
 # Debug cache upload conditions
 message(STATUS "=== CACHE UPLOAD DEBUG ===")
@@ -369,6 +216,163 @@ else()
   )
   message(STATUS "Created no-op upload-all-caches target")
 endif()
+
+# === END CACHE UPLOAD TARGETS ===
+
+# === CACHE RESTORATION LOGIC ===
+# This requires build ID detection and can fail, but upload targets are already created above
+
+# Store the current build ID for exclusion from cache search
+set(CURRENT_BUILD_ID $ENV{BUILDKITE_BUILD_ID})
+
+# Always search for the latest successful build with cache artifacts
+# Don't use the current build ID - it hasn't uploaded cache yet!
+message(STATUS "Searching for latest successful build with cache artifacts...")
+
+find_command(
+  VARIABLE NODE_EXECUTABLE
+  COMMAND node
+  REQUIRED OFF
+)
+
+if(NODE_EXECUTABLE)
+  execute_process(
+    COMMAND ${NODE_EXECUTABLE} ${CWD}/scripts/get-last-build-id.mjs --branch=current
+    WORKING_DIRECTORY ${CWD}
+    OUTPUT_VARIABLE DETECTED_BUILD_ID
+    ERROR_VARIABLE BUILD_ID_ERROR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE DETECTION_RESULT
+  )
+  
+  if(DETECTION_RESULT EQUAL 0 AND DETECTED_BUILD_ID)
+    setx(BUILDKITE_BUILD_ID ${DETECTED_BUILD_ID})
+    message(STATUS "Found latest successful build with cache: ${BUILDKITE_BUILD_ID}")
+    if(CURRENT_BUILD_ID)
+      message(STATUS "Current build ID ${CURRENT_BUILD_ID} excluded from cache search")
+    endif()
+    # Always show detailed cache detection logging (from stderr)
+    if(BUILD_ID_ERROR)
+      # Split the error output into lines and display each line
+      string(REPLACE "\n" ";" BUILD_ID_ERROR_LINES "${BUILD_ID_ERROR}")
+      foreach(LOG_LINE ${BUILD_ID_ERROR_LINES})
+        if(LOG_LINE)
+          message(STATUS "${LOG_LINE}")
+        endif()
+      endforeach()
+    endif()
+  else()
+    message(STATUS "Could not find a suitable build for cache restoration")
+    if(BUILD_ID_ERROR)
+      message(STATUS "Error: ${BUILD_ID_ERROR}")
+    endif()
+    
+    # Fallback: try manual override if provided
+    if(BUILDKITE_BUILD_ID_OVERRIDE)
+      setx(BUILDKITE_BUILD_ID ${BUILDKITE_BUILD_ID_OVERRIDE})
+      message(STATUS "Using manual build ID override: ${BUILDKITE_BUILD_ID}")
+    else()
+      return()
+    endif()
+  endif()
+else()
+  message(STATUS "Node.js not found, cannot auto-detect build ID")
+  
+  # Fallback: try manual override if provided
+  if(BUILDKITE_BUILD_ID_OVERRIDE)
+    setx(BUILDKITE_BUILD_ID ${BUILDKITE_BUILD_ID_OVERRIDE})
+    message(STATUS "Using manual build ID override: ${BUILDKITE_BUILD_ID}")
+  else()
+    return()
+  endif()
+endif()
+
+setx(BUILDKITE_BUILD_URL https://buildkite.com/${BUILDKITE_ORGANIZATION_SLUG}/${BUILDKITE_PIPELINE_SLUG}/builds/${BUILDKITE_BUILD_ID})
+setx(BUILDKITE_BUILD_PATH ${BUILDKITE_BUILDS_PATH}/builds/${BUILDKITE_BUILD_ID})
+
+# === CACHE RESTORATION ===
+# Restore cache files immediately during CMake configuration
+# This avoids dependency cycles and provides cache for all build steps
+
+message(STATUS "Restoring Buildkite cache artifacts...")
+
+if(BUILDKITE)
+  set(CACHE_ARTIFACTS "ccache-cache.tar.gz" "zig-local-cache.tar.gz" "zig-global-cache.tar.gz")
+  foreach(cache_artifact ${CACHE_ARTIFACTS})
+    # Determine cache directory based on artifact name
+    if(cache_artifact STREQUAL "ccache-cache.tar.gz")
+      set(cache_dir ${CACHE_PATH}/ccache)
+    elseif(cache_artifact STREQUAL "zig-local-cache.tar.gz")
+      set(cache_dir ${CACHE_PATH}/zig/local)
+    elseif(cache_artifact STREQUAL "zig-global-cache.tar.gz")
+      set(cache_dir ${CACHE_PATH}/zig/global)
+    endif()
+    
+    # Download cache artifact if available
+    message(STATUS "  Attempting to download ${cache_artifact} from build ${BUILDKITE_BUILD_ID}")
+    execute_process(
+      COMMAND buildkite-agent artifact download ${cache_artifact} ${BUILD_PATH} --build ${BUILDKITE_BUILD_ID}
+      WORKING_DIRECTORY ${BUILD_PATH}
+      RESULT_VARIABLE download_result
+      OUTPUT_VARIABLE download_output
+      ERROR_VARIABLE download_error
+    )
+    
+    if(download_result EQUAL 0 AND EXISTS ${BUILD_PATH}/${cache_artifact})
+      # Extract cache to target directory
+      file(MAKE_DIRECTORY ${cache_dir})
+      execute_process(
+        COMMAND ${CMAKE_COMMAND} -E tar xzf ${BUILD_PATH}/${cache_artifact}
+        WORKING_DIRECTORY ${cache_dir}
+        RESULT_VARIABLE extract_result
+        OUTPUT_QUIET
+        ERROR_QUIET
+      )
+      
+      if(extract_result EQUAL 0)
+        # Count files for reporting and validation
+        file(GLOB_RECURSE cache_files ${cache_dir}/*)
+        list(LENGTH cache_files file_count)
+        
+        # Validate that we actually got meaningful cache content
+        if(file_count GREATER 0)
+          if(cache_artifact STREQUAL "ccache-cache.tar.gz" AND file_count GREATER 10)
+            message(STATUS "  ✅ Restored ${cache_artifact}: ${file_count} files")
+          elseif(NOT cache_artifact STREQUAL "ccache-cache.tar.gz" AND file_count GREATER 5)
+            message(STATUS "  ✅ Restored ${cache_artifact}: ${file_count} files")
+          else()
+            message(STATUS "  ⚠️  ${cache_artifact} has insufficient content (${file_count} files) - treating as cache miss")
+            # Clean up the insufficient cache content
+            file(REMOVE_RECURSE ${cache_dir})
+            file(MAKE_DIRECTORY ${cache_dir})
+          endif()
+        else()
+          message(STATUS "  ❌ ${cache_artifact} is empty or corrupted (${file_count} files) - treating as cache miss")
+          # Clean up the empty cache directory
+          file(REMOVE_RECURSE ${cache_dir})
+          file(MAKE_DIRECTORY ${cache_dir})
+        endif()
+      else()
+        message(STATUS "  ⚠️  Failed to extract ${cache_artifact}")
+      endif()
+      
+      # Clean up downloaded archive
+      file(REMOVE ${BUILD_PATH}/${cache_artifact})
+    else()
+      message(STATUS "  📭 No ${cache_artifact} found (exit code: ${download_result})")
+      if(download_output)
+        message(STATUS "    Output: ${download_output}")
+      endif()
+      if(download_error)
+        message(STATUS "    Error: ${download_error}")
+      endif()
+    endif()
+  endforeach()
+else()
+  message(STATUS "  ⚠️  Not running in Buildkite, skipping cache restoration")
+endif()
+
+# === END CACHE RESTORATION ===
 
 # === BUILD ARTIFACT DOWNLOADING ===
 # Only download build artifacts (libbun-*.a) for linking step
