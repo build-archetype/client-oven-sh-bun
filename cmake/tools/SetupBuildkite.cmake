@@ -230,15 +230,28 @@ message(STATUS "=== END CACHE UPLOAD DEBUG ===")
 
 # ccache upload target (only created in C++ build step)
 if(UPLOAD_CCACHE AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/ccache)
-  # Cache enabled and directory exists - create real upload target
-  register_command(
-    TARGET upload-ccache-cache
-    COMMENT "Uploading ccache cache"
-    COMMAND ${CMAKE_COMMAND} -E chdir ${CACHE_PATH}/ccache ${CMAKE_COMMAND} -E tar czf ${BUILD_PATH}/ccache-cache.tar.gz .
-    CWD ${BUILD_PATH}
-    ARTIFACTS ${BUILD_PATH}/ccache-cache.tar.gz
-  )
-  message(STATUS "Created real ccache upload target")
+  # Check if ccache directory has meaningful content before uploading
+  file(GLOB_RECURSE CCACHE_FILES ${CACHE_PATH}/ccache/*)
+  list(LENGTH CCACHE_FILES CCACHE_FILE_COUNT)
+  
+  if(CCACHE_FILE_COUNT GREATER 10)
+    # Cache enabled and directory has content - create real upload target
+    register_command(
+      TARGET upload-ccache-cache
+      COMMENT "Uploading ccache cache (${CCACHE_FILE_COUNT} files)"
+      COMMAND ${CMAKE_COMMAND} -E chdir ${CACHE_PATH}/ccache ${CMAKE_COMMAND} -E tar czf ${BUILD_PATH}/ccache-cache.tar.gz .
+      CWD ${BUILD_PATH}
+      ARTIFACTS ${BUILD_PATH}/ccache-cache.tar.gz
+    )
+    message(STATUS "Created real ccache upload target (${CCACHE_FILE_COUNT} files)")
+  else()
+    # Cache directory is empty or has minimal content - create no-op target
+    add_custom_target(upload-ccache-cache
+      COMMAND ${CMAKE_COMMAND} -E echo "Skipping ccache cache upload \\(only ${CCACHE_FILE_COUNT} files, need >10\\)"
+      COMMENT "Skipping ccache cache upload - insufficient content"
+    )
+    message(STATUS "Created no-op ccache upload target (only ${CCACHE_FILE_COUNT} files)")
+  endif()
 elseif(UPLOAD_CCACHE)
   # Cache disabled or directory missing - create no-op target
   add_custom_target(upload-ccache-cache
@@ -250,15 +263,28 @@ endif()
 
 # Zig local cache upload target (only created in Zig build step)
 if(UPLOAD_ZIG_CACHES AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/zig/local)
-  # Cache enabled and directory exists - create real upload target
-  register_command(
-    TARGET upload-zig-local-cache
-    COMMENT "Uploading Zig local cache"
-    COMMAND ${CMAKE_COMMAND} -E chdir ${CACHE_PATH}/zig/local ${CMAKE_COMMAND} -E tar czf ${BUILD_PATH}/zig-local-cache.tar.gz .
-    CWD ${BUILD_PATH}
-    ARTIFACTS ${BUILD_PATH}/zig-local-cache.tar.gz
-  )
-  message(STATUS "Created real zig-local upload target")
+  # Check if zig local cache directory has meaningful content before uploading
+  file(GLOB_RECURSE ZIG_LOCAL_FILES ${CACHE_PATH}/zig/local/*)
+  list(LENGTH ZIG_LOCAL_FILES ZIG_LOCAL_FILE_COUNT)
+  
+  if(ZIG_LOCAL_FILE_COUNT GREATER 5)
+    # Cache enabled and directory has content - create real upload target
+    register_command(
+      TARGET upload-zig-local-cache
+      COMMENT "Uploading Zig local cache (${ZIG_LOCAL_FILE_COUNT} files)"
+      COMMAND ${CMAKE_COMMAND} -E chdir ${CACHE_PATH}/zig/local ${CMAKE_COMMAND} -E tar czf ${BUILD_PATH}/zig-local-cache.tar.gz .
+      CWD ${BUILD_PATH}
+      ARTIFACTS ${BUILD_PATH}/zig-local-cache.tar.gz
+    )
+    message(STATUS "Created real zig-local upload target (${ZIG_LOCAL_FILE_COUNT} files)")
+  else()
+    # Cache directory is empty or has minimal content - create no-op target
+    add_custom_target(upload-zig-local-cache
+      COMMAND ${CMAKE_COMMAND} -E echo "Skipping Zig local cache upload \\(only ${ZIG_LOCAL_FILE_COUNT} files, need >5\\)"
+      COMMENT "Skipping Zig local cache upload - insufficient content"
+    )
+    message(STATUS "Created no-op zig-local upload target (only ${ZIG_LOCAL_FILE_COUNT} files)")
+  endif()
 elseif(UPLOAD_ZIG_CACHES)
   # Cache disabled or directory missing - create no-op target
   add_custom_target(upload-zig-local-cache
@@ -270,15 +296,28 @@ endif()
 
 # Zig global cache upload target (only created in Zig build step)
 if(UPLOAD_ZIG_CACHES AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/zig/global)
-  # Cache enabled and directory exists - create real upload target
-  register_command(
-    TARGET upload-zig-global-cache
-    COMMENT "Uploading Zig global cache"
-    COMMAND ${CMAKE_COMMAND} -E chdir ${CACHE_PATH}/zig/global ${CMAKE_COMMAND} -E tar czf ${BUILD_PATH}/zig-global-cache.tar.gz .
-    CWD ${BUILD_PATH}
-    ARTIFACTS ${BUILD_PATH}/zig-global-cache.tar.gz
-  )
-  message(STATUS "Created real zig-global upload target")
+  # Check if zig global cache directory has meaningful content before uploading
+  file(GLOB_RECURSE ZIG_GLOBAL_FILES ${CACHE_PATH}/zig/global/*)
+  list(LENGTH ZIG_GLOBAL_FILES ZIG_GLOBAL_FILE_COUNT)
+  
+  if(ZIG_GLOBAL_FILE_COUNT GREATER 5)
+    # Cache enabled and directory has content - create real upload target
+    register_command(
+      TARGET upload-zig-global-cache
+      COMMENT "Uploading Zig global cache (${ZIG_GLOBAL_FILE_COUNT} files)"
+      COMMAND ${CMAKE_COMMAND} -E chdir ${CACHE_PATH}/zig/global ${CMAKE_COMMAND} -E tar czf ${BUILD_PATH}/zig-global-cache.tar.gz .
+      CWD ${BUILD_PATH}
+      ARTIFACTS ${BUILD_PATH}/zig-global-cache.tar.gz
+    )
+    message(STATUS "Created real zig-global upload target (${ZIG_GLOBAL_FILE_COUNT} files)")
+  else()
+    # Cache directory is empty or has minimal content - create no-op target
+    add_custom_target(upload-zig-global-cache
+      COMMAND ${CMAKE_COMMAND} -E echo "Skipping Zig global cache upload \\(only ${ZIG_GLOBAL_FILE_COUNT} files, need >5\\)"
+      COMMENT "Skipping Zig global cache upload - insufficient content"
+    )
+    message(STATUS "Created no-op zig-global upload target (only ${ZIG_GLOBAL_FILE_COUNT} files)")
+  endif()
 elseif(UPLOAD_ZIG_CACHES)
   # Cache disabled or directory missing - create no-op target
   add_custom_target(upload-zig-global-cache

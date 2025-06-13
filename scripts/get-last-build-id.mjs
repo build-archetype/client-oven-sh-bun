@@ -86,13 +86,13 @@ async function buildHasCacheArtifacts(buildId, orgSlug, pipelineSlug, neededCach
           for (const artifact of artifactsResponse) {
             const filename = artifact.filename || artifact.file_name || artifact.path;
             if (neededCacheTypes.includes(filename)) {
-              // Verify the artifact has actual size (not empty)
+              // Verify the artifact has actual size (not empty or too small)
               const fileSize = artifact.file_size || artifact.size || 0;
-              if (fileSize > 0) {
+              if (fileSize > 1024) { // Minimum 1KB for meaningful cache content
                 foundCacheTypes.add(filename);
                 console.error(`    ✅ Job ${job.step_key}: Found ${filename} (${fileSize} bytes)`);
               } else {
-                console.error(`    ⚠️  Job ${job.step_key}: Found ${filename} but it's empty (${fileSize} bytes)`);
+                console.error(`    ⚠️  Job ${job.step_key}: Found ${filename} but it's too small (${fileSize} bytes, need >1024)`);
               }
             }
           }
