@@ -32,12 +32,25 @@ endif()
 
 message(STATUS "Found ccache: ${CCACHE_PROGRAM}")
 
-# Set compiler launcher variables
-set(CCACHE_ARGS CMAKE_C_COMPILER_LAUNCHER CMAKE_CXX_COMPILER_LAUNCHER)
-foreach(arg ${CCACHE_ARGS})
-  setx(${arg} ${CCACHE_PROGRAM})
-  list(APPEND CMAKE_ARGS -D${arg}=${${arg}})
-endforeach()
+# Set compiler launcher
+if(CCACHE_PROGRAM AND ENABLE_CCACHE)
+    message(STATUS "✅ ccache enabled: ${CCACHE_PROGRAM}")
+    
+    # Set compiler launcher (without arguments)
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    
+    # Enable ccache verbose and debug mode for detailed logging
+    set(ENV{CCACHE_VERBOSE} "1")
+    set(ENV{CCACHE_DEBUG} "1")
+    set(ENV{CCACHE_LOGFILE} "${CMAKE_BINARY_DIR}/ccache-log.txt")
+    
+    message(STATUS "  - C compiler launcher: ${CMAKE_C_COMPILER_LAUNCHER}")
+    message(STATUS "  - CXX compiler launcher: ${CMAKE_CXX_COMPILER_LAUNCHER}")
+    message(STATUS "  - ccache log file: $ENV{CCACHE_LOGFILE}")
+else()
+    message(STATUS "ℹ️  ccache disabled")
+endif()
 
 # Set ccache environment variables
 setenv(CCACHE_DIR ${CACHE_PATH}/ccache)
@@ -56,10 +69,6 @@ setenv(CCACHE_FILECLONE 1)
 setenv(CCACHE_STATSLOG ${BUILD_PATH}/ccache.log)
 setenv(CCACHE_LOGFILE ${BUILD_PATH}/ccache.log)
 setenv(CCACHE_DEBUG 1)
-
-# Add debug output for compilation commands
-set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM} -v")
-set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM} -v")
 
 if(CI)
   # FIXME: Does not work on Ubuntu 18.04
