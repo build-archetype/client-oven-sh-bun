@@ -143,10 +143,28 @@ if(BUILDKITE)
       )
       
       if(extract_result EQUAL 0)
-        # Count files for reporting
+        # Count files for reporting and validation
         file(GLOB_RECURSE cache_files ${cache_dir}/*)
         list(LENGTH cache_files file_count)
-        message(STATUS "  ✅ Restored ${cache_artifact}: ${file_count} files")
+        
+        # Validate that we actually got meaningful cache content
+        if(file_count GREATER 0)
+          if(cache_artifact STREQUAL "ccache-cache.tar.gz" AND file_count GREATER 10)
+            message(STATUS "  ✅ Restored ${cache_artifact}: ${file_count} files")
+          elseif(NOT cache_artifact STREQUAL "ccache-cache.tar.gz" AND file_count GREATER 5)
+            message(STATUS "  ✅ Restored ${cache_artifact}: ${file_count} files")
+          else()
+            message(STATUS "  ⚠️  ${cache_artifact} has insufficient content (${file_count} files) - treating as cache miss")
+            # Clean up the insufficient cache content
+            file(REMOVE_RECURSE ${cache_dir})
+            file(MAKE_DIRECTORY ${cache_dir})
+          endif()
+        else()
+          message(STATUS "  ❌ ${cache_artifact} is empty or corrupted (${file_count} files) - treating as cache miss")
+          # Clean up the empty cache directory
+          file(REMOVE_RECURSE ${cache_dir})
+          file(MAKE_DIRECTORY ${cache_dir})
+        endif()
       else()
         message(STATUS "  ⚠️  Failed to extract ${cache_artifact}")
       endif()
