@@ -806,33 +806,21 @@ make_caching_decision() {
     local usable_images="${remaining%%|*}"
     local all_images="${remaining#*|}"
     
-    # Priority 1: Exact local match - but validate it has required tools
+    # Priority 1: Exact local match - trust existing images (no validation to avoid deleting working images)
     if [ -n "$exact_match" ]; then
-        log "🔍 Found exact local match: $exact_match - validating tools..." >&2
-        if validate_vm_image_tools "$exact_match"; then
-            log "🎯 Decision: Use exact local match ($exact_match)" >&2
-            echo "use_local_exact|$exact_match"
-            return
-        else
-            log "⚠️  Exact match failed validation - deleting corrupted image" >&2
-            tart delete "$exact_match" 2>/dev/null || log "   Failed to delete corrupted image" >&2
-            # Continue to other options
-        fi
+        log "🔍 Found exact local match: $exact_match" >&2
+        log "🎯 Decision: Use exact local match ($exact_match) - trusting existing image" >&2
+        echo "use_local_exact|$exact_match"
+        return
     fi
     
     # Priority 2: Compatible local match (same minor version - incremental update)
     if [ -n "$compatible_match" ]; then
-        log "🔍 Found compatible local match: $compatible_match - validating tools..." >&2
-        if validate_vm_image_tools "$compatible_match"; then
-            log "🔄 Compatible local image found: $compatible_match" >&2
-            log "🎯 Decision: Build incrementally from compatible local base" >&2
-            echo "build_incremental|$compatible_match"
-            return
-        else
-            log "⚠️  Compatible match failed validation - deleting corrupted image" >&2
-            tart delete "$compatible_match" 2>/dev/null || log "   Failed to delete corrupted image" >&2
-            # Continue to remote check
-        fi
+        log "🔍 Found compatible local match: $compatible_match" >&2
+        log "🔄 Compatible local image found: $compatible_match" >&2
+        log "🎯 Decision: Build incrementally from compatible local base" >&2
+        echo "build_incremental|$compatible_match"
+        return
     fi
     
     # Priority 3: Check remote registry (skip only in local dev mode)
