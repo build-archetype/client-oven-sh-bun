@@ -1128,27 +1128,28 @@ function getMacOSVMBuildStep(platform, options) {
 
 // === MAC_OS_VM_RESOURCE_CONFIGURATION ===
 // Centralized configuration for Tart macOS VM resources
-// Adjust these based on your build machine specs
+// IMPORTANT: These values are intentionally conservative to ensure reliable VM boot
+// Over-allocation causes VMs to fail to boot properly with SSH connectivity issues
 const MAC_OS_VM_RESOURCES = {
-  // For Mac Mini M4 (24GB RAM, ~10 cores)
+  // For Mac Mini M4 (24GB RAM, ~10 cores) - CONSERVATIVE for stability
   macMiniM4: {
-    memory: 16384,  // 16GB - leaves 8GB for host + overhead
-    cpu: 8,         // 8 cores - leaves 2 for host
-    description: "Mac Mini M4 (24GB RAM, ~10 cores)"
+    memory: 8192,   // 8GB - much more conservative for reliable boot
+    cpu: 4,         // 4 cores - leaves more for host and hypervisor
+    description: "Mac Mini M4 (conservative for stability)"
   },
   
-  // For Mac Studio M2 Max (64GB RAM, ~12 cores) 
+  // For Mac Studio M2 Max (64GB RAM, ~12 cores) - CONSERVATIVE for stability
   macStudioM2Max: {
-    memory: 32768,  // 32GB - leaves 32GB for host + overhead
-    cpu: 10,        // 10 cores - leaves 2 for host
-    description: "Mac Studio M2 Max (64GB RAM, ~12 cores)"
+    memory: 12288,  // 12GB - conservative even on high-end hardware
+    cpu: 6,         // 6 cores - leaves more for host and hypervisor
+    description: "Mac Studio M2 Max (conservative for stability)"
   },
   
   // Conservative default for unknown hardware
   default: {
-    memory: 12288,  // 12GB
-    cpu: 6,         // 6 cores
-    description: "Conservative default"
+    memory: 6144,   // 6GB - very conservative for unknown hardware
+    cpu: 4,         // 4 cores - safe for most systems
+    description: "Conservative default for reliable boot"
   }
 };
 
@@ -1159,15 +1160,13 @@ function getOptimalMacOSVMResources() {
   
   console.log(`🔍 Detected system: ${totalMemoryGB}GB RAM, ${totalCores} cores`);
   
-  // Auto-select configuration based on detected specs
-  if (totalMemoryGB >= 24 && totalCores >= 10) {
-    if (totalMemoryGB >= 64) {
-      console.log(`📊 Using Mac Studio M2 Max configuration`);
-      return MAC_OS_VM_RESOURCES.macStudioM2Max;
-    } else {
-      console.log(`📊 Using Mac Mini M4 configuration`);
-      return MAC_OS_VM_RESOURCES.macMiniM4;
-    }
+  // Auto-select configuration based on detected specs (conservative values)
+  if (totalMemoryGB >= 32 && totalCores >= 10) {
+    console.log(`📊 Using Mac Studio M2 Max configuration (conservative)`);
+    return MAC_OS_VM_RESOURCES.macStudioM2Max;
+  } else if (totalMemoryGB >= 16 && totalCores >= 8) {
+    console.log(`📊 Using Mac Mini M4 configuration (conservative)`);
+    return MAC_OS_VM_RESOURCES.macMiniM4;
   } else {
     console.log(`📊 Using conservative default configuration`);
     return MAC_OS_VM_RESOURCES.default;
