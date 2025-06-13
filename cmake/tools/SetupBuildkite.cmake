@@ -100,18 +100,27 @@ if(UPLOAD_CCACHE AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL 
     TARGET upload-ccache-cache
     COMMENT "Uploading ccache cache (validation at build time)"
     COMMAND /bin/sh -c "
+      echo '=== CCACHE UPLOAD DEBUG ==='
       echo 'Checking ccache content before upload...'
+      echo 'Cache directory: ${CACHE_PATH}/ccache'
+      echo 'Listing cache directory contents:'
+      ls -la '${CACHE_PATH}/ccache'
+      echo 'Checking ccache statistics:'
+      ${CCACHE_PROGRAM} -s
       file_count=$(find '${CACHE_PATH}/ccache' -type f | wc -l | tr -d ' ')
       echo \"Found $file_count ccache files\"
       if [ \"$file_count\" -gt 10 ]; then
         echo '✅ ccache has sufficient content ('$file_count' files), creating archive...'
         cd '${CACHE_PATH}/ccache' && tar czf '${BUILD_PATH}/ccache-cache.tar.gz' .
         echo '📦 ccache archive created successfully'
+        echo 'Archive size:'
+        ls -lh '${BUILD_PATH}/ccache-cache.tar.gz'
       else
         echo '⚠️ ccache has insufficient content ('$file_count' files, need >10), creating empty placeholder...'
         echo 'empty' > '${BUILD_PATH}/ccache-cache.tar.gz'
         echo '📭 Empty placeholder created (will be rejected by cache system)'
       fi
+      echo '=== END CCACHE UPLOAD DEBUG ==='
     "
     CWD ${BUILD_PATH}
     ARTIFACTS ${BUILD_PATH}/ccache-cache.tar.gz
