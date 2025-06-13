@@ -226,6 +226,10 @@ endif()
 if(BUN_LINK_ONLY)
   message(STATUS "Link step detected - setting up build artifact downloading")
   
+  # Set the build URL before using it (this was previously set later in the file)
+  setx(BUILDKITE_BUILD_URL https://buildkite.com/${BUILDKITE_ORGANIZATION_SLUG}/${BUILDKITE_PIPELINE_SLUG}/builds/${BUILDKITE_BUILD_ID})
+  setx(BUILDKITE_BUILD_PATH ${BUILDKITE_BUILDS_PATH}/builds/${BUILDKITE_BUILD_ID})
+  
   file(
     DOWNLOAD ${BUILDKITE_BUILD_URL}
     HTTPHEADER "Accept: application/json"
@@ -472,8 +476,9 @@ else()
   endif()
 endif()
 
-setx(BUILDKITE_BUILD_URL https://buildkite.com/${BUILDKITE_ORGANIZATION_SLUG}/${BUILDKITE_PIPELINE_SLUG}/builds/${BUILDKITE_BUILD_ID})
-setx(BUILDKITE_BUILD_PATH ${BUILDKITE_BUILDS_PATH}/builds/${BUILDKITE_BUILD_ID})
+# The URL and path are now set earlier in the build artifact downloading section
+# setx(BUILDKITE_BUILD_URL https://buildkite.com/${BUILDKITE_ORGANIZATION_SLUG}/${BUILDKITE_PIPELINE_SLUG}/builds/${BUILDKITE_BUILD_ID})
+# setx(BUILDKITE_BUILD_PATH ${BUILDKITE_BUILDS_PATH}/builds/${BUILDKITE_BUILD_ID})
 
 # === CACHE RESTORATION ===
 # Restore cache files immediately during CMake configuration
