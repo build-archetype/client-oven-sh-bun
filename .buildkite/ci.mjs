@@ -470,18 +470,11 @@ function getBuildCppStep(platform, options) {
       ...getBuildEnv(platform, options),
     },
     // Build C++ components and dependencies separately for better caching
-    command: [
-      `${command} --target bun`, 
-      `${command} --target dependencies`,
-      `${command} --target upload-all-caches || echo "Cache upload failed (non-fatal)"`
-    ],
+    command: `${command} --target bun && ${command} --target dependencies && (${command} --target upload-all-caches || echo 'Cache upload failed (non-fatal)')`,
   };
   // If macOS, run in VM - combine all commands in single VM to preserve ccache
   if (platform.os === "darwin") {
-    step.command = [
-      `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target bun && ${command} --target dependencies && (${command} --target upload-all-caches || echo 'Cache upload failed (non-fatal)')" "${process.cwd()}"`
-    ];
+    step.command = `./scripts/build-macos-vm.sh --release=${platform.release} && ./scripts/ci-macos-build-cpp.sh ${platform.release} "${command}" "${process.cwd()}"`;
   }
   return step;
 }
@@ -520,18 +513,12 @@ function getBuildZigStep(platform, options) {
       BUILDKITE_GROUP_KEY: getTargetKey(platform),
       ...getBuildEnv(platform, options),
     },
-    command: [
-      `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
-      `${getBuildCommand(platform, options)} --target upload-all-caches || echo "Cache upload failed (non-fatal)"`
-    ],
+    command: `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain} && (${getBuildCommand(platform, options)} --target upload-all-caches || echo "Cache upload failed (non-fatal)")`,
     timeout_in_minutes: 35,
   };
   // If macOS, run in VM - combine all commands in single VM to preserve zig cache
   if (platform.os === "darwin") {
-    step.command = [
-      `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain} && (${getBuildCommand(platform, options)} --target upload-all-caches || echo 'Cache upload failed (non-fatal)')" "${process.cwd()}"`
-    ];
+    step.command = `./scripts/build-macos-vm.sh --release=${platform.release} && ./scripts/ci-macos-build-zig.sh ${platform.release} "${getBuildCommand(platform, options)}" ${toolchain} "${process.cwd()}"`;
   }
   return step;
 }
@@ -559,10 +546,7 @@ function getLinkBunStep(platform, options) {
   };
   // If macOS, run in VM
   if (platform.os === "darwin") {
-    step.command = [
-      `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target bun" "${process.cwd()}"`
-    ];
+    step.command = `./scripts/build-macos-vm.sh --release=${platform.release} && ./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target bun" "${process.cwd()}"`;
   }
   return step;
 }
