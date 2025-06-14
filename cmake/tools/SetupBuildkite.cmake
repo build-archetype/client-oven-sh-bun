@@ -50,7 +50,7 @@ message(STATUS "BUILD_PATH: ${BUILD_PATH}")
 message(STATUS "BUN_CPP_ONLY: ${BUN_CPP_ONLY}")
 message(STATUS "BUN_LINK_ONLY: ${BUN_LINK_ONLY}")
 
-# Determine which caches this build step should upload
+# Cache upload targets - simplify the conditions to work both locally and in CI
 set(UPLOAD_CCACHE OFF)
 set(UPLOAD_ZIG_CACHES OFF)
 
@@ -69,7 +69,7 @@ endif()
 
 # Ensure cache directories exist (create them if they don't)
 # This allows cache upload even when starting with empty cache
-if(BUILDKITE_CACHE AND BUILDKITE)
+if(BUILDKITE_CACHE)
   file(MAKE_DIRECTORY ${CACHE_PATH}/ccache)
   file(MAKE_DIRECTORY ${CACHE_PATH}/zig/local)
   file(MAKE_DIRECTORY ${CACHE_PATH}/zig/global)
@@ -93,17 +93,16 @@ else()
 endif()
 message(STATUS "=== END CACHE UPLOAD DEBUG ===")
 
-# ccache upload target (only created in C++ build step)
-if(UPLOAD_CCACHE AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/ccache)
-  # Always create upload target - validate file count at BUILD TIME, not configure time
+# ccache upload target - simplified conditions
+if(UPLOAD_CCACHE AND BUILDKITE_CACHE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/ccache)
   register_command(
     TARGET upload-ccache-cache
     COMMENT "Uploading ccache cache (validation at build time)"
-    COMMAND /bin/sh -c "file_count=$(find '${CACHE_PATH}/ccache' -type f | wc -l | tr -d ' ') && echo \"Found \$file_count ccache files\" && test \"\$file_count\" -gt 10 && cd '${CACHE_PATH}/ccache' && tar czf '${BUILD_PATH}/ccache-cache.tar.gz' . && echo 'ccache archive created' || (echo 'empty' > '${BUILD_PATH}/ccache-cache.tar.gz' && echo 'ccache insufficient content')"
+    COMMAND /bin/sh -c "file_count=$(find '${CACHE_PATH}/ccache' -type f | wc -l | tr -d ' ') && echo \"Found \$file_count ccache files\" && test \"\$file_count\" -gt 10 && cd '${CACHE_PATH}/ccache' && tar czf '${BUILD_PATH}/ccache-cache.tar.gz' . && mkdir -p '${CACHE_PATH}/../cache-backup' && cp '${BUILD_PATH}/ccache-cache.tar.gz' '${CACHE_PATH}/../cache-backup/' && echo 'ccache archive and local backup created' || (echo 'empty' > '${BUILD_PATH}/ccache-cache.tar.gz' && echo 'ccache insufficient content')"
     CWD ${BUILD_PATH}
     ARTIFACTS ${BUILD_PATH}/ccache-cache.tar.gz
   )
-  message(STATUS "Created smart ccache upload target (validates at build time)")
+  message(STATUS "Created smart ccache upload target (validation at build time)")
 elseif(UPLOAD_CCACHE)
   # Cache disabled or directory missing - create no-op target
   add_custom_target(upload-ccache-cache
@@ -113,18 +112,16 @@ elseif(UPLOAD_CCACHE)
   message(STATUS "Created no-op ccache upload target")
 endif()
 
-# Zig local cache upload target (only created in Zig build step)
-if(UPLOAD_ZIG_CACHES AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/zig/local)
-  # Always create upload target - validate file count at BUILD TIME, not configure time
+# Zig local cache upload target - simplified conditions
+if(UPLOAD_ZIG_CACHES AND BUILDKITE_CACHE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/zig/local)
   register_command(
     TARGET upload-zig-local-cache
     COMMENT "Uploading Zig local cache (validation at build time)"
-    COMMAND /bin/sh -c "echo '=== ZIG LOCAL CACHE UPLOAD DEBUG ===' && file_count=$(find '${CACHE_PATH}/zig/local' -type f | wc -l | tr -d ' ') && echo \"Found \$file_count Zig local cache files\" && if [ \"\$file_count\" -gt 1 ]; then echo 'Cache has sufficient content, creating archive...' && cd '${CACHE_PATH}/zig/local' && tar czf '${BUILD_PATH}/zig-local-cache.tar.gz' . && archive_size=$(ls -lh '${BUILD_PATH}/zig-local-cache.tar.gz' | awk '{print \$5}') && echo \"Zig local cache archive created: \$archive_size\" && echo '=== ZIG LOCAL CACHE UPLOAD SUCCESS ==='; else echo 'Cache has insufficient content (\$file_count files), creating empty marker' && echo 'empty' > '${BUILD_PATH}/zig-local-cache.tar.gz' && echo '=== ZIG LOCAL CACHE UPLOAD SKIPPED ==='; fi"
+    COMMAND /bin/sh -c "echo '=== ZIG LOCAL CACHE UPLOAD DEBUG ===' && file_count=$(find '${CACHE_PATH}/zig/local' -type f | wc -l | tr -d ' ') && echo \"Found \$file_count Zig local cache files\" && if [ \"\$file_count\" -gt 1 ]; then echo 'Cache has sufficient content, creating archive...' && cd '${CACHE_PATH}/zig/local' && tar czf '${BUILD_PATH}/zig-local-cache.tar.gz' . && archive_size=$(ls -lh '${BUILD_PATH}/zig-local-cache.tar.gz' | awk '{print \$5}') && echo \"Zig local cache archive created: \$archive_size\" && mkdir -p '${CACHE_PATH}/../cache-backup' && cp '${BUILD_PATH}/zig-local-cache.tar.gz' '${CACHE_PATH}/../cache-backup/' && echo 'Local backup created' && echo '=== ZIG LOCAL CACHE UPLOAD SUCCESS ==='; else echo 'Cache has insufficient content (\$file_count files), creating empty marker' && echo 'empty' > '${BUILD_PATH}/zig-local-cache.tar.gz' && echo '=== ZIG LOCAL CACHE UPLOAD SKIPPED ==='; fi"
     CWD ${BUILD_PATH}
     ARTIFACTS ${BUILD_PATH}/zig-local-cache.tar.gz
-    TARGETS bun-zig
   )
-  message(STATUS "Created smart zig-local upload target (validates at build time)")
+  message(STATUS "Created smart zig-local upload target (validation at build time)")
 elseif(UPLOAD_ZIG_CACHES)
   # Cache disabled or directory missing - create no-op target
   add_custom_target(upload-zig-local-cache
@@ -134,18 +131,16 @@ elseif(UPLOAD_ZIG_CACHES)
   message(STATUS "Created no-op zig-local upload target")
 endif()
 
-# Zig global cache upload target (only created in Zig build step)
-if(UPLOAD_ZIG_CACHES AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/zig/global)
-  # Always create upload target - validate file count at BUILD TIME, not configure time
+# Zig global cache upload target - simplified conditions  
+if(UPLOAD_ZIG_CACHES AND BUILDKITE_CACHE AND (CACHE_STRATEGY STREQUAL "read-write" OR CACHE_STRATEGY STREQUAL "write-only") AND IS_DIRECTORY ${CACHE_PATH}/zig/global)
   register_command(
     TARGET upload-zig-global-cache
     COMMENT "Uploading Zig global cache (validation at build time)"
-    COMMAND /bin/sh -c "echo '=== ZIG GLOBAL CACHE UPLOAD DEBUG ===' && file_count=$(find '${CACHE_PATH}/zig/global' -type f | wc -l | tr -d ' ') && echo \"Found \$file_count Zig global cache files\" && if [ \"\$file_count\" -gt 1 ]; then echo 'Cache has sufficient content, creating archive...' && cd '${CACHE_PATH}/zig/global' && tar czf '${BUILD_PATH}/zig-global-cache.tar.gz' . && archive_size=$(ls -lh '${BUILD_PATH}/zig-global-cache.tar.gz' | awk '{print \$5}') && echo \"Zig global cache archive created: \$archive_size\" && echo '=== ZIG GLOBAL CACHE UPLOAD SUCCESS ==='; else echo 'Cache has insufficient content (\$file_count files), creating empty marker' && echo 'empty' > '${BUILD_PATH}/zig-global-cache.tar.gz' && echo '=== ZIG GLOBAL CACHE UPLOAD SKIPPED ==='; fi"
+    COMMAND /bin/sh -c "echo '=== ZIG GLOBAL CACHE UPLOAD DEBUG ===' && file_count=$(find '${CACHE_PATH}/zig/global' -type f | wc -l | tr -d ' ') && echo \"Found \$file_count Zig global cache files\" && if [ \"\$file_count\" -gt 1 ]; then echo 'Cache has sufficient content, creating archive...' && cd '${CACHE_PATH}/zig/global' && tar czf '${BUILD_PATH}/zig-global-cache.tar.gz' . && archive_size=$(ls -lh '${BUILD_PATH}/zig-global-cache.tar.gz' | awk '{print \$5}') && echo \"Zig global cache archive created: \$archive_size\" && mkdir -p '${CACHE_PATH}/../cache-backup' && cp '${BUILD_PATH}/zig-global-cache.tar.gz' '${CACHE_PATH}/../cache-backup/' && echo 'Local backup created' && echo '=== ZIG GLOBAL CACHE UPLOAD SUCCESS ==='; else echo 'Cache has insufficient content (\$file_count files), creating empty marker' && echo 'empty' > '${BUILD_PATH}/zig-global-cache.tar.gz' && echo '=== ZIG GLOBAL CACHE UPLOAD SKIPPED ==='; fi"
     CWD ${BUILD_PATH}
     ARTIFACTS ${BUILD_PATH}/zig-global-cache.tar.gz
-    TARGETS bun-zig
   )
-  message(STATUS "Created smart zig-global upload target (validates at build time)")
+  message(STATUS "Created smart zig-global upload target (validation at build time)")
 elseif(UPLOAD_ZIG_CACHES)
   # Cache disabled or directory missing - create no-op target
   add_custom_target(upload-zig-global-cache
@@ -381,85 +376,17 @@ endif()
 
 # === END BUILD ARTIFACT DOWNLOADING ===
 
-# === CACHE RESTORATION LOGIC ===
-# This requires build ID detection and can fail, but upload targets are already created above
-
-# Store the current build ID for exclusion from cache search
-set(CURRENT_BUILD_ID $ENV{BUILDKITE_BUILD_ID})
-
-# Always search for the latest successful build with cache artifacts
-# Don't use the current build ID - it hasn't uploaded cache yet!
-message(STATUS "Searching for latest successful build with cache artifacts...")
-
-find_command(
-  VARIABLE NODE_EXECUTABLE
-  COMMAND node
-  REQUIRED OFF
-)
-
-if(NODE_EXECUTABLE)
-  execute_process(
-    COMMAND ${NODE_EXECUTABLE} ${CWD}/scripts/get-last-build-id.mjs --branch=current
-    WORKING_DIRECTORY ${CWD}
-    OUTPUT_VARIABLE DETECTED_BUILD_ID
-    ERROR_VARIABLE BUILD_ID_ERROR
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    RESULT_VARIABLE DETECTION_RESULT
-  )
-  
-  if(DETECTION_RESULT EQUAL 0 AND DETECTED_BUILD_ID)
-    setx(BUILDKITE_BUILD_ID ${DETECTED_BUILD_ID})
-    message(STATUS "Found latest successful build with cache: ${BUILDKITE_BUILD_ID}")
-    if(CURRENT_BUILD_ID)
-      message(STATUS "Current build ID ${CURRENT_BUILD_ID} excluded from cache search")
-    endif()
-    # Always show detailed cache detection logging (from stderr)
-    if(BUILD_ID_ERROR)
-      # Split the error output into lines and display each line
-      string(REPLACE "\n" ";" BUILD_ID_ERROR_LINES "${BUILD_ID_ERROR}")
-      foreach(LOG_LINE ${BUILD_ID_ERROR_LINES})
-        if(LOG_LINE)
-          message(STATUS "${LOG_LINE}")
-        endif()
-      endforeach()
-    endif()
-  else()
-    message(STATUS "Could not find a suitable build for cache restoration")
-    if(BUILD_ID_ERROR)
-      message(STATUS "Error: ${BUILD_ID_ERROR}")
-    endif()
-    
-    # Fallback: try manual override if provided
-    if(BUILDKITE_BUILD_ID_OVERRIDE)
-      setx(BUILDKITE_BUILD_ID ${BUILDKITE_BUILD_ID_OVERRIDE})
-      message(STATUS "Using manual build ID override: ${BUILDKITE_BUILD_ID}")
-    else()
-      return()
-    endif()
-  endif()
-else()
-  message(STATUS "Node.js not found, cannot auto-detect build ID")
-  
-  # Fallback: try manual override if provided
-  if(BUILDKITE_BUILD_ID_OVERRIDE)
-    setx(BUILDKITE_BUILD_ID ${BUILDKITE_BUILD_ID_OVERRIDE})
-    message(STATUS "Using manual build ID override: ${BUILDKITE_BUILD_ID}")
-  else()
-    return()
-  endif()
-endif()
-
-# The URL and path are now set earlier in the build artifact downloading section
-# setx(BUILDKITE_BUILD_URL https://buildkite.com/${BUILDKITE_ORGANIZATION_SLUG}/${BUILDKITE_PIPELINE_SLUG}/builds/${BUILDKITE_BUILD_ID})
-# setx(BUILDKITE_BUILD_PATH ${BUILDKITE_BUILDS_PATH}/builds/${BUILDKITE_BUILD_ID})
-
 # === CACHE RESTORATION ===
 # Restore cache files immediately during CMake configuration
 # This avoids dependency cycles and provides cache for all build steps
 
-message(STATUS "Restoring Buildkite cache artifacts...")
+message(STATUS "Restoring cache artifacts...")
+
+# Simple local cache restore (works both in CI and locally)
+set(CACHE_BACKUP_DIR ${CACHE_PATH}/../cache-backup)
 
 if(BUILDKITE)
+  # Buildkite environment - use existing artifact download logic
   # Determine which caches this build step should restore
   set(CACHE_ARTIFACTS)
   if(BUN_CPP_ONLY)
@@ -547,7 +474,71 @@ if(BUILDKITE)
     endif()
   endforeach()
 else()
-  message(STATUS "  WARNING: Not running in Buildkite, skipping cache restoration")
+  # Local development - simple backup/restore from local directory
+  message(STATUS "  Local environment - checking for cache backups in ${CACHE_BACKUP_DIR}")
+  
+  # Restore ccache if backup exists
+  if(EXISTS ${CACHE_BACKUP_DIR}/ccache-cache.tar.gz)
+    file(MAKE_DIRECTORY ${CACHE_PATH}/ccache)
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CACHE_BACKUP_DIR}/ccache-cache.tar.gz
+      WORKING_DIRECTORY ${CACHE_PATH}/ccache
+      RESULT_VARIABLE extract_result
+      OUTPUT_QUIET
+      ERROR_QUIET
+    )
+    if(extract_result EQUAL 0)
+      file(GLOB_RECURSE cache_files ${CACHE_PATH}/ccache/*)
+      list(LENGTH cache_files file_count)
+      message(STATUS "  SUCCESS: Restored local ccache backup: ${file_count} files")
+    else()
+      message(STATUS "  WARNING: Failed to extract local ccache backup")
+    endif()
+  else()
+    message(STATUS "  INFO: No local ccache backup found")
+  endif()
+  
+  # Restore zig local cache if backup exists
+  if(EXISTS ${CACHE_BACKUP_DIR}/zig-local-cache.tar.gz)
+    file(MAKE_DIRECTORY ${CACHE_PATH}/zig/local)
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CACHE_BACKUP_DIR}/zig-local-cache.tar.gz
+      WORKING_DIRECTORY ${CACHE_PATH}/zig/local
+      RESULT_VARIABLE extract_result
+      OUTPUT_QUIET
+      ERROR_QUIET
+    )
+    if(extract_result EQUAL 0)
+      file(GLOB_RECURSE cache_files ${CACHE_PATH}/zig/local/*)
+      list(LENGTH cache_files file_count)
+      message(STATUS "  SUCCESS: Restored local zig-local backup: ${file_count} files")
+    else()
+      message(STATUS "  WARNING: Failed to extract local zig-local backup")
+    endif()
+  else()
+    message(STATUS "  INFO: No local zig-local backup found")
+  endif()
+  
+  # Restore zig global cache if backup exists
+  if(EXISTS ${CACHE_BACKUP_DIR}/zig-global-cache.tar.gz)
+    file(MAKE_DIRECTORY ${CACHE_PATH}/zig/global)
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} -E tar xzf ${CACHE_BACKUP_DIR}/zig-global-cache.tar.gz
+      WORKING_DIRECTORY ${CACHE_PATH}/zig/global
+      RESULT_VARIABLE extract_result
+      OUTPUT_QUIET
+      ERROR_QUIET
+    )
+    if(extract_result EQUAL 0)
+      file(GLOB_RECURSE cache_files ${CACHE_PATH}/zig/global/*)
+      list(LENGTH cache_files file_count)
+      message(STATUS "  SUCCESS: Restored local zig-global backup: ${file_count} files")
+    else()
+      message(STATUS "  WARNING: Failed to extract local zig-global backup")
+    endif()
+  else()
+    message(STATUS "  INFO: No local zig-global backup found")
+  endif()
 endif()
 
 # === END CACHE RESTORATION ===
