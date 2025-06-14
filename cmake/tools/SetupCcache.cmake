@@ -53,7 +53,7 @@ else()
 endif()
 
 # Set ccache environment variables
-setenv(CCACHE_DIR ${CACHE_PATH}/ccache)
+setenv(CCACHE_DIR ${BUILD_PATH}/cache/ccache)
 setenv(CCACHE_BASEDIR ${CWD})
 setenv(CCACHE_NOHASHDIR 1)
 
