@@ -458,7 +458,22 @@ endif()
 message(STATUS "Restoring Buildkite cache artifacts...")
 
 if(BUILDKITE)
-  set(CACHE_ARTIFACTS "ccache-cache.tar.gz" "zig-local-cache.tar.gz" "zig-global-cache.tar.gz")
+  # Determine which caches this build step should restore
+  set(CACHE_ARTIFACTS)
+  if(BUN_CPP_ONLY)
+    # C++ build step - only restore ccache
+    list(APPEND CACHE_ARTIFACTS "ccache-cache.tar.gz")
+    message(STATUS "C++ build step - will restore ccache only")
+  elseif(NOT BUN_LINK_ONLY)
+    # Zig build step - only restore Zig caches
+    list(APPEND CACHE_ARTIFACTS "zig-local-cache.tar.gz" "zig-global-cache.tar.gz")
+    message(STATUS "Zig build step - will restore Zig caches only")
+  else()
+    # Link step - restore all caches (might need any of them)
+    list(APPEND CACHE_ARTIFACTS "ccache-cache.tar.gz" "zig-local-cache.tar.gz" "zig-global-cache.tar.gz")
+    message(STATUS "Link step - will restore all caches")
+  endif()
+  
   foreach(cache_artifact ${CACHE_ARTIFACTS})
     # Determine cache directory based on artifact name
     if(cache_artifact STREQUAL "ccache-cache.tar.gz")
