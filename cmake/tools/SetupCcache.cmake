@@ -36,9 +36,9 @@ message(STATUS "Found ccache: ${CCACHE_PROGRAM}")
 if(CCACHE_PROGRAM AND ENABLE_CCACHE)
     message(STATUS "✅ ccache enabled: ${CCACHE_PROGRAM}")
     
-    # Set compiler launcher (without arguments)
-    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    # Set compiler launcher (store in cache so cmake --build can access)
+    set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE FILEPATH "C compiler launcher" FORCE)
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}" CACHE FILEPATH "CXX compiler launcher" FORCE)
     
     # Enable ccache verbose and debug mode for detailed logging
     set(ENV{CCACHE_VERBOSE} "1")
