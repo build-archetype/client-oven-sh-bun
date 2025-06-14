@@ -474,7 +474,8 @@ function getBuildCppStep(platform, options) {
   };
   // If macOS, run in VM - combine all commands in single VM to preserve ccache
   if (platform.os === "darwin") {
-    step.command = `./scripts/build-macos-vm.sh --release=${platform.release} && ./scripts/ci-macos-build-cpp.sh ${platform.release} "${command}" "${process.cwd()}"`;
+    const combinedCommand = `cd workspace && ${command} --target bun && ${command} --target dependencies && (${command} --target upload-all-caches || echo 'Cache upload failed (non-fatal)')`;
+    step.command = `./scripts/build-macos-vm.sh --release=${platform.release} && ./scripts/ci-macos.sh --release=${platform.release} "${combinedCommand}" "${process.cwd()}"`;
   }
   return step;
 }
@@ -518,7 +519,8 @@ function getBuildZigStep(platform, options) {
   };
   // If macOS, run in VM - combine all commands in single VM to preserve zig cache
   if (platform.os === "darwin") {
-    step.command = `./scripts/build-macos-vm.sh --release=${platform.release} && ./scripts/ci-macos-build-zig.sh ${platform.release} "${getBuildCommand(platform, options)}" ${toolchain} "${process.cwd()}"`;
+    const combinedCommand = `cd workspace && ${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain} && (${getBuildCommand(platform, options)} --target upload-all-caches || echo 'Cache upload failed (non-fatal)')`;
+    step.command = `./scripts/build-macos-vm.sh --release=${platform.release} && ./scripts/ci-macos.sh --release=${platform.release} "${combinedCommand}" "${process.cwd()}"`;
   }
   return step;
 }
