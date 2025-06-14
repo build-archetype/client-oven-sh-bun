@@ -99,7 +99,7 @@ if(UPLOAD_CCACHE AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL 
   register_command(
     TARGET upload-ccache-cache
     COMMENT "Uploading ccache cache (validation at build time)"
-    COMMAND /bin/sh -c "echo 'Checking ccache cache before upload' && ls -la '${CACHE_PATH}/ccache' && file_count=$(find '${CACHE_PATH}/ccache' -type f | wc -l | tr -d ' ') && echo \"Found $file_count ccache files\" && if [ \"$file_count\" -gt 10 ]; then cd '${CACHE_PATH}/ccache' && tar czf '${BUILD_PATH}/ccache-cache.tar.gz' . && echo 'ccache archive created'; else echo 'empty' > '${BUILD_PATH}/ccache-cache.tar.gz' && echo 'ccache insufficient content'; fi"
+    COMMAND /bin/sh -c "file_count=$(find '${CACHE_PATH}/ccache' -type f | wc -l | tr -d ' ') && echo \"Found \$file_count ccache files\" && test \"\$file_count\" -gt 10 && cd '${CACHE_PATH}/ccache' && tar czf '${BUILD_PATH}/ccache-cache.tar.gz' . && echo 'ccache archive created' || (echo 'empty' > '${BUILD_PATH}/ccache-cache.tar.gz' && echo 'ccache insufficient content')"
     CWD ${BUILD_PATH}
     ARTIFACTS ${BUILD_PATH}/ccache-cache.tar.gz
   )
@@ -119,7 +119,7 @@ if(UPLOAD_ZIG_CACHES AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQ
   register_command(
     TARGET upload-zig-local-cache
     COMMENT "Uploading Zig local cache (validation at build time)"
-    COMMAND /bin/sh -c "file_count=$(find '${CACHE_PATH}/zig/local' -type f | wc -l | tr -d ' ') && echo \"Found $file_count Zig local cache files\" && if [ \"$file_count\" -gt 5 ]; then cd '${CACHE_PATH}/zig/local' && tar czf '${BUILD_PATH}/zig-local-cache.tar.gz' . && echo 'Zig local cache archive created'; else echo 'empty' > '${BUILD_PATH}/zig-local-cache.tar.gz' && echo 'Zig local cache insufficient content'; fi"
+    COMMAND /bin/sh -c "file_count=$(find '${CACHE_PATH}/zig/local' -type f | wc -l | tr -d ' ') && echo \"Found \$file_count Zig local cache files\" && test \"\$file_count\" -gt 5 && cd '${CACHE_PATH}/zig/local' && tar czf '${BUILD_PATH}/zig-local-cache.tar.gz' . && echo 'Zig local cache archive created' || (echo 'empty' > '${BUILD_PATH}/zig-local-cache.tar.gz' && echo 'Zig local cache insufficient content')"
     CWD ${BUILD_PATH}
     ARTIFACTS ${BUILD_PATH}/zig-local-cache.tar.gz
   )
@@ -139,7 +139,7 @@ if(UPLOAD_ZIG_CACHES AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQ
   register_command(
     TARGET upload-zig-global-cache
     COMMENT "Uploading Zig global cache (validation at build time)"
-    COMMAND /bin/sh -c "file_count=$(find '${CACHE_PATH}/zig/global' -type f | wc -l | tr -d ' ') && echo \"Found $file_count Zig global cache files\" && if [ \"$file_count\" -gt 5 ]; then cd '${CACHE_PATH}/zig/global' && tar czf '${BUILD_PATH}/zig-global-cache.tar.gz' . && echo 'Zig global cache archive created'; else echo 'empty' > '${BUILD_PATH}/zig-global-cache.tar.gz' && echo 'Zig global cache insufficient content'; fi"
+    COMMAND /bin/sh -c "file_count=$(find '${CACHE_PATH}/zig/global' -type f | wc -l | tr -d ' ') && echo \"Found \$file_count Zig global cache files\" && test \"\$file_count\" -gt 5 && cd '${CACHE_PATH}/zig/global' && tar czf '${BUILD_PATH}/zig-global-cache.tar.gz' . && echo 'Zig global cache archive created' || (echo 'empty' > '${BUILD_PATH}/zig-global-cache.tar.gz' && echo 'Zig global cache insufficient content')"
     CWD ${BUILD_PATH}
     ARTIFACTS ${BUILD_PATH}/zig-global-cache.tar.gz
   )
