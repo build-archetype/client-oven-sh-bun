@@ -119,9 +119,10 @@ if(UPLOAD_ZIG_CACHES AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQ
   register_command(
     TARGET upload-zig-local-cache
     COMMENT "Uploading Zig local cache (validation at build time)"
-    COMMAND /bin/sh -c "file_count=$(find '${CACHE_PATH}/zig/local' -type f | wc -l | tr -d ' ') && echo \"Found \$file_count Zig local cache files\" && test \"\$file_count\" -gt 5 && cd '${CACHE_PATH}/zig/local' && tar czf '${BUILD_PATH}/zig-local-cache.tar.gz' . && echo 'Zig local cache archive created' || (echo 'empty' > '${BUILD_PATH}/zig-local-cache.tar.gz' && echo 'Zig local cache insufficient content')"
+    COMMAND /bin/sh -c "echo '=== ZIG LOCAL CACHE UPLOAD DEBUG ===' && file_count=$(find '${CACHE_PATH}/zig/local' -type f | wc -l | tr -d ' ') && echo \"Found \$file_count Zig local cache files\" && if [ \"\$file_count\" -gt 1 ]; then echo 'Cache has sufficient content, creating archive...' && cd '${CACHE_PATH}/zig/local' && tar czf '${BUILD_PATH}/zig-local-cache.tar.gz' . && archive_size=$(ls -lh '${BUILD_PATH}/zig-local-cache.tar.gz' | awk '{print \$5}') && echo \"Zig local cache archive created: \$archive_size\" && echo '=== ZIG LOCAL CACHE UPLOAD SUCCESS ==='; else echo 'Cache has insufficient content (\$file_count files), creating empty marker' && echo 'empty' > '${BUILD_PATH}/zig-local-cache.tar.gz' && echo '=== ZIG LOCAL CACHE UPLOAD SKIPPED ==='; fi"
     CWD ${BUILD_PATH}
     ARTIFACTS ${BUILD_PATH}/zig-local-cache.tar.gz
+    TARGETS bun-zig
   )
   message(STATUS "Created smart zig-local upload target (validates at build time)")
 elseif(UPLOAD_ZIG_CACHES)
@@ -139,9 +140,10 @@ if(UPLOAD_ZIG_CACHES AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQ
   register_command(
     TARGET upload-zig-global-cache
     COMMENT "Uploading Zig global cache (validation at build time)"
-    COMMAND /bin/sh -c "file_count=$(find '${CACHE_PATH}/zig/global' -type f | wc -l | tr -d ' ') && echo \"Found \$file_count Zig global cache files\" && test \"\$file_count\" -gt 5 && cd '${CACHE_PATH}/zig/global' && tar czf '${BUILD_PATH}/zig-global-cache.tar.gz' . && echo 'Zig global cache archive created' || (echo 'empty' > '${BUILD_PATH}/zig-global-cache.tar.gz' && echo 'Zig global cache insufficient content')"
+    COMMAND /bin/sh -c "echo '=== ZIG GLOBAL CACHE UPLOAD DEBUG ===' && file_count=$(find '${CACHE_PATH}/zig/global' -type f | wc -l | tr -d ' ') && echo \"Found \$file_count Zig global cache files\" && if [ \"\$file_count\" -gt 1 ]; then echo 'Cache has sufficient content, creating archive...' && cd '${CACHE_PATH}/zig/global' && tar czf '${BUILD_PATH}/zig-global-cache.tar.gz' . && archive_size=$(ls -lh '${BUILD_PATH}/zig-global-cache.tar.gz' | awk '{print \$5}') && echo \"Zig global cache archive created: \$archive_size\" && echo '=== ZIG GLOBAL CACHE UPLOAD SUCCESS ==='; else echo 'Cache has insufficient content (\$file_count files), creating empty marker' && echo 'empty' > '${BUILD_PATH}/zig-global-cache.tar.gz' && echo '=== ZIG GLOBAL CACHE UPLOAD SKIPPED ==='; fi"
     CWD ${BUILD_PATH}
     ARTIFACTS ${BUILD_PATH}/zig-global-cache.tar.gz
+    TARGETS bun-zig
   )
   message(STATUS "Created smart zig-global upload target (validates at build time)")
 elseif(UPLOAD_ZIG_CACHES)
@@ -514,7 +516,7 @@ if(BUILDKITE)
         if(file_count GREATER 0)
           if(cache_artifact STREQUAL "ccache-cache.tar.gz" AND file_count GREATER 10)
             message(STATUS "  SUCCESS: Restored ${cache_artifact}: ${file_count} files")
-          elseif(NOT cache_artifact STREQUAL "ccache-cache.tar.gz" AND file_count GREATER 5)
+          elseif(NOT cache_artifact STREQUAL "ccache-cache.tar.gz" AND file_count GREATER 1)
             message(STATUS "  SUCCESS: Restored ${cache_artifact}: ${file_count} files")
           else()
             message(STATUS "  WARNING: ${cache_artifact} has insufficient content (${file_count} files) - treating as cache miss")
