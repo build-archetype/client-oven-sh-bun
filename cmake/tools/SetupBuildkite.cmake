@@ -111,6 +111,9 @@ if(UPLOAD_CCACHE AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL 
       echo 'CCACHE_BASEDIR=' && echo \$CCACHE_BASEDIR
       echo 'CCACHE_LOGFILE=' && echo \$CCACHE_LOGFILE
       echo 'CCACHE_STATSLOG=' && echo \$CCACHE_STATSLOG
+      echo 'CMAKE CACHE_PATH: ${CACHE_PATH}'
+      echo 'CMAKE BUILD_PATH: ${BUILD_PATH}'
+      echo 'Expected ccache dir: ${CACHE_PATH}/ccache'
       echo ''
       echo '--- Directory Structure ---'
       echo 'Listing cache directory contents:'
