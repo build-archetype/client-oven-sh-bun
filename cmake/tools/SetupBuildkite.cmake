@@ -175,7 +175,7 @@ if(UPLOAD_DEPENDENCIES)
     add_custom_command(
       TARGET upload-all-caches
       POST_BUILD
-      COMMAND /bin/sh -c "echo 'POST-BUILD CACHE STATUS CHECK' && echo 'CCACHE_DIR=' && echo \$CCACHE_DIR && echo 'CACHE_PATH: ${CACHE_PATH}' && echo 'BUILD_PATH: ${BUILD_PATH}' && ls -la '${CACHE_PATH}/ccache' && ${CCACHE_PROGRAM} -s"
+      COMMAND /bin/sh -c "echo 'POST-BUILD CACHE STATUS CHECK' && echo 'CACHE_PATH: ${CACHE_PATH}' && echo 'BUILD_PATH: ${BUILD_PATH}' && ls -la '${CACHE_PATH}/ccache' && ${CCACHE_PROGRAM} -s"
       COMMENT "Checking post-build cache status"
     )
   endif()
