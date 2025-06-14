@@ -100,6 +100,45 @@ if(UPLOAD_CCACHE AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL 
     TARGET upload-ccache-cache
     COMMENT "Uploading ccache cache (validation at build time)"
     COMMAND /bin/sh -c "
+      echo '=== EXTENSIVE DIRECTORY LISTING DEBUG ==='
+      echo 'Current working directory:' && pwd
+      echo ''
+      echo '--- Workspace Structure ---'
+      echo 'Workspace root (/Users/admin/workspace):'
+      ls -la /Users/admin/workspace/ 2>/dev/null || echo 'Cannot access workspace root'
+      echo ''
+      echo 'Build directory (${BUILD_PATH}):'
+      ls -la '${BUILD_PATH}' 2>/dev/null || echo 'Cannot access build directory'
+      echo ''
+      echo 'Cache base directory (${CACHE_PATH}):'
+      ls -la '${CACHE_PATH}' 2>/dev/null || echo 'Cannot access cache base directory'
+      echo ''
+      echo 'Cache parent directory:'
+      ls -la '$(dirname "${CACHE_PATH}")' 2>/dev/null || echo 'Cannot access cache parent directory'
+      echo ''
+      echo 'Cache grandparent directory:'
+      ls -la '$(dirname "$(dirname "${CACHE_PATH}")")' 2>/dev/null || echo 'Cannot access cache grandparent directory'
+      echo ''
+      echo '--- Cache Directory Structure ---'
+      echo 'ccache directory (${CACHE_PATH}/ccache):'
+      ls -la '${CACHE_PATH}/ccache' 2>/dev/null || echo 'ccache directory does not exist'
+      echo ''
+      echo 'zig directory (${CACHE_PATH}/zig):'
+      ls -la '${CACHE_PATH}/zig' 2>/dev/null || echo 'zig directory does not exist'
+      echo ''
+      echo 'zig/local directory (${CACHE_PATH}/zig/local):'
+      ls -la '${CACHE_PATH}/zig/local' 2>/dev/null || echo 'zig/local directory does not exist'
+      echo ''
+      echo 'zig/global directory (${CACHE_PATH}/zig/global):'
+      ls -la '${CACHE_PATH}/zig/global' 2>/dev/null || echo 'zig/global directory does not exist'
+      echo ''
+      echo '--- Alternative Cache Locations ---'
+      echo 'BUILD_PATH/cache directory (${BUILD_PATH}/cache):'
+      ls -la '${BUILD_PATH}/cache' 2>/dev/null || echo 'BUILD_PATH/cache directory does not exist'
+      echo ''
+      echo 'BUILD_PATH/cache/ccache directory (${BUILD_PATH}/cache/ccache):'
+      ls -la '${BUILD_PATH}/cache/ccache' 2>/dev/null || echo 'BUILD_PATH/cache/ccache directory does not exist'
+      echo ''
       echo '=== CCACHE UPLOAD DEBUG ==='
       echo 'Checking ccache content before upload...'
       echo 'Cache directory: ${CACHE_PATH}/ccache'
@@ -111,9 +150,6 @@ if(UPLOAD_CCACHE AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL 
       echo 'CCACHE_BASEDIR=' && echo \$CCACHE_BASEDIR
       echo 'CCACHE_LOGFILE=' && echo \$CCACHE_LOGFILE
       echo 'CCACHE_STATSLOG=' && echo \$CCACHE_STATSLOG
-      echo 'CMAKE CACHE_PATH: ${CACHE_PATH}'
-      echo 'CMAKE BUILD_PATH: ${BUILD_PATH}'
-      echo 'Expected ccache dir: ${CACHE_PATH}/ccache'
       echo ''
       echo '--- Directory Structure ---'
       echo 'Listing cache directory contents:'
@@ -258,8 +294,61 @@ if(UPLOAD_DEPENDENCIES)
     add_custom_command(
       TARGET upload-all-caches
       POST_BUILD
-      COMMAND ${CCACHE_PROGRAM} -s
-      COMMENT "Checking ccache statistics"
+      COMMAND /bin/sh -c "
+        echo '=== POST-BUILD CACHE STATUS CHECK ==='
+        echo 'Build step completed, checking cache population...'
+        echo ''
+        echo '--- Environment Variables ---'
+        echo 'CCACHE_DIR=' && echo \$CCACHE_DIR
+        echo 'CACHE_PATH: ${CACHE_PATH}'
+        echo 'BUILD_PATH: ${BUILD_PATH}'
+        echo ''
+        echo '--- Cache Directory Status ---'
+        echo 'ccache directory (${CACHE_PATH}/ccache):'
+        if [ -d '${CACHE_PATH}/ccache' ]; then
+          echo '✅ ccache directory exists'
+          file_count=$(find '${CACHE_PATH}/ccache' -type f | wc -l | tr -d ' ')
+          echo \"  Files: $file_count\"
+          if [ \"$file_count\" -gt 0 ]; then
+            echo '  Directory size:' && du -sh '${CACHE_PATH}/ccache' 2>/dev/null || echo '  Could not get size'
+            echo '  Sample files:'
+            find '${CACHE_PATH}/ccache' -type f | head -5
+          else
+            echo '  ⚠️ Directory is empty'
+          fi
+        else
+          echo '❌ ccache directory does not exist'
+        fi
+        echo ''
+        echo 'zig/local directory (${CACHE_PATH}/zig/local):'
+        if [ -d '${CACHE_PATH}/zig/local' ]; then
+          echo '✅ zig/local directory exists'
+          file_count=$(find '${CACHE_PATH}/zig/local' -type f | wc -l | tr -d ' ')
+          echo \"  Files: $file_count\"
+          if [ \"$file_count\" -gt 0 ]; then
+            echo '  Directory size:' && du -sh '${CACHE_PATH}/zig/local' 2>/dev/null || echo '  Could not get size'
+          fi
+        else
+          echo '❌ zig/local directory does not exist'
+        fi
+        echo ''
+        echo 'zig/global directory (${CACHE_PATH}/zig/global):'
+        if [ -d '${CACHE_PATH}/zig/global' ]; then
+          echo '✅ zig/global directory exists'
+          file_count=$(find '${CACHE_PATH}/zig/global' -type f | wc -l | tr -d ' ')
+          echo \"  Files: $file_count\"
+          if [ \"$file_count\" -gt 0 ]; then
+            echo '  Directory size:' && du -sh '${CACHE_PATH}/zig/global' 2>/dev/null || echo '  Could not get size'
+          fi
+        else
+          echo '❌ zig/global directory does not exist'
+        fi
+        echo ''
+        echo '--- ccache Statistics ---'
+        ${CCACHE_PROGRAM} -s || echo 'ERROR: ccache command failed'
+        echo '=== END POST-BUILD CACHE STATUS CHECK ==='
+      "
+      COMMENT "Checking post-build cache status"
     )
   endif()
 else()
