@@ -146,10 +146,10 @@ if(UPLOAD_CCACHE AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL 
       echo 'Current working directory:' && pwd
       echo ''
       echo '--- Environment Variables ---'
-      echo 'CCACHE_DIR=' && echo \$CCACHE_DIR
-      echo 'CCACHE_BASEDIR=' && echo \$CCACHE_BASEDIR
-      echo 'CCACHE_LOGFILE=' && echo \$CCACHE_LOGFILE
-      echo 'CCACHE_STATSLOG=' && echo \$CCACHE_STATSLOG
+      echo 'CCACHE_DIR=' && echo $CCACHE_DIR
+      echo 'CCACHE_BASEDIR=' && echo $CCACHE_BASEDIR
+      echo 'CCACHE_LOGFILE=' && echo $CCACHE_LOGFILE
+      echo 'CCACHE_STATSLOG=' && echo $CCACHE_STATSLOG
       echo ''
       echo '--- Directory Structure ---'
       echo 'Listing cache directory contents:'
@@ -157,12 +157,12 @@ if(UPLOAD_CCACHE AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL 
       echo ''
       echo 'Checking if cache directory exists:'
       if [ -d '${CACHE_PATH}/ccache' ]; then
-        echo '✅ Cache directory exists'
+        echo 'SUCCESS: Cache directory exists'
         echo 'Directory size:' && du -sh '${CACHE_PATH}/ccache' 2>/dev/null || echo 'Could not get directory size'
         echo 'Subdirectory count:' && find '${CACHE_PATH}/ccache' -type d | wc -l | tr -d ' '
         echo 'Sample subdirectories:' && find '${CACHE_PATH}/ccache' -type d | head -5
       else
-        echo '❌ Cache directory does not exist'
+        echo 'ERROR: Cache directory does not exist'
       fi
       echo ''
       echo '--- ccache Statistics ---'
@@ -171,8 +171,8 @@ if(UPLOAD_CCACHE AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL 
       echo ''
       echo '--- File Count Analysis ---'
       file_count=$(find '${CACHE_PATH}/ccache' -type f | wc -l | tr -d ' ')
-      echo \"Found $file_count ccache files\"
-      if [ \"$file_count\" -gt 0 ]; then
+      echo "Found $file_count ccache files"
+      if [ "$file_count" -gt 0 ]; then
         echo 'Sample cache files:'
         find '${CACHE_PATH}/ccache' -type f | head -10
         echo 'File types in cache:'
@@ -180,16 +180,16 @@ if(UPLOAD_CCACHE AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQUAL 
       fi
       echo ''
       echo '--- Upload Decision ---'
-      if [ \"$file_count\" -gt 10 ]; then
-        echo '✅ ccache has sufficient content ('$file_count' files), creating archive...'
+      if [ "$file_count" -gt 10 ]; then
+        echo 'SUCCESS: ccache has sufficient content ('$file_count' files), creating archive...'
         cd '${CACHE_PATH}/ccache' && tar czf '${BUILD_PATH}/ccache-cache.tar.gz' .
-        echo '📦 ccache archive created successfully'
+        echo 'Archive created successfully'
         echo 'Archive size:'
         ls -lh '${BUILD_PATH}/ccache-cache.tar.gz'
       else
-        echo '⚠️ ccache has insufficient content ('$file_count' files, need >10), creating empty placeholder...'
+        echo 'WARNING: ccache has insufficient content ('$file_count' files, need >10), creating empty placeholder...'
         echo 'empty' > '${BUILD_PATH}/ccache-cache.tar.gz'
-        echo '📭 Empty placeholder created (will be rejected by cache system)'
+        echo 'Empty placeholder created (will be rejected by cache system)'
       fi
       echo '=== END CCACHE UPLOAD DEBUG ==='
     "
@@ -217,13 +217,13 @@ if(UPLOAD_ZIG_CACHES AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQ
       file_count=$(find '${CACHE_PATH}/zig/local' -type f | wc -l | tr -d ' ')
       echo \"Found $file_count Zig local cache files\"
       if [ \"$file_count\" -gt 5 ]; then
-        echo '✅ Zig local cache has sufficient content ('$file_count' files), creating archive...'
+        echo 'SUCCESS: Zig local cache has sufficient content ('$file_count' files), creating archive...'
         cd '${CACHE_PATH}/zig/local' && tar czf '${BUILD_PATH}/zig-local-cache.tar.gz' .
-        echo '📦 Zig local cache archive created successfully'
+        echo 'Zig local cache archive created successfully'
       else
-        echo '⚠️ Zig local cache has insufficient content ('$file_count' files, need >5), creating empty placeholder...'
+        echo 'WARNING: Zig local cache has insufficient content ('$file_count' files, need >5), creating empty placeholder...'
         echo 'empty' > '${BUILD_PATH}/zig-local-cache.tar.gz'
-        echo '📭 Empty placeholder created (will be rejected by cache system)'
+        echo 'Empty placeholder created (will be rejected by cache system)'
       fi
     "
     CWD ${BUILD_PATH}
@@ -250,13 +250,13 @@ if(UPLOAD_ZIG_CACHES AND BUILDKITE_CACHE AND BUILDKITE AND (CACHE_STRATEGY STREQ
       file_count=$(find '${CACHE_PATH}/zig/global' -type f | wc -l | tr -d ' ')
       echo \"Found $file_count Zig global cache files\"
       if [ \"$file_count\" -gt 5 ]; then
-        echo '✅ Zig global cache has sufficient content ('$file_count' files), creating archive...'
+        echo 'SUCCESS: Zig global cache has sufficient content ('$file_count' files), creating archive...'
         cd '${CACHE_PATH}/zig/global' && tar czf '${BUILD_PATH}/zig-global-cache.tar.gz' .
-        echo '📦 Zig global cache archive created successfully'
+        echo 'Zig global cache archive created successfully'
       else
-        echo '⚠️ Zig global cache has insufficient content ('$file_count' files, need >5), creating empty placeholder...'
+        echo 'WARNING: Zig global cache has insufficient content ('$file_count' files, need >5), creating empty placeholder...'
         echo 'empty' > '${BUILD_PATH}/zig-global-cache.tar.gz'
-        echo '📭 Empty placeholder created (will be rejected by cache system)'
+        echo 'Empty placeholder created (will be rejected by cache system)'
       fi
     "
     CWD ${BUILD_PATH}
@@ -306,7 +306,7 @@ if(UPLOAD_DEPENDENCIES)
         echo '--- Cache Directory Status ---'
         echo 'ccache directory (${CACHE_PATH}/ccache):'
         if [ -d '${CACHE_PATH}/ccache' ]; then
-          echo '✅ ccache directory exists'
+          echo 'SUCCESS: ccache directory exists'
           file_count=$(find '${CACHE_PATH}/ccache' -type f | wc -l | tr -d ' ')
           echo \"  Files: $file_count\"
           if [ \"$file_count\" -gt 0 ]; then
@@ -314,34 +314,34 @@ if(UPLOAD_DEPENDENCIES)
             echo '  Sample files:'
             find '${CACHE_PATH}/ccache' -type f | head -5
           else
-            echo '  ⚠️ Directory is empty'
+            echo '  WARNING: Directory is empty'
           fi
         else
-          echo '❌ ccache directory does not exist'
+          echo 'ERROR: ccache directory does not exist'
         fi
         echo ''
         echo 'zig/local directory (${CACHE_PATH}/zig/local):'
         if [ -d '${CACHE_PATH}/zig/local' ]; then
-          echo '✅ zig/local directory exists'
+          echo 'SUCCESS: zig/local directory exists'
           file_count=$(find '${CACHE_PATH}/zig/local' -type f | wc -l | tr -d ' ')
           echo \"  Files: $file_count\"
           if [ \"$file_count\" -gt 0 ]; then
             echo '  Directory size:' && du -sh '${CACHE_PATH}/zig/local' 2>/dev/null || echo '  Could not get size'
           fi
         else
-          echo '❌ zig/local directory does not exist'
+          echo 'ERROR: zig/local directory does not exist'
         fi
         echo ''
         echo 'zig/global directory (${CACHE_PATH}/zig/global):'
         if [ -d '${CACHE_PATH}/zig/global' ]; then
-          echo '✅ zig/global directory exists'
+          echo 'SUCCESS: zig/global directory exists'
           file_count=$(find '${CACHE_PATH}/zig/global' -type f | wc -l | tr -d ' ')
           echo \"  Files: $file_count\"
           if [ \"$file_count\" -gt 0 ]; then
             echo '  Directory size:' && du -sh '${CACHE_PATH}/zig/global' 2>/dev/null || echo '  Could not get size'
           fi
         else
-          echo '❌ zig/global directory does not exist'
+          echo 'ERROR: zig/global directory does not exist'
         fi
         echo ''
         echo '--- ccache Statistics ---'
