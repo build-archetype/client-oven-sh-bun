@@ -559,7 +559,8 @@ function getLinkBunStep(platform, options) {
  * @returns {Step}
  */
 function getBuildBunStep(platform, options) {
-  return {
+  const command = getBuildCommand(platform, options);
+  const step = {
     key: `${getTargetKey(platform)}-build-bun`,
     label: `${getTargetLabel(platform)} - build-bun`,
     agents: getCppAgent(platform, options),
@@ -572,6 +573,15 @@ function getBuildBunStep(platform, options) {
     },
     command: getBuildCommand(platform, options),
   };
+  
+  // If macOS, run all build targets in single VM to preserve cache
+  if (platform.os === "darwin") {
+    const toolchain = getBuildToolchain(platform);
+    const combinedCommand = `${command} --target bun && ${command} --target dependencies && ${command} --target bun-zig --toolchain ${toolchain} && (${command} --target upload-all-caches || echo 'Cache upload failed (non-fatal)')`;
+    step.command = `./scripts/build-macos-vm.sh --release=${platform.release} && ./scripts/ci-macos.sh --release=${platform.release} "${combinedCommand}" "${process.cwd()}"`;
+  }
+  
+  return step;
 }
 
 /**
@@ -1275,7 +1285,7 @@ async function getPipeline(options = {}) {
           {
             key: getTargetKey(target),
             group: getTargetLabel(target),
-            steps: unifiedBuilds
+            steps: unifiedBuilds || target.os === "darwin"
               ? [getBuildBunStep(target, options)]
               : [getBuildCppStep(target, options), getBuildZigStep(target, options), getLinkBunStep(target, options)],
           },
