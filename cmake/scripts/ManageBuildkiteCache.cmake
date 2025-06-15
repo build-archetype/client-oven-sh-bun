@@ -108,8 +108,8 @@ function(restore_cache CACHE_TYPE CACHE_DIR)
   # This implements: current branch -> main branch -> fresh build
   find_program(NODE node REQUIRED)
   execute_process(
-    COMMAND ${NODE} ${CMAKE_SOURCE_DIR}/scripts/get-last-build-id.mjs
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMAND ${NODE} scripts/get-last-build-id.mjs
+    WORKING_DIRECTORY ${BUILD_PATH}/..
     OUTPUT_VARIABLE CACHE_BUILD_ID
     ERROR_VARIABLE CACHE_SEARCH_LOG
     RESULT_VARIABLE CACHE_SEARCH_RESULT
