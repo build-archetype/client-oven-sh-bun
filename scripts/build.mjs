@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { spawn as nodeSpawn, execSync } from "node:child_process";
+import { spawn as nodeSpawn } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
 import {
@@ -162,6 +162,33 @@ async function build(args) {
     .flatMap(([flag, value]) => [flag, value]);
 
   await startGroup("CMake Build", () => spawn("cmake", buildArgs, { env }));
+
+  // Upload build artifacts for linking step
+  if (process.env.BUN_CPP_ONLY === "ON") {
+    console.log("📤 Uploading C++ build artifacts for linking step...");
+    try {
+      await spawn("buildkite-agent", ["artifact", "upload", "build/release/libbun-profile.a"], {
+        stdio: "inherit"
+      });
+      console.log("✅ C++ artifacts uploaded successfully");
+    } catch (error) {
+      console.warn("⚠️ Failed to upload C++ artifacts:", error.message);
+    }
+  }
+  
+  // Upload zig artifacts if they exist (for zig build step)
+  const zigArtifact = "build/release/bun-zig.o";
+  if (existsSync(zigArtifact)) {
+    console.log("📤 Uploading Zig build artifacts for linking step...");
+    try {
+      await spawn("buildkite-agent", ["artifact", "upload", zigArtifact], {
+        stdio: "inherit"
+      });
+      console.log("✅ Zig artifacts uploaded successfully");
+    } catch (error) {
+      console.warn("⚠️ Failed to upload Zig artifacts:", error.message);
+    }
+  }
 
   // Cache save step (after main build)
   if (process.env.BUILDKITE_CACHE_SAVE === "ON") {
@@ -366,7 +393,7 @@ function printDuration(label, duration) {
 }
 
 async function downloadBuildArtifacts() {
-  // For persistent cache (macOS), just set environment variables to point cache to workspace directory
+  // For persistent cache (macOS), set environment variables to point cache to workspace directory
   if (process.env.BUILDKITE_CACHE_TYPE === "persistent") {
     console.log("🔧 Setting up persistent cache environment for macOS build...");
     
@@ -387,50 +414,52 @@ async function downloadBuildArtifacts() {
     console.log(`   NPM_CONFIG_CACHE=${process.env.NPM_CONFIG_CACHE}`);
   }
   
-  // Check for required artifacts when BUN_LINK_ONLY=ON (regardless of cache type)
+  // Download build artifacts when BUN_LINK_ONLY=ON (linking step)
   if (process.env.BUN_LINK_ONLY === "ON") {
-    console.log("🔗 BUN_LINK_ONLY=ON detected");
+    console.log("🔗 BUN_LINK_ONLY=ON detected - downloading artifacts from previous build steps");
     
-    // Use the same path resolution as before but add debugging
-    const buildPath = process.env.CMAKE_BINARY_DIR || resolve("build");
+    const buildPath = resolve("build", "release");
     
-    console.log(`CMAKE_BINARY_DIR: ${process.env.CMAKE_BINARY_DIR}`);
-    console.log(`Build path: ${buildPath}`);
-    console.log(`Current working directory: ${process.cwd()}`);
+    // Create build directory if it doesn't exist
+    if (!existsSync(buildPath)) {
+      mkdirSync(buildPath, { recursive: true });
+      console.log(`Created build directory: ${buildPath}`);
+    }
     
-    // Check for required artifacts in expected locations
+    // Download artifacts from previous build steps using buildkite-agent
+    try {
+      console.log("📥 Downloading libbun-profile.a from build-cpp step...");
+      await spawn("buildkite-agent", ["artifact", "download", "build/release/libbun-profile.a", "."], {
+        stdio: "inherit"
+      });
+      
+      console.log("📥 Downloading bun-zig.o from build-zig step...");
+      await spawn("buildkite-agent", ["artifact", "download", "build/release/bun-zig.o", "."], {
+        stdio: "inherit"
+      });
+      
+      console.log("✅ Build artifacts downloaded successfully");
+    } catch (error) {
+      console.error("❌ Failed to download build artifacts:", error.message);
+      console.error("Make sure build-cpp and build-zig steps completed successfully");
+      process.exit(1);
+    }
+    
+    // Verify artifacts exist after download
     const requiredArtifacts = [
       join(buildPath, "libbun-profile.a"),
       join(buildPath, "bun-zig.o"),
     ];
     
-    console.log("Required artifacts:");
-    requiredArtifacts.forEach(file => console.log(`   ${file}`));
-    
-    // List what's actually in the build directory
-    const buildDir = resolve("build");
-    if (existsSync(buildDir)) {
-      console.log(`Contents of ${buildDir}:`);
-      try {
-        const output = execSync(`find "${buildDir}" -name "*.a" -o -name "*.o" | head -20`, { encoding: "utf8" });
-        console.log(output || "  No .a or .o files found");
-      } catch (error) {
-        console.log("  Error listing files");
-      }
-    } else {
-      console.log(`Build directory ${buildDir} does not exist`);
-    }
-    
     const missingArtifacts = requiredArtifacts.filter(file => !existsSync(file));
     
     if (missingArtifacts.length > 0) {
-      console.error("❌ Missing required build artifacts:");
+      console.error("❌ Build artifacts still missing after download:");
       missingArtifacts.forEach(file => console.error(`   ${file}`));
-      console.error("\nRun build-cpp and build-zig steps first, or disable BUN_LINK_ONLY");
       process.exit(1);
     }
     
-    console.log("✅ All required artifacts found");
+    console.log("✅ All required artifacts verified");
   }
 }
 
