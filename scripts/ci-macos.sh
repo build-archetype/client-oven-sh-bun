@@ -346,17 +346,37 @@ create_and_run_vm() {
     
     log "✅ Workspace directory validated: $actual_workspace_dir"
     
-    # Create cache directory inside workspace if persistent cache is enabled
-    if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ]; then
-        local cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}"
-        log "🔧 Creating persistent cache directory inside workspace: $cache_dir"
-        
-        # Create cache structure inside workspace - will be mounted with workspace
-        mkdir -p "$cache_dir"/{zig/global,zig/local,ccache,npm}
-        
-        log "✅ Cache directory created inside workspace (mounted with workspace)"
-        log "   Cache path in VM: /Volumes/workspace/buildkite-cache"
+    # Clean workspace to prevent build pollution (preserve cache)
+    log "🧹 Cleaning workspace to prevent build pollution..."
+    
+    # Always clean build artifacts and temporary files to ensure fresh builds
+    rm -rf ./build ./artifacts ./dist ./tmp ./.temp || true
+    rm -rf ./node_modules/.cache || true  # Clear npm cache but keep node_modules
+    
+    # Clean any CMake cache files (but preserve our buildkite-cache)
+    find . -name "CMakeCache.txt" -delete 2>/dev/null || true
+    find . -name "CMakeFiles" -type d -exec rm -rf {} + 2>/dev/null || true
+    
+    # For linking steps, ensure completely fresh environment (no cache pollution)
+    if [ "${BUN_LINK_ONLY:-}" = "ON" ]; then
+        log "🔗 Linking step detected - ensuring completely fresh environment"
+        # Don't create cache directory for linking steps (no cache needed)
+        log "   Skipping cache setup for fresh linking environment"
+    else
+        # Create cache directory inside workspace for compilation steps only
+        if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ]; then
+            local cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}"
+            log "🔧 Creating persistent cache directory inside workspace: $cache_dir"
+            
+            # Create cache structure inside workspace - will be mounted with workspace
+            mkdir -p "$cache_dir"/{zig/global,zig/local,ccache,npm}
+            
+            log "✅ Cache directory created inside workspace (mounted with workspace)"
+            log "   Cache path in VM: /Volumes/workspace/buildkite-cache"
+        fi
     fi
+    
+    log "✅ Workspace cleaned and prepared for fresh build"
     
     log "Starting VM with workspace: $actual_workspace_dir"
     # Mount workspace only (cache is inside workspace) - single mount, more reliable

@@ -171,9 +171,12 @@ echo "🔗 ===== WORKSPACE AND CACHE MOUNTED ====="
 
 # ===== WORKSPACE AND CACHE ALREADY MOUNTED =====
 echo "✅ Workspace already mounted to VM via Tart at /Volumes/workspace"
-if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ]; then
+if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ] && [ "${BUN_LINK_ONLY:-}" != "ON" ]; then
     echo "✅ Cache directory inside mounted workspace at /Volumes/workspace/buildkite-cache" 
-    echo "🚀 Using fast workspace mount - no rsync needed!"
+    echo "🚀 Using fast workspace mount with persistent cache!"
+elif [ "${BUN_LINK_ONLY:-}" = "ON" ]; then
+    echo "🔗 Linking step - using completely fresh environment (no cache directory)"
+    echo "🚀 Using fast workspace mount with fresh build environment!"
 else
     echo "📋 No persistent cache configured"
 fi
@@ -207,11 +210,17 @@ if [ -d "/Volumes/workspace" ]; then
     ls -la /Volumes/workspace/ | head -10
     
     # Check if cache directory exists inside workspace
-    if [ -d "/Volumes/workspace/buildkite-cache" ]; then
-        echo "✅ Cache directory found inside workspace"
-        ls -la /Volumes/workspace/buildkite-cache/ || true
+    if [ "${BUN_LINK_ONLY:-}" = "ON" ]; then
+        echo "🔗 Linking step - cache directory intentionally not created for fresh environment"
+    elif [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ]; then
+        if [ -d "/Volumes/workspace/buildkite-cache" ]; then
+            echo "✅ Cache directory found inside workspace"
+            ls -la /Volumes/workspace/buildkite-cache/ || true
+        else
+            echo "⚠️  Cache directory not found (will be created by build script)"
+        fi
     else
-        echo "📋 No cache directory (normal for linking steps)"
+        echo "📋 No persistent cache configured"
     fi
 else
     echo "❌ Workspace not mounted properly"

@@ -422,6 +422,16 @@ async function downloadBuildArtifacts() {
       console.log("⚠️  Using workspace cache directory (rsync fallback)");
     }
     
+    // Verify cache directory exists before setting up environment
+    if (!existsSync(cacheBase)) {
+      console.log("⚠️  Cache directory not found, creating it...");
+      mkdirSync(cacheBase, { recursive: true });
+      mkdirSync(`${cacheBase}/zig/global`, { recursive: true });
+      mkdirSync(`${cacheBase}/zig/local`, { recursive: true });
+      mkdirSync(`${cacheBase}/ccache`, { recursive: true });
+      mkdirSync(`${cacheBase}/npm`, { recursive: true });
+    }
+    
     // Set environment variables for CMake and build tools to use mounted cache
     process.env.ZIG_GLOBAL_CACHE_DIR = `${cacheBase}/zig/global`;
     process.env.ZIG_LOCAL_CACHE_DIR = `${cacheBase}/zig/local`;
@@ -435,7 +445,7 @@ async function downloadBuildArtifacts() {
     console.log(`   CCACHE_DIR=${process.env.CCACHE_DIR}`);
     console.log(`   NPM_CONFIG_CACHE=${process.env.NPM_CONFIG_CACHE}`);
   } else if (process.env.BUN_LINK_ONLY === "ON") {
-    console.log("🔗 Linking step detected - using fresh build (no persistent cache)");
+    console.log("🔗 Linking step detected - using completely fresh build environment (no cache)");
   }
   
   // Download build artifacts when BUN_LINK_ONLY=ON (linking step only)
