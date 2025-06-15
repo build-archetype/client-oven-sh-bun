@@ -297,9 +297,9 @@ function getCppAgent(platform, options) {
   const { os, arch } = platform;
 
   if (os === "darwin") {
-    // Use Tart VMs for macOS
+    // Use Tart VMs for macOS with correct queue name
     return {
-      queue: `tart-darwin`,
+      queue: "darwin",
       os,
       arch,
       "vm-image": `macos-${arch}-build`,
