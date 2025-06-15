@@ -521,25 +521,8 @@ main() {
         export BUILDKITE_CACHE_SAVE=ON
     fi
     
-    # Build the full command with cache operations if requested
-    local full_command=""
-    
-    if [ "$cache_restore" = true ]; then
-        log "Cache restore enabled - will restore cache before build"
-        full_command="cmake --build . --target cache-restore || true"
-    fi
-    
-    # Add the main command
-    if [ -n "$full_command" ]; then
-        full_command="$full_command; $command"
-    else
-        full_command="$command"
-    fi
-    
-    if [ "$cache_save" = true ]; then
-        log "Cache save enabled - will save cache after build"
-        full_command="$full_command; cmake --build . --target cache-save || true"
-    fi
+    # The build command will handle cache operations internally via environment variables
+    local full_command="$command"
     
     # Get the workspace directory (default to current directory)
     local workspace_dir="${2:-$PWD}"
