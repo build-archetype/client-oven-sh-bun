@@ -446,7 +446,7 @@ function getBuildVendorStep(platform, options) {
   if (platform.os === "darwin") {
     step.command = [
       `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target dependencies" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target dependencies"`
     ];
   }
   return step;
@@ -481,11 +481,10 @@ function getBuildCppStep(platform, options) {
       os === "darwin" ? "cmake --build . --target cache-save || true" : "",
     ].filter(Boolean),
   };
-  // If macOS, run in VM - use new cache flags for cleaner commands
   if (platform.os === "darwin") {
     step.command = [
       `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} --cache-restore --cache-save "${command} --target bun && ${command} --target dependencies" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} --cache-restore --cache-save "${command} --target bun && ${command} --target dependencies"`
     ];
   }
   return step;
@@ -526,20 +525,13 @@ function getBuildZigStep(platform, options) {
     env: {
       ...getBuildEnv(platform, options),
     },
-    command: [
-      // Add cache restore before build
-      os === "darwin" ? "cmake --build . --target cache-restore || true" : "",
-      `${command} --target bun-zig --toolchain ${toolchain}`,
-      // Add cache save after build
-      os === "darwin" ? "cmake --build . --target cache-save || true" : "",
-    ].filter(Boolean),
+    command: `${command} --target bun-zig`,
     timeout_in_minutes: 35,
   };
-  // If macOS, run in VM - use new cache flags for cleaner commands
   if (platform.os === "darwin") {
     step.command = [
       `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} --cache-restore --cache-save "${command} --target bun-zig --toolchain ${toolchain}" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} --cache-restore --cache-save "${command} --target bun-zig --toolchain ${toolchain}"`
     ];
   }
   return step;
@@ -571,7 +563,7 @@ function getLinkBunStep(platform, options) {
   if (platform.os === "darwin") {
     step.command = [
       `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target bun" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target bun"`
     ];
   }
   return step;
