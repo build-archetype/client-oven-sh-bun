@@ -297,13 +297,12 @@ function getCppAgent(platform, options) {
   const { os, arch } = platform;
 
   if (os === "darwin") {
-    // Use Tart VMs for macOS with correct queue name
+    // Use consistent Tart VM configuration with getZigAgent
     return {
       queue: "darwin",
-      os,
-      arch,
-      "vm-image": `macos-${arch}-build`,
-      "ephemeral": true,
+      os: "darwin",
+      arch: arch === "aarch64" ? "arm64" : arch,
+      tart: true,
     };
   }
 
@@ -351,11 +350,12 @@ function getTestAgent(platform, options) {
   const { os, arch } = platform;
 
   if (os === "darwin") {
+    // Use consistent Tart VM configuration
     return {
       queue: "darwin",
-      os,
+      os: "darwin",
       arch: arch === "aarch64" ? "arm64" : arch,
-      tart: "true"
+      tart: true,
     };
   }
 
