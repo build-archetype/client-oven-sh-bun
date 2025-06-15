@@ -135,7 +135,9 @@ pub const MachoFile = struct {
         const size_diff = @as(i64, @intCast(aligned_size)) - @as(i64, @intCast(original_segsize));
 
         // We assume that the section is page-aligned, so we can calculate the number of new pages
-        const num_of_new_pages = @divExact(size_diff, PAGE_SIZE);
+        // Use safe division that rounds up to the nearest page
+        const abs_size_diff = @abs(size_diff);
+        const num_of_new_pages = (abs_size_diff + PAGE_SIZE - 1) / PAGE_SIZE;
 
         // Since we're adding a new section, we also need to increase our CODE_SIGNATURE size to add the
         // hashes for these pages.
