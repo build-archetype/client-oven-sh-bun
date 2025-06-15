@@ -407,17 +407,27 @@ async function downloadBuildArtifacts() {
   if (process.env.BUILDKITE_CACHE_TYPE === "persistent" && process.env.BUN_LINK_ONLY !== "ON") {
     console.log("🔧 Setting up persistent cache environment for macOS compilation...");
     
-    // Use workspace-relative cache path (will be copied to VM via rsync)
-    const cacheBase = process.env.BUILDKITE_CACHE_BASE || "./buildkite-cache";
+    // Check if cache is mounted directly to VM (preferred) or in workspace (fallback)
+    const mountedCachePath = "/Volumes/cache";
+    const workspaceCachePath = process.env.BUILDKITE_CACHE_BASE || "./buildkite-cache";
     
-    // Set environment variables for CMake and build tools to use workspace cache
+    let cacheBase;
+    if (existsSync(mountedCachePath)) {
+      cacheBase = mountedCachePath;
+      console.log("✅ Using mounted cache directory (fast direct mount)");
+    } else {
+      cacheBase = workspaceCachePath;
+      console.log("⚠️  Using workspace cache directory (slower rsync fallback)");
+    }
+    
+    // Set environment variables for CMake and build tools to use mounted cache
     process.env.ZIG_GLOBAL_CACHE_DIR = `${cacheBase}/zig/global`;
     process.env.ZIG_LOCAL_CACHE_DIR = `${cacheBase}/zig/local`;
     process.env.CCACHE_DIR = `${cacheBase}/ccache`;
     process.env.NPM_CONFIG_CACHE = `${cacheBase}/npm`;
     
     console.log("✅ Persistent cache environment configured:");
-    console.log(`   Cache base path: ${cacheBase} (workspace-relative)`);
+    console.log(`   Cache base path: ${cacheBase}`);
     console.log(`   ZIG_GLOBAL_CACHE_DIR=${process.env.ZIG_GLOBAL_CACHE_DIR}`);
     console.log(`   ZIG_LOCAL_CACHE_DIR=${process.env.ZIG_LOCAL_CACHE_DIR}`);
     console.log(`   CCACHE_DIR=${process.env.CCACHE_DIR}`);

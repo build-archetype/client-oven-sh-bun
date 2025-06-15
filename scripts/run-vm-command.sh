@@ -127,6 +127,7 @@ echo "Running command in VM: $COMMAND"
 echo "📝 ===== CREATING ENVIRONMENT FILE ====="
 
 # ===== CREATE ENVIRONMENT FILE =====
+# Create environment file in mounted workspace (no need to copy it separately)
 ENV_FILE="./buildkite_env.sh"
 
 cat > "$ENV_FILE" << 'EOF'
@@ -152,7 +153,7 @@ while IFS='=' read -r -d '' name value; do
         
         # Override build path to use VM workspace
         if [[ "$name" == "BUILDKITE_BUILD_PATH" ]]; then
-            value="/Users/admin/workspace/build-workdir"
+            value="/Volumes/workspace/build-workdir"
         fi
         
         printf 'export %s=%q\n' "$name" "$value" >> "$ENV_FILE"
@@ -166,187 +167,76 @@ done < <(env -0)
 
 echo "✅ Exported $env_count environment variables ($buildkite_count BUILDKITE_* vars)"
 
-echo "📦 ===== COPYING WORKSPACE TO VM ====="
+echo "🔗 ===== WORKSPACE AND CACHE MOUNTED ====="
 
-# ===== COPY WORKSPACE TO VM =====
-echo "Copying workspace to VM..."
-
-# Ensure workspace directory exists on VM
-sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "rm -rf ~/workspace && mkdir -p ~/workspace"
-
-# Copy entire workspace to VM
-if rsync -av --delete -e "sshpass -p admin ssh $SSH_OPTS" ./ admin@$VM_IP:~/workspace/; then
-    echo "✅ Workspace copied successfully"
+# ===== WORKSPACE AND CACHE ALREADY MOUNTED =====
+echo "✅ Workspace already mounted to VM via Tart at /Volumes/workspace"
+if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ]; then
+    echo "✅ Cache already mounted to VM via Tart at /Volumes/cache" 
+    echo "🚀 Using fast direct mount - no rsync needed!"
 else
-    echo "❌ Failed to copy workspace to VM"
-    exit 1
+    echo "📋 No persistent cache configured"
 fi
-
-echo "⚙️  ===== SETTING UP VM ENVIRONMENT ====="
-
-# ===== SETUP VM ENVIRONMENT =====
-
-sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -s <<'REMOTE_SETUP'
-set -eo pipefail
-
-echo "🔧 Setting up VM environment..."
-cd ~/workspace
-
-# Source environment variables
-source ./buildkite_env.sh
-
-# Set VM-specific paths
-export WORKSPACE="$HOME/workspace"
-export BUILDKITE_BUILD_PATH="$HOME/workspace/build-workdir"
-export VENDOR_PATH="$HOME/workspace/vendor"
-export TMPDIR="/tmp"
-export LD_SUPPORT_TMPDIR="/tmp"
-
-# Ensure buildkite-agent is available
-if ! command -v buildkite-agent >/dev/null 2>&1; then
-    echo "Installing buildkite-agent..."
-    AGENT_DIR="$HOME/.buildkite-agent"
-    if [ ! -d "$AGENT_DIR" ]; then
-        curl -fsSL https://raw.githubusercontent.com/buildkite/agent/main/install.sh > /tmp/install-buildkite.sh
-        chmod +x /tmp/install-buildkite.sh
-        DESTINATION=$AGENT_DIR bash /tmp/install-buildkite.sh
-        sudo ln -sf "$AGENT_DIR/bin/buildkite-agent" /usr/local/bin/buildkite-agent 2>/dev/null || true
-        rm -f /tmp/install-buildkite.sh
-    fi
-fi
-
-# Ensure bun is accessible
-if command -v bun >/dev/null 2>&1; then
-    BUN_BIN=$(command -v bun)
-    sudo ln -sf "$BUN_BIN" /usr/local/bin/bun 2>/dev/null || true
-    echo "✅ Bun found: $(bun --version)"
-else
-    echo "❌ Bun not found - base image may be corrupted"
-    exit 1
-fi
-
-# Verify Rust is available
-if command -v cargo >/dev/null 2>&1; then
-    echo "✅ Cargo found: $(cargo --version)"
-else
-    echo "❌ Cargo not found - base image may be corrupted"
-    exit 1
-fi
-
-echo "🔧 === Tool Verification ==="
-echo "Bun: $(command -v bun || echo 'NOT FOUND')"
-echo "Cargo: $(command -v cargo || echo 'NOT FOUND')" 
-echo "CMake: $(command -v cmake || echo 'NOT FOUND')"
-echo "Node: $(command -v node || echo 'NOT FOUND')"
-echo "============================="
-
-# Debug: Show Rust/Cargo availability
-echo "🦀 === Rust Debug Info ==="
-
-# Check standard Rust installation location
-echo "🔍 Checking standard Rust installation..."
-if [ -d "$HOME/.cargo" ]; then
-    echo "✅ ~/.cargo directory exists"
-    if [ -d "$HOME/.cargo/bin" ]; then
-        echo "✅ ~/.cargo/bin directory exists"
-        ls -la "$HOME/.cargo/bin/" | grep -E "(cargo|rustc|rustup)" || echo "❌ No Rust binaries in ~/.cargo/bin"
-    else
-        echo "❌ No ~/.cargo/bin directory"
-    fi
-else
-    echo "❌ No ~/.cargo directory found"
-fi
-
-# Check system-wide symlinks
-echo "🔍 Checking system-wide Rust symlinks..."
-for location in "/usr/local/bin" "/opt/homebrew/bin"; do
-    if [ -d "$location" ]; then
-        echo "Checking $location:"
-        ls -la "$location" | grep -E "(cargo|rustc|rustup)" || echo "  No Rust symlinks found"
-    fi
-done
-
-# Try to find Rust anywhere on the system
-echo "🔍 Searching for Rust binaries system-wide..."
-find /usr -name "cargo" 2>/dev/null || echo "No cargo found in /usr"
-find /opt -name "cargo" 2>/dev/null || echo "No cargo found in /opt"
-find "$HOME" -name "cargo" 2>/dev/null || echo "No cargo found in $HOME"
-
-# Check our environment file
-echo "🔍 Checking environment file..."
-if [ -f "./buildkite_env.sh" ]; then
-    echo "✅ buildkite_env.sh exists"
-    echo "PATH line in env file:"
-    grep "^export PATH=" ./buildkite_env.sh || echo "❌ No PATH export found"
-else
-    echo "❌ buildkite_env.sh not found"
-fi
-
-# Use which commands for clarity
-echo "🔍 Using 'which' to locate Rust tools..."
-which cargo && echo "✅ Cargo found at: $(which cargo)" || echo "❌ Cargo not found"
-which rustc && echo "✅ Rustc found at: $(which rustc)" || echo "❌ Rustc not found"
-which rustup && echo "✅ Rustup found at: $(which rustup)" || echo "❌ Rustup not found"
-
-if command -v cargo >/dev/null 2>&1; then
-    echo "✅ Cargo found: $(command -v cargo)"
-    echo "✅ Cargo version: $(cargo --version)"
-else
-    echo "❌ Cargo not found in PATH"
-fi
-
-if command -v rustc >/dev/null 2>&1; then
-    echo "✅ Rustc found: $(command -v rustc)"
-    echo "✅ Rustc version: $(rustc --version)"
-else
-    echo "❌ Rustc not found in PATH"
-fi
-
-echo "🛤️  Current PATH: $PATH"
-echo "========================"
-
-echo "✅ VM environment setup complete"
-REMOTE_SETUP
 
 echo "🎬 ===== EXECUTING COMMAND ====="
 
 # ===== EXECUTE COMMAND =====
 
-# Execute the user command in the VM - using heredoc for better escaping
+# Execute the user command in the VM using mounted directories
 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -s <<REMOTE_EXEC
 set -eo pipefail
-cd ~/workspace
+
+# Change to mounted workspace directory 
+cd /Volumes/workspace
+
+# Source environment variables (from mounted workspace)
 source ./buildkite_env.sh
-export WORKSPACE="\$HOME/workspace"
-export BUILDKITE_BUILD_PATH="\$HOME/workspace/build-workdir"
-export VENDOR_PATH="\$HOME/workspace/vendor"
+
+# Set VM-specific paths for mounted directories
+export WORKSPACE="/Volumes/workspace"
+export BUILDKITE_BUILD_PATH="/Volumes/workspace/build-workdir"
+export VENDOR_PATH="/Volumes/workspace/vendor"
 export TMPDIR="/tmp"
 export LD_SUPPORT_TMPDIR="/tmp"
+
+# Verify mount points
+echo "🔍 Verifying mount points..."
+ls -la /Volumes/ || true
+if [ -d "/Volumes/workspace" ]; then
+    echo "✅ Workspace mounted at /Volumes/workspace"
+    ls -la /Volumes/workspace/ | head -10
+else
+    echo "❌ Workspace not mounted properly"
+    exit 1
+fi
+
+if [ -d "/Volumes/cache" ]; then
+    echo "✅ Cache mounted at /Volumes/cache"
+    ls -la /Volumes/cache/ || true
+else
+    echo "📋 No cache mount (normal for linking steps)"
+fi
+
+# Ensure required tools are available
+echo "🔧 Verifying tools..."
+command -v bun >/dev/null 2>&1 && echo "✅ Bun: \$(bun --version)" || echo "❌ Bun not found"
+command -v buildkite-agent >/dev/null 2>&1 && echo "✅ buildkite-agent available" || echo "❌ buildkite-agent not found"
 
 echo "🚀 Executing: $COMMAND"
 $COMMAND
 REMOTE_EXEC
 EXIT_CODE=$?
 
-echo "📤 ===== COPYING ARTIFACTS BACK ====="
+echo "📤 ===== COPYING FINAL ARTIFACTS BACK ====="
 
-# ===== COPY ARTIFACTS BACK =====
+# ===== COPY ONLY FINAL ARTIFACTS BACK =====
 
-# Always copy build artifacts
+# Only copy build artifacts back (cache is mounted so no need to copy)
 artifact_dirs=("build" "artifacts" "dist")
 
-# Add cache to copy back if persistent cache is enabled AND this is not a linking step
-if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ] && [ "${BUN_LINK_ONLY:-}" != "ON" ]; then
-    cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}"
-    # Remove ./ prefix if present for directory name check
-    cache_dir_name=$(echo "$cache_dir" | sed 's|^\./||')
-    artifact_dirs+=("$cache_dir_name")
-    echo "📦 Persistent cache enabled - will copy cache back from VM"
-elif [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ] && [ "${BUN_LINK_ONLY:-}" = "ON" ]; then
-    echo "🔗 Linking step detected - skipping cache copy back (linking doesn't generate cache)"
-fi
+echo "📦 Copying final build artifacts only (cache stays mounted)"
 
-# Check if any artifact directories exist
+# Check if any artifact directories exist in the workspace
 should_copy=false
 for dir in "${artifact_dirs[@]}"; do
     if [ -d "./$dir" ]; then
@@ -356,20 +246,23 @@ for dir in "${artifact_dirs[@]}"; do
 done
 
 if [ "$should_copy" = true ]; then
-    echo "Copying build artifacts back from VM..."
+    echo "Copying final artifacts back from VM..."
     
-    # Copy artifact directories back
+    # Copy only final artifacts back (much faster than full rsync)
     for dir in "${artifact_dirs[@]}"; do
-        if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d ~/workspace/$dir ]"; then
+        if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d /Volumes/workspace/$dir ]"; then
             echo "Copying $dir/ back..."
-            rsync -av -e "sshpass -p admin ssh $SSH_OPTS" admin@$VM_IP:~/workspace/$dir/ ./$dir/ || true
+            rsync -av -e "sshpass -p admin ssh $SSH_OPTS" admin@$VM_IP:/Volumes/workspace/$dir/ ./$dir/ || true
         fi
     done
     
-    echo "✅ Artifacts copied back"
+    echo "✅ Final artifacts copied back"
 else
-    echo "No artifact directories found, skipping artifact copy"
+    echo "No final artifact directories found, skipping artifact copy"
 fi
+
+# Note: Cache is not copied back because it's mounted directly - 
+# changes persist automatically on the host filesystem!
 
 echo "🧹 ===== CLEANUP ====="
 
