@@ -137,11 +137,35 @@ async function build(args) {
     }
   }
 
+  // Cache restore step (before main build)
+  if (process.env.BUILDKITE_CACHE_RESTORE === "ON") {
+    console.log("Running cache restore step...");
+    try {
+      await startGroup("Cache Restore", () => 
+        spawn("cmake", ["--build", buildPath, "--target", "cache-restore"], { env })
+      );
+    } catch (error) {
+      console.warn("Cache restore failed (continuing with build):", error.message);
+    }
+  }
+
   const buildArgs = Object.entries(buildOptions)
     .sort(([a], [b]) => (a === "--build" ? -1 : a.localeCompare(b)))
     .flatMap(([flag, value]) => [flag, value]);
 
   await startGroup("CMake Build", () => spawn("cmake", buildArgs, { env }));
+
+  // Cache save step (after main build)
+  if (process.env.BUILDKITE_CACHE_SAVE === "ON") {
+    console.log("Running cache save step...");
+    try {
+      await startGroup("Cache Save", () => 
+        spawn("cmake", ["--build", buildPath, "--target", "cache-save"], { env })
+      );
+    } catch (error) {
+      console.warn("Cache save failed:", error.message);
+    }
+  }
 
   printDuration("total", Date.now() - startTime);
 }
