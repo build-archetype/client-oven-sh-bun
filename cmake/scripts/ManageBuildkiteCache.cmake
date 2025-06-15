@@ -24,7 +24,6 @@ endif()
 # Find required tools
 find_program(BUILDKITE_AGENT buildkite-agent REQUIRED)
 find_program(TAR tar REQUIRED)
-find_program(ZSTD zstd REQUIRED)
 
 # Helper function to ensure directory permissions
 function(ensure_cache_permissions CACHE_DIR)
@@ -77,7 +76,17 @@ function(test_write_permissions CACHE_DIR SUCCESS_VAR)
 endfunction()
 
 function(restore_cache CACHE_TYPE CACHE_DIR)
-  set(CACHE_FILE "${CACHE_TYPE}-${BUILDKITE_CACHE_KEY}.tar.zst")
+  # Map cache types to expected artifact names
+  if(CACHE_TYPE STREQUAL "ccache")
+    set(CACHE_FILE "ccache-cache.tar.gz")
+  elseif(CACHE_TYPE STREQUAL "zig-local")
+    set(CACHE_FILE "zig-local-cache.tar.gz")
+  elseif(CACHE_TYPE STREQUAL "zig-global") 
+    set(CACHE_FILE "zig-global-cache.tar.gz")
+  else()
+    message(STATUS "❌ Unknown cache type: ${CACHE_TYPE}")
+    return()
+  endif()
   
   message(STATUS "Attempting to restore ${CACHE_TYPE} cache...")
   
@@ -95,24 +104,75 @@ function(restore_cache CACHE_TYPE CACHE_DIR)
   
   message(STATUS "Cache directory permissions verified: ${CACHE_DIR}")
   
-  # Use existing Buildkite logic to find last successful build
+  # Use hierarchical cache discovery to find the best available cache
+  # This implements: current branch -> main branch -> fresh build
+  find_program(NODE node REQUIRED)
   execute_process(
-    COMMAND ${BUILDKITE_AGENT} artifact download ${CACHE_FILE} .
-      --step "*cache-save*"
-    WORKING_DIRECTORY ${BUILD_PATH}
-    RESULT_VARIABLE DOWNLOAD_RESULT
-    OUTPUT_QUIET
-    ERROR_QUIET
+    COMMAND ${NODE} ${CMAKE_SOURCE_DIR}/scripts/get-last-build-id.mjs
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE CACHE_BUILD_ID
+    ERROR_VARIABLE CACHE_SEARCH_LOG
+    RESULT_VARIABLE CACHE_SEARCH_RESULT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
   )
   
-  if(DOWNLOAD_RESULT EQUAL 0 AND EXISTS "${BUILD_PATH}/${CACHE_FILE}")
+  # Log the cache search process
+  if(CACHE_SEARCH_LOG)
+    string(REPLACE "\n" "\n   " FORMATTED_LOG "${CACHE_SEARCH_LOG}")
+    message(STATUS "Cache search log:\n   ${FORMATTED_LOG}")
+  endif()
+  
+  if(CACHE_SEARCH_RESULT EQUAL 0 AND CACHE_BUILD_ID)
+    message(STATUS "Found cache source: build ID ${CACHE_BUILD_ID}")
+    
+    # Download cache from the discovered build
+    execute_process(
+      COMMAND ${BUILDKITE_AGENT} artifact download ${CACHE_FILE} . --build ${CACHE_BUILD_ID}
+      WORKING_DIRECTORY ${BUILD_PATH}
+      RESULT_VARIABLE DOWNLOAD_RESULT
+      OUTPUT_VARIABLE DOWNLOAD_OUTPUT
+      ERROR_VARIABLE DOWNLOAD_ERROR
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    
+    if(DOWNLOAD_RESULT EQUAL 0 AND EXISTS "${BUILD_PATH}/${CACHE_FILE}")
+      message(STATUS "✅ Downloaded ${CACHE_TYPE} cache from build ${CACHE_BUILD_ID}")
+    else()
+      message(STATUS "❌ Failed to download ${CACHE_TYPE} cache from build ${CACHE_BUILD_ID}")
+      if(DOWNLOAD_ERROR)
+        message(STATUS "Download error: ${DOWNLOAD_ERROR}")
+      endif()
+    endif()
+  else()
+    message(STATUS "ℹ️ No ${CACHE_TYPE} cache found via hierarchical search")
+    if(CACHE_SEARCH_RESULT EQUAL 1)
+      message(STATUS "   → No builds with cache artifacts found")
+    else()
+      message(STATUS "   → Cache search failed (exit code: ${CACHE_SEARCH_RESULT})")
+    endif()
+    
+    # Try fallback to current pipeline artifacts (legacy behavior)
+    message(STATUS "🔄 Attempting fallback to current pipeline artifacts...")
+    execute_process(
+      COMMAND ${BUILDKITE_AGENT} artifact download ${CACHE_FILE} .
+        --step "*cache-save*"
+      WORKING_DIRECTORY ${BUILD_PATH}
+      RESULT_VARIABLE DOWNLOAD_RESULT
+      OUTPUT_QUIET
+      ERROR_QUIET
+    )
+  endif()
+  
+  # Process downloaded cache if available
+  if(EXISTS "${BUILD_PATH}/${CACHE_FILE}")
     message(STATUS "Found ${CACHE_TYPE} cache artifact, extracting...")
     
     # Extract the cache directly to the cache directory
     get_filename_component(CACHE_PARENT_DIR ${CACHE_DIR} DIRECTORY)
+    
+    # Use gzip for .tar.gz files
     execute_process(
-      COMMAND ${ZSTD} -d -c ${BUILD_PATH}/${CACHE_FILE}
-      COMMAND ${TAR} xf - -C ${CACHE_PARENT_DIR}
+      COMMAND ${TAR} xzf ${BUILD_PATH}/${CACHE_FILE} -C ${CACHE_PARENT_DIR}
       RESULT_VARIABLE EXTRACT_RESULT
       OUTPUT_QUIET
       ERROR_QUIET
@@ -128,7 +188,8 @@ function(restore_cache CACHE_TYPE CACHE_DIR)
       # Verify cache directory has content
       file(GLOB CACHE_CONTENTS "${CACHE_DIR}/*")
       if(CACHE_CONTENTS)
-        message(STATUS "✅ ${CACHE_TYPE} cache restored successfully")
+        list(LENGTH CACHE_CONTENTS CACHE_FILE_COUNT)
+        message(STATUS "✅ ${CACHE_TYPE} cache restored successfully (${CACHE_FILE_COUNT} files)")
         
         # Initialize ccache if needed
         if(CACHE_TYPE STREQUAL "ccache")
@@ -185,7 +246,18 @@ function(save_cache CACHE_TYPE CACHE_DIR)
   message(STATUS "📦 Saving ${CACHE_TYPE} cache...")
   message(STATUS "Cache directory verified: ${CACHE_DIR}")
   
-  set(CACHE_FILE "${CACHE_TYPE}-${BUILDKITE_CACHE_KEY}.tar.zst")
+  # Map cache types to expected artifact names
+  if(CACHE_TYPE STREQUAL "ccache")
+    set(CACHE_FILE "ccache-cache.tar.gz")
+  elseif(CACHE_TYPE STREQUAL "zig-local")
+    set(CACHE_FILE "zig-local-cache.tar.gz") 
+  elseif(CACHE_TYPE STREQUAL "zig-global")
+    set(CACHE_FILE "zig-global-cache.tar.gz")
+  else()
+    message(STATUS "❌ Unknown cache type: ${CACHE_TYPE}")
+    return()
+  endif()
+  
   set(CACHE_FILE_PATH "${BUILD_PATH}/${CACHE_FILE}")
   
   # Clean up ccache before saving
@@ -210,11 +282,10 @@ function(save_cache CACHE_TYPE CACHE_DIR)
   get_filename_component(CACHE_PARENT_DIR ${CACHE_DIR} DIRECTORY)
   get_filename_component(CACHE_DIR_NAME ${CACHE_DIR} NAME)
   
+  # Use gzip compression for compatibility
   execute_process(
-    COMMAND ${TAR} cf - ${CACHE_DIR_NAME}
-    COMMAND ${ZSTD} -c
+    COMMAND ${TAR} czf ${CACHE_FILE_PATH} ${CACHE_DIR_NAME}
     WORKING_DIRECTORY ${CACHE_PARENT_DIR}
-    OUTPUT_FILE ${CACHE_FILE_PATH}
     RESULT_VARIABLE ARCHIVE_RESULT
   )
   
@@ -248,13 +319,15 @@ endfunction()
 if(ACTION STREQUAL "restore")
   message(STATUS "🔄 Restoring caches for ${BUILDKITE_CACHE_KEY}...")
   restore_cache("ccache" ${CCACHE_CACHE_DIR})
-  restore_cache("zig" ${ZIG_CACHE_DIR})
+  restore_cache("zig-local" ${ZIG_CACHE_DIR}/local)
+  restore_cache("zig-global" ${ZIG_CACHE_DIR}/global)
   message(STATUS "✅ Cache restoration completed")
   
 elseif(ACTION STREQUAL "save")
   message(STATUS "💾 Saving caches for ${BUILDKITE_CACHE_KEY}...")
   save_cache("ccache" ${CCACHE_CACHE_DIR})
-  save_cache("zig" ${ZIG_CACHE_DIR})
+  save_cache("zig-local" ${ZIG_CACHE_DIR}/local)
+  save_cache("zig-global" ${ZIG_CACHE_DIR}/global)
   message(STATUS "✅ Cache saving completed")
   
 else()
