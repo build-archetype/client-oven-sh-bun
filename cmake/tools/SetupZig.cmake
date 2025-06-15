@@ -52,8 +52,22 @@ optionx(ZIG_OPTIMIZE "ReleaseFast|ReleaseSafe|ReleaseSmall|Debug" "The Zig optim
 # Change to "bc" to experiment, "Invalid record" means it is not valid output.
 optionx(ZIG_OBJECT_FORMAT "obj|bc" "Output file format for Zig object files" DEFAULT obj)
 
-optionx(ZIG_LOCAL_CACHE_DIR FILEPATH "The path to local the zig cache directory" DEFAULT ${CACHE_PATH}/zig/local)
-optionx(ZIG_GLOBAL_CACHE_DIR FILEPATH "The path to the global zig cache directory" DEFAULT ${CACHE_PATH}/zig/global)
+# Setup Zig cache directories - use environment variables if available for VM compatibility
+if(DEFINED ENV{ZIG_LOCAL_CACHE_DIR} AND DEFINED ENV{ZIG_GLOBAL_CACHE_DIR})
+  # Use environment variables (set by CI system for VM builds)
+  set(ZIG_LOCAL_CACHE_DIR $ENV{ZIG_LOCAL_CACHE_DIR})
+  set(ZIG_GLOBAL_CACHE_DIR $ENV{ZIG_GLOBAL_CACHE_DIR})
+  message(STATUS "Using Zig cache directories from environment:")
+  message(STATUS "  ZIG_LOCAL_CACHE_DIR: ${ZIG_LOCAL_CACHE_DIR}")
+  message(STATUS "  ZIG_GLOBAL_CACHE_DIR: ${ZIG_GLOBAL_CACHE_DIR}")
+else()
+  # Use CMake variables (traditional path)
+  optionx(ZIG_LOCAL_CACHE_DIR FILEPATH "The path to local the zig cache directory" DEFAULT ${CACHE_PATH}/zig/local)
+  optionx(ZIG_GLOBAL_CACHE_DIR FILEPATH "The path to the global zig cache directory" DEFAULT ${CACHE_PATH}/zig/global)
+  message(STATUS "Using Zig cache directories from CMake:")
+  message(STATUS "  ZIG_LOCAL_CACHE_DIR: ${ZIG_LOCAL_CACHE_DIR}")
+  message(STATUS "  ZIG_GLOBAL_CACHE_DIR: ${ZIG_GLOBAL_CACHE_DIR}")
+endif()
 
 # TEMPORARY FIX: Commented out to avoid Zig compiler crash in Response.zig
 # The ReleaseSafe build of the Zig compiler has a known issue analyzing Response.zig

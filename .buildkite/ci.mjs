@@ -407,16 +407,16 @@ function getBuildEnv(target, options) {
     MACOS_VM_CPU: macOSVmResources.cpu.toString(),
     MACOS_VM_CONFIG_DESCRIPTION: macOSVmResources.description,
     // ccache environment variables (consistent across all platforms)
-    CCACHE_DIR: "${CACHE_PATH}/ccache",
-    CCACHE_BASEDIR: "${WORKSPACE:-$PWD}",
+    CCACHE_DIR: "$PWD/build/release/cache/ccache",
+    CCACHE_BASEDIR: "$PWD",
     CCACHE_NOHASHDIR: "1", 
     CCACHE_FILECLONE: "1",
     CCACHE_DEBUG: "1",
     CCACHE_MAXSIZE: "100G",
     CCACHE_SLOPPINESS: "pch_defines,time_macros,locale,random_seed,clang_index_store,gcno_cwd",
     // Zig cache environment variables (consistent across all platforms)  
-    ZIG_LOCAL_CACHE_DIR: "${CACHE_PATH}/zig/local",
-    ZIG_GLOBAL_CACHE_DIR: "${CACHE_PATH}/zig/global",
+    ZIG_LOCAL_CACHE_DIR: "$PWD/build/release/cache/zig/local",
+    ZIG_GLOBAL_CACHE_DIR: "$PWD/build/release/cache/zig/global",
   };
 }
 
