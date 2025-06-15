@@ -108,67 +108,69 @@ function(restore_cache CACHE_TYPE CACHE_DIR)
   
   message(STATUS "Cache directory permissions verified: ${CACHE_DIR}")
   
-  # Use hierarchical cache discovery to find the best available cache
-  # This implements: current branch -> main branch -> fresh build
-  find_program(NODE node REQUIRED)
+  # Get current build number from environment
+  set(CURRENT_BUILD_NUMBER $ENV{BUILDKITE_BUILD_NUMBER})
+  if(NOT CURRENT_BUILD_NUMBER)
+    message(STATUS "⚠️ No build number available, trying direct download only")
+    set(SEARCH_BUILDS "")
+  else()
+    # Try previous 10 builds
+    set(SEARCH_BUILDS "")
+    math(EXPR BUILD_START "${CURRENT_BUILD_NUMBER} - 1")
+    math(EXPR BUILD_END "${CURRENT_BUILD_NUMBER} - 10")
+    
+    foreach(BUILD_NUM RANGE ${BUILD_START} ${BUILD_END} -1)
+      if(BUILD_NUM GREATER 0)
+        list(APPEND SEARCH_BUILDS ${BUILD_NUM})
+      endif()
+    endforeach()
+    
+    message(STATUS "🔍 Will search builds: ${SEARCH_BUILDS}")
+  endif()
+  
+  # Try downloading from recent builds
+  set(CACHE_FOUND FALSE)
+  
+  # First try current build (in case of retry)
+  message(STATUS "🔄 Trying current build...")
   execute_process(
-    COMMAND ${NODE} ${WORKSPACE_DIR}/scripts/get-last-build-id.mjs
-    OUTPUT_VARIABLE CACHE_BUILD_ID
-    ERROR_VARIABLE CACHE_SEARCH_LOG
-    RESULT_VARIABLE CACHE_SEARCH_RESULT
-    OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND ${BUILDKITE_AGENT} artifact download ${CACHE_FILE} .
+    WORKING_DIRECTORY ${BUILD_PATH}
+    RESULT_VARIABLE DOWNLOAD_RESULT
+    OUTPUT_QUIET
+    ERROR_QUIET
+    TIMEOUT 15
   )
   
-  # Log the cache search process
-  if(CACHE_SEARCH_LOG)
-    string(REPLACE "\n" "\n   " FORMATTED_LOG "${CACHE_SEARCH_LOG}")
-    message(STATUS "Cache search log:\n   ${FORMATTED_LOG}")
-  endif()
-  
-  if(CACHE_SEARCH_RESULT EQUAL 0 AND CACHE_BUILD_ID)
-    message(STATUS "Found cache source: build ID ${CACHE_BUILD_ID}")
-    
-    # Download cache from the discovered build
-    execute_process(
-      COMMAND ${BUILDKITE_AGENT} artifact download ${CACHE_FILE} . --build ${CACHE_BUILD_ID}
-      WORKING_DIRECTORY ${BUILD_PATH}
-      RESULT_VARIABLE DOWNLOAD_RESULT
-      OUTPUT_VARIABLE DOWNLOAD_OUTPUT
-      ERROR_VARIABLE DOWNLOAD_ERROR
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    
-    if(DOWNLOAD_RESULT EQUAL 0 AND EXISTS "${BUILD_PATH}/${CACHE_FILE}")
-      message(STATUS "✅ Downloaded ${CACHE_TYPE} cache from build ${CACHE_BUILD_ID}")
-    else()
-      message(STATUS "❌ Failed to download ${CACHE_TYPE} cache from build ${CACHE_BUILD_ID}")
-      if(DOWNLOAD_ERROR)
-        message(STATUS "Download error: ${DOWNLOAD_ERROR}")
-      endif()
-    endif()
-  else()
-    message(STATUS "ℹ️ No ${CACHE_TYPE} cache found via hierarchical search")
-    if(CACHE_SEARCH_RESULT EQUAL 1)
-      message(STATUS "   → No builds with cache artifacts found")
-    else()
-      message(STATUS "   → Cache search failed (exit code: ${CACHE_SEARCH_RESULT})")
-    endif()
-    
-    # Try fallback to current pipeline artifacts (legacy behavior)
-    message(STATUS "🔄 Attempting fallback to current pipeline artifacts...")
-    execute_process(
-      COMMAND ${BUILDKITE_AGENT} artifact download ${CACHE_FILE} .
-        --step "*cache-save*"
-      WORKING_DIRECTORY ${BUILD_PATH}
-      RESULT_VARIABLE DOWNLOAD_RESULT
-      OUTPUT_QUIET
-      ERROR_QUIET
-    )
-  endif()
-  
-  # Process downloaded cache if available
   if(EXISTS "${BUILD_PATH}/${CACHE_FILE}")
-    message(STATUS "Found ${CACHE_TYPE} cache artifact, extracting...")
+    set(CACHE_FOUND TRUE)
+    message(STATUS "✅ Found ${CACHE_TYPE} cache in current build")
+  else()
+    # Try previous builds
+    foreach(BUILD_NUM ${SEARCH_BUILDS})
+      if(NOT CACHE_FOUND)
+        message(STATUS "🔄 Trying build ${BUILD_NUM}...")
+        execute_process(
+          COMMAND ${BUILDKITE_AGENT} artifact download ${CACHE_FILE} . --build ${BUILD_NUM}
+          WORKING_DIRECTORY ${BUILD_PATH}
+          RESULT_VARIABLE DOWNLOAD_RESULT
+          OUTPUT_QUIET
+          ERROR_QUIET
+          TIMEOUT 15
+        )
+        
+        if(EXISTS "${BUILD_PATH}/${CACHE_FILE}")
+          set(CACHE_FOUND TRUE)
+          message(STATUS "✅ Found ${CACHE_TYPE} cache in build ${BUILD_NUM}")
+          break()
+        endif()
+      endif()
+    endforeach()
+  endif()
+  
+  # Process downloaded cache if found
+  if(CACHE_FOUND AND EXISTS "${BUILD_PATH}/${CACHE_FILE}")
+    message(STATUS "Extracting ${CACHE_TYPE} cache...")
     
     # Extract the cache directly to the cache directory
     get_filename_component(CACHE_PARENT_DIR ${CACHE_DIR} DIRECTORY)
@@ -219,7 +221,7 @@ function(restore_cache CACHE_TYPE CACHE_DIR)
       ensure_cache_permissions(${CACHE_DIR})
     endif()
   else()
-    message(STATUS "ℹ️ No ${CACHE_TYPE} cache found, starting fresh")
+    message(STATUS "ℹ️ No ${CACHE_TYPE} cache found in recent builds, starting fresh")
     file(MAKE_DIRECTORY ${CACHE_DIR})
     ensure_cache_permissions(${CACHE_DIR})
   endif()
