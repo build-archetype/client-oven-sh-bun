@@ -116,6 +116,17 @@ async function build(args) {
     console.log("Buildkite cache save enabled via environment variable");
   }
 
+  // Download build artifacts if BUN_LINK_ONLY is enabled
+  if (process.env.BUN_LINK_ONLY === "ON") {
+    console.log("BUN_LINK_ONLY detected - downloading build artifacts...");
+    try {
+      await downloadBuildArtifacts(buildPath);
+    } catch (error) {
+      console.error("Failed to download build artifacts:", error.message);
+      process.exit(1);
+    }
+  }
+
   const toolchain = generateOptions["--toolchain"];
   if (toolchain) {
     const toolchainPath = resolve(import.meta.dirname, "..", "cmake", "toolchains", `${toolchain}.cmake`);
@@ -350,6 +361,57 @@ function printDuration(label, duration) {
   } else {
     console.log(`${label} took ${(duration / 1000).toFixed(2)} seconds`);
   }
+}
+
+async function downloadBuildArtifacts(buildPath) {
+  console.log("Downloading build artifacts for linking...");
+  
+  // Download C++ artifact: libbun-profile.a.gz
+  const cppArtifactFile = "libbun-profile.a.gz";
+  try {
+    await spawn("buildkite-agent", ["artifact", "download", cppArtifactFile, buildPath]);
+    console.log(`✅ Downloaded ${cppArtifactFile}`);
+  } catch (error) {
+    throw new Error(`Failed to download ${cppArtifactFile}: ${error.message}`);
+  }
+
+  // Download Zig artifact: bun-zig.o
+  const zigArtifactFile = "bun-zig.o";
+  try {
+    await spawn("buildkite-agent", ["artifact", "download", zigArtifactFile, buildPath]);
+    console.log(`✅ Downloaded ${zigArtifactFile}`);
+  } catch (error) {
+    throw new Error(`Failed to download ${zigArtifactFile}: ${error.message}`);
+  }
+
+  // Decompress the C++ artifact
+  const compressedPath = join(buildPath, cppArtifactFile);
+  const decompressedPath = join(buildPath, "libbun-profile.a");
+  
+  if (!existsSync(compressedPath)) {
+    throw new Error(`Compressed C++ artifact not found: ${compressedPath}`);
+  }
+
+  try {
+    await spawn("gzip", ["-d", compressedPath]);
+    console.log(`✅ Decompressed to ${decompressedPath}`);
+  } catch (error) {
+    throw new Error(`Failed to decompress ${cppArtifactFile}: ${error.message}`);
+  }
+
+  // Verify both artifacts exist
+  if (!existsSync(decompressedPath)) {
+    throw new Error(`Decompressed C++ artifact not found: ${decompressedPath}`);
+  }
+
+  const zigArtifactPath = join(buildPath, zigArtifactFile);
+  if (!existsSync(zigArtifactPath)) {
+    throw new Error(`Zig artifact not found: ${zigArtifactPath}`);
+  }
+
+  console.log("✅ All build artifacts ready for linking");
+  console.log(`   C++: ${decompressedPath}`);
+  console.log(`   Zig: ${zigArtifactPath}`);
 }
 
 build(process.argv.slice(2));
