@@ -356,16 +356,40 @@ function printDuration(label, duration) {
 }
 
 async function downloadBuildArtifacts() {
-  // REMOVED: Complex artifact download logic
-  // Now using persistent host cache - no downloads needed!
+  // For persistent cache (macOS), just set environment variables to point cache to mounted directory
+  if (process.env.BUILDKITE_CACHE_TYPE === "persistent") {
+    console.log("🔧 Setting up persistent cache environment for macOS build...");
+    
+    // Use centralized cache mount path from environment
+    const cacheBase = process.env.BUILDKITE_CACHE_MOUNT_PATH || "/buildkite-cache";
+    
+    // Set environment variables for CMake and build tools to use persistent cache
+    process.env.ZIG_GLOBAL_CACHE_DIR = `${cacheBase}/zig/global`;
+    process.env.ZIG_LOCAL_CACHE_DIR = `${cacheBase}/zig/local`;
+    process.env.CCACHE_DIR = `${cacheBase}/ccache`;
+    process.env.NPM_CONFIG_CACHE = `${cacheBase}/npm`;
+    
+    console.log("✅ Persistent cache environment configured:");
+    console.log(`   Cache mount path: ${cacheBase}`);
+    console.log(`   ZIG_GLOBAL_CACHE_DIR=${process.env.ZIG_GLOBAL_CACHE_DIR}`);
+    console.log(`   ZIG_LOCAL_CACHE_DIR=${process.env.ZIG_LOCAL_CACHE_DIR}`);
+    console.log(`   CCACHE_DIR=${process.env.CCACHE_DIR}`);
+    console.log(`   NPM_CONFIG_CACHE=${process.env.NPM_CONFIG_CACHE}`);
+    
+    return;
+  }
   
+  // Original artifact download logic for non-macOS platforms
   if (process.env.BUN_LINK_ONLY === "ON") {
     console.log("🔗 BUN_LINK_ONLY=ON detected");
     
+    // Get build path from environment or default
+    const buildPath = process.env.CMAKE_BINARY_DIR || resolve("build");
+    
     // Check for required artifacts in expected locations
     const requiredArtifacts = [
-      path.join(BUILD_PATH, "libbun-profile.a"),
-      path.join(BUILD_PATH, "bun-zig.o"),
+      join(buildPath, "libbun-profile.a"),
+      join(buildPath, "bun-zig.o"),
     ];
     
     const missingArtifacts = requiredArtifacts.filter(file => !existsSync(file));

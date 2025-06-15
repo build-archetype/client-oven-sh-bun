@@ -393,11 +393,11 @@ function getTestAgent(platform, options) {
  * @returns {Record<string, string | undefined>}
  */
 function getBuildEnv(target, options) {
-  const { baseline, abi } = target;
+  const { baseline, abi, os } = target;
   const { canary } = options;
   const revision = typeof canary === "number" ? canary : 1;
 
-  return {
+  const env = {
     ENABLE_BASELINE: baseline ? "ON" : "OFF",
     ENABLE_CANARY: revision > 0 ? "ON" : "OFF",
     CANARY_REVISION: revision,
@@ -409,6 +409,20 @@ function getBuildEnv(target, options) {
     MACOS_VM_CPU: macOSVmResources.cpu.toString(),
     MACOS_VM_CONFIG_DESCRIPTION: macOSVmResources.description,
   };
+
+  // Add persistent cache configuration for macOS only
+  if (os === "darwin") {
+    env.BUILDKITE_CACHE_RESTORE = "ON";
+    env.BUILDKITE_CACHE_SAVE = "ON";
+    // Use persistent cache - mounted from host to VM
+    env.BUILDKITE_CACHE_TYPE = "persistent";
+    // Host cache directory (can be customized per agent)
+    env.BUILDKITE_CACHE_BASE = env.BUILDKITE_CACHE_BASE || "/opt/buildkite-cache";
+    // Cache will be mounted at this path inside VM
+    env.BUILDKITE_CACHE_MOUNT_PATH = "/buildkite-cache";
+  }
+
+  return env;
 }
 
 /**
