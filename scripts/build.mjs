@@ -402,9 +402,10 @@ function printDuration(label, duration) {
 }
 
 async function downloadBuildArtifacts() {
-  // Set up persistent cache environment for ALL macOS build steps (not just linking)
-  if (process.env.BUILDKITE_CACHE_TYPE === "persistent") {
-    console.log("🔧 Setting up persistent cache environment for macOS build...");
+  // Set up persistent cache environment for compilation steps only (build-cpp, build-zig)
+  // Linking step (build-bun) should always be fresh, so exclude it
+  if (process.env.BUILDKITE_CACHE_TYPE === "persistent" && process.env.BUN_LINK_ONLY !== "ON") {
+    console.log("🔧 Setting up persistent cache environment for macOS compilation...");
     
     // Use workspace-relative cache path (will be copied to VM via rsync)
     const cacheBase = process.env.BUILDKITE_CACHE_BASE || "./buildkite-cache";
@@ -421,11 +422,13 @@ async function downloadBuildArtifacts() {
     console.log(`   ZIG_LOCAL_CACHE_DIR=${process.env.ZIG_LOCAL_CACHE_DIR}`);
     console.log(`   CCACHE_DIR=${process.env.CCACHE_DIR}`);
     console.log(`   NPM_CONFIG_CACHE=${process.env.NPM_CONFIG_CACHE}`);
+  } else if (process.env.BUN_LINK_ONLY === "ON") {
+    console.log("🔗 Linking step detected - using fresh build (no persistent cache)");
   }
   
   // Download build artifacts when BUN_LINK_ONLY=ON (linking step only)
   if (process.env.BUN_LINK_ONLY === "ON") {
-    console.log("🔗 BUN_LINK_ONLY=ON detected - downloading artifacts from previous build steps");
+    console.log("📥 Downloading artifacts from previous build steps for linking...");
     
     const buildPath = resolve("build", "release");
     
