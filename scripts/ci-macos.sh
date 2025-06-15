@@ -427,6 +427,8 @@ show_usage() {
     echo "  --force-base-rebuild      Force rebuild of base image before use"
     echo "  --release=VERSION         macOS release version (13, 14) [default: 14]"
     echo "  --cleanup-orphaned        Clean up orphaned temporary VMs"
+    echo "  --cache-restore           Restore cache from Buildkite artifacts before build"
+    echo "  --cache-save              Save cache to Buildkite artifacts after build"
     echo ""
     echo "Environment Variables:"
     echo "  BASE_VM_IMAGE             Base VM image to clone (auto-determined if not set)"
@@ -436,6 +438,7 @@ show_usage() {
     echo "  $0                                           # Run default build on macOS 14"
     echo "  $0 --release=13                              # Run default build on macOS 13"
     echo "  $0 'bun run build:release'                  # Run custom command"
+    echo "  $0 --cache-restore --cache-save 'bun run build:release --target bun-zig'"
     echo "  $0 --force-base-rebuild --release=13        # Force rebuild base image for macOS 13"
     echo "  BASE_VM_IMAGE=my-custom-image $0            # Use custom base image"
     echo ""
@@ -448,6 +451,8 @@ main() {
     local show_help=false
     local release="14"  # Default to macOS 14
     local cleanup_orphaned=false
+    local cache_restore=false
+    local cache_save=false
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -465,6 +470,14 @@ main() {
                 ;;
             --cleanup-orphaned)
                 cleanup_orphaned=true
+                shift
+                ;;
+            --cache-restore)
+                cache_restore=true
+                shift
+                ;;
+            --cache-save)
+                cache_save=true
                 shift
                 ;;
             *)
@@ -497,22 +510,44 @@ main() {
     # Get the command to run (default to build command if none provided)
     local command="${1:-./scripts/runner.node.mjs --step=darwin-x64-build-bun}"
     
+    # Build the full command with cache operations if requested
+    local full_command=""
+    
+    if [ "$cache_restore" = true ]; then
+        log "Cache restore enabled - will restore cache before build"
+        full_command="cmake --build . --target cache-restore || true"
+    fi
+    
+    # Add the main command
+    if [ -n "$full_command" ]; then
+        full_command="$full_command; $command"
+    else
+        full_command="$command"
+    fi
+    
+    if [ "$cache_save" = true ]; then
+        log "Cache save enabled - will save cache after build"
+        full_command="$full_command; cmake --build . --target cache-save || true"
+    fi
+    
     # Get the workspace directory (default to current directory)
     local workspace_dir="${2:-$PWD}"
 
     log "Starting build process..."
     log "Configuration:"
     log "  macOS Release: $release"
+    log "  Cache Restore: $cache_restore"
+    log "  Cache Save: $cache_save"
     log "  BASE_VM_IMAGE override: ${BASE_VM_IMAGE:-<auto-determined>}"
     log "  FORCE_BASE_IMAGE_REBUILD: $FORCE_BASE_IMAGE_REBUILD"
     log "VM Name: $vm_name"
-    log "Command: $command"
+    log "Command: $full_command"
     log "Workspace: $workspace_dir"
 
     # Setup cache environment
     setup_cache_environment
 
-    create_and_run_vm "$vm_name" "$command" "$workspace_dir" "$release"
+    create_and_run_vm "$vm_name" "$full_command" "$workspace_dir" "$release"
 }
 
 # Run main if script is executed directly

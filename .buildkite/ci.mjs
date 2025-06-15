@@ -490,12 +490,11 @@ function getBuildCppStep(platform, options) {
       os === "darwin" ? "cmake --build . --target cache-save || true" : "",
     ].filter(Boolean),
   };
-  // If macOS, run in VM - use bash -c for better command parsing
+  // If macOS, run in VM - use new cache flags for cleaner commands
   if (platform.os === "darwin") {
-    const vmCommand = `cmake --build . --target cache-restore || true; ${command} --target bun; ${command} --target dependencies; cmake --build . --target cache-save || true`;
     step.command = [
       `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} "bash -c '${vmCommand}'" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} --cache-restore --cache-save "${command} --target bun && ${command} --target dependencies" "${process.cwd()}"`
     ];
   }
   return step;
@@ -545,12 +544,11 @@ function getBuildZigStep(platform, options) {
     ].filter(Boolean),
     timeout_in_minutes: 35,
   };
-  // If macOS, run in VM - use bash -c for better command parsing
+  // If macOS, run in VM - use new cache flags for cleaner commands
   if (platform.os === "darwin") {
-    const vmCommand = `cmake --build . --target cache-restore || true; ${command} --target bun-zig --toolchain ${toolchain}; cmake --build . --target cache-save || true`;
     step.command = [
       `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} "bash -c '${vmCommand}'" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} --cache-restore --cache-save "${command} --target bun-zig --toolchain ${toolchain}" "${process.cwd()}"`
     ];
   }
   return step;
@@ -581,12 +579,11 @@ function getLinkBunStep(platform, options) {
       `${command} --target bun`
     ] : `${command} --target bun`,
   };
-  // If macOS, run in VM - use bash -c for better command parsing
+  // If macOS, run in VM - use new cache flags for cleaner commands
   if (platform.os === "darwin") {
-    const vmCommand = `cmake --build . --target cache-restore || true; ${command} --target bun`;
     step.command = [
       `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} "bash -c '${vmCommand}'" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} --cache-restore "${command} --target bun" "${process.cwd()}"`
     ];
   }
   return step;
