@@ -393,12 +393,26 @@ create_and_run_vm() {
     log "🔍 Validating workspace directory: $workspace_dir"
     local actual_workspace_dir="$workspace_dir"
     
-    # If we have a complex/long path, prefer current directory for reliability (like C++ build)
+    # If we have a complex/long path, create a simple symlink for Tart mounting
     if [[ "$workspace_dir" =~ /builds/.*/build-archetype.*/ ]] || [ "${#workspace_dir}" -gt 100 ]; then
-        log "🔄 Detected complex BuildKite workspace path, using current directory for reliability"
+        log "🔄 Detected complex BuildKite workspace path, creating simple symlink for Tart"
         log "   Complex path: $workspace_dir"
-        log "   Using instead: $PWD"
-        actual_workspace_dir="$PWD"
+        
+        # Create a simple symlink that Tart can handle
+        local simple_path="/tmp/bun-workspace-$(date +%s)"
+        ln -sf "$workspace_dir" "$simple_path"
+        actual_workspace_dir="$simple_path"
+        
+        log "   Created symlink: $simple_path -> $workspace_dir"
+        
+        # Add cleanup for symlink
+        cleanup_symlink() {
+            if [ -L "$simple_path" ]; then
+                rm -f "$simple_path"
+                log "🧹 Cleaned up workspace symlink: $simple_path"
+            fi
+        }
+        trap cleanup_symlink EXIT
     fi
     
     if [ ! -d "$actual_workspace_dir" ]; then
@@ -625,73 +639,6 @@ format_duration() {
     fi
 }
 
-# Hermetic Dependency Verification Functions
-verify_tool_versions() {
-    log "🔒 Verifying hermetic tool versions for reproducible builds..."
-    
-    # Create dependency manifest
-    local manifest_file="dependency_manifest.txt"
-    echo "# Build Tool Versions - $(date '+%Y-%m-%d %H:%M:%S')" > "$manifest_file"
-    echo "# Commit: ${BUILDKITE_COMMIT:-unknown}" >> "$manifest_file"
-    echo "# Build: ${BUILDKITE_BUILD_NUMBER:-unknown}" >> "$manifest_file"
-    echo "" >> "$manifest_file"
-    
-    # Check and record key tool versions
-    local tools=(
-        "bun:bun --version"
-        "cmake:cmake --version | head -1"
-        "ninja:ninja --version"
-        "clang:clang --version | head -1"
-        "rustc:rustc --version"
-        "cargo:cargo --version"
-        "llvm-config:llvm-config --version"
-        "ccache:ccache --version | head -1"
-        "buildkite-agent:buildkite-agent --version"
-        "git:git --version"
-        "make:make --version | head -1"
-        "python3:python3 --version"
-    )
-    
-    local all_versions_ok=true
-    
-    for tool_spec in "${tools[@]}"; do
-        local tool_name="${tool_spec%%:*}"
-        local version_cmd="${tool_spec#*:}"
-        
-        if command -v "${tool_name}" >/dev/null 2>&1; then
-            local version_output=$(eval "$version_cmd" 2>/dev/null || echo "version check failed")
-            echo "$tool_name=$version_output" >> "$manifest_file"
-            log "✅ $tool_name: $version_output"
-        else
-            echo "$tool_name=NOT_FOUND" >> "$manifest_file"
-            log "❌ $tool_name: NOT FOUND"
-            all_versions_ok=false
-        fi
-    done
-    
-    # Report to Buildkite
-    if command -v buildkite-agent >/dev/null 2>&1; then
-        local status_emoji="✅"
-        local status_text="All tools verified"
-        if [ "$all_versions_ok" = false ]; then
-            status_emoji="⚠️"
-            status_text="Some tools missing"
-        fi
-        buildkite-agent annotate --style info "$status_emoji **Tool Versions**: $status_text - see artifact" --context "tool-versions"
-    fi
-    
-    # Upload manifest for debugging/auditing
-    if command -v buildkite-agent >/dev/null 2>&1; then
-        buildkite-agent artifact upload "$manifest_file" || true
-    fi
-    
-    if [ "$all_versions_ok" = false ]; then
-        log "⚠️ Some tools are missing - build may fail"
-    else
-        log "🔒 All hermetic dependencies verified"
-    fi
-}
-
 # Main execution
 main() {
     # Parse arguments
@@ -784,9 +731,6 @@ main() {
     log "VM Name: $vm_name"
     log "Command: $full_command"
     log "Workspace: $workspace_dir"
-
-    # Verify hermetic dependencies before build
-    verify_tool_versions
 
     # Check build result cache before VM creation
     log "🎯 Checking build result cache..."
