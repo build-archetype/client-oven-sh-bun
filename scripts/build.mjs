@@ -435,12 +435,25 @@ async function downloadBuildArtifacts() {
       console.log(`Created build directory: ${buildPath}`);
     }
     
+    // Determine the target platform key for job names (e.g., "darwin-aarch64")
+    // This should match the getTargetKey function in ci.mjs
+    const os = process.platform === "darwin" ? "darwin" : process.platform === "win32" ? "windows" : "linux";
+    const arch = process.arch === "arm64" ? "aarch64" : "x64";
+    const targetKey = `${os}-${arch}`;
+    
+    const buildCppJob = `${targetKey}-build-cpp`;
+    const buildZigJob = `${targetKey}-build-zig`;
+    
+    console.log(`Target platform: ${targetKey}`);
+    console.log(`Build C++ job: ${buildCppJob}`);
+    console.log(`Build Zig job: ${buildZigJob}`);
+    
     // Download artifacts from previous build steps using buildkite-agent
     try {
       console.log("📥 Downloading libbun-profile.a from build-cpp step...");
       // Try downloading compressed version first, then uncompressed
       try {
-        await spawn("buildkite-agent", ["artifact", "download", "build/release/libbun-profile.a.gz", "."], {
+        await spawn("buildkite-agent", ["artifact", "download", "--job", buildCppJob, "build/release/libbun-profile.a.gz", "."], {
           stdio: "inherit"
         });
         
@@ -454,7 +467,7 @@ async function downloadBuildArtifacts() {
         }
       } catch (error) {
         console.log("Compressed version not found, trying uncompressed...");
-        await spawn("buildkite-agent", ["artifact", "download", "build/release/libbun-profile.a", "."], {
+        await spawn("buildkite-agent", ["artifact", "download", "--job", buildCppJob, "build/release/libbun-profile.a", "."], {
           stdio: "inherit"
         });
       }
@@ -462,7 +475,7 @@ async function downloadBuildArtifacts() {
       console.log("📥 Downloading bun-zig.o from build-zig step...");
       // Try downloading compressed version first, then uncompressed
       try {
-        await spawn("buildkite-agent", ["artifact", "download", "build/release/bun-zig.o.gz", "."], {
+        await spawn("buildkite-agent", ["artifact", "download", "--job", buildZigJob, "build/release/bun-zig.o.gz", "."], {
           stdio: "inherit"
         });
         
@@ -476,7 +489,7 @@ async function downloadBuildArtifacts() {
         }
       } catch (error) {
         console.log("Compressed version not found, trying uncompressed...");
-        await spawn("buildkite-agent", ["artifact", "download", "build/release/bun-zig.o", "."], {
+        await spawn("buildkite-agent", ["artifact", "download", "--job", buildZigJob, "build/release/bun-zig.o", "."], {
           stdio: "inherit"
         });
       }
