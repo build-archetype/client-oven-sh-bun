@@ -105,6 +105,17 @@ async function build(args) {
     }
   }
 
+  // Add Buildkite artifact-based cache flags if environment variables are set
+  if (process.env.BUILDKITE_CACHE_RESTORE === "ON") {
+    generateOptions["-DBUILDKITE_CACHE_RESTORE"] = "ON";
+    console.log("Buildkite cache restore enabled via environment variable");
+  }
+  
+  if (process.env.BUILDKITE_CACHE_SAVE === "ON") {
+    generateOptions["-DBUILDKITE_CACHE_SAVE"] = "ON";
+    console.log("Buildkite cache save enabled via environment variable");
+  }
+
   const toolchain = generateOptions["--toolchain"];
   if (toolchain) {
     const toolchainPath = resolve(import.meta.dirname, "..", "cmake", "toolchains", `${toolchain}.cmake`);
