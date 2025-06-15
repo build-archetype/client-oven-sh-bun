@@ -483,20 +483,12 @@ function getBuildCppStep(platform, options) {
       BUN_CPP_ONLY: "ON",
       ...getBuildEnv(platform, options),
     },
-    // Build C++ components and dependencies separately for better caching
-    command: [
-      // Add cache restore before build
-      os === "darwin" ? "cmake --build . --target cache-restore || true" : "",
-      `${command} --target bun`, 
-      `${command} --target dependencies`,
-      // Add cache save after build
-      os === "darwin" ? "cmake --build . --target cache-save || true" : "",
-    ].filter(Boolean),
+    command: `${command} --target bun && ${command} --target dependencies`,
   };
   if (platform.os === "darwin") {
     step.command = [
       `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} --cache-restore --cache-save "${command} --target bun && ${command} --target dependencies"`
+      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target bun && ${command} --target dependencies"`
     ];
   }
   return step;
@@ -543,7 +535,7 @@ function getBuildZigStep(platform, options) {
   if (platform.os === "darwin") {
     step.command = [
       `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} --cache-restore --cache-save "${command} --target bun-zig --toolchain ${toolchain}"`
+      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target bun-zig --toolchain ${toolchain}"`
     ];
   }
   return step;
