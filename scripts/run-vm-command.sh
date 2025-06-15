@@ -332,11 +332,32 @@ echo "📤 ===== COPYING ARTIFACTS BACK ====="
 
 # ===== COPY ARTIFACTS BACK =====
 
-if [ -d "./build" ] || [ -d "./artifacts" ] || [ -d "./dist" ]; then
+# Always copy build artifacts
+artifact_dirs=("build" "artifacts" "dist")
+
+# Add cache to copy back if persistent cache is enabled
+if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ]; then
+    cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}"
+    # Remove ./ prefix if present for directory name check
+    cache_dir_name=$(echo "$cache_dir" | sed 's|^\./||')
+    artifact_dirs+=("$cache_dir_name")
+    echo "📦 Persistent cache enabled - will copy cache back from VM"
+fi
+
+# Check if any artifact directories exist
+should_copy=false
+for dir in "${artifact_dirs[@]}"; do
+    if [ -d "./$dir" ]; then
+        should_copy=true
+        break
+    fi
+done
+
+if [ "$should_copy" = true ]; then
     echo "Copying build artifacts back from VM..."
     
-    # Copy common artifact directories back
-    for dir in build artifacts dist; do
+    # Copy artifact directories back
+    for dir in "${artifact_dirs[@]}"; do
         if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d ~/workspace/$dir ]"; then
             echo "Copying $dir/ back..."
             rsync -av -e "sshpass -p admin ssh $SSH_OPTS" admin@$VM_IP:~/workspace/$dir/ ./$dir/ || true
@@ -345,7 +366,7 @@ if [ -d "./build" ] || [ -d "./artifacts" ] || [ -d "./dist" ]; then
     
     echo "✅ Artifacts copied back"
 else
-    echo "No standard artifact directories found, skipping artifact copy"
+    echo "No artifact directories found, skipping artifact copy"
 fi
 
 echo "🧹 ===== CLEANUP ====="
