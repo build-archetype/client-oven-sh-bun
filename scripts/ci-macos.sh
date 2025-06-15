@@ -346,46 +346,21 @@ create_and_run_vm() {
     
     log "✅ Workspace directory validated: $actual_workspace_dir"
     
-    # Prepare cache mount if persistent cache is enabled
-    local cache_mount_args=""
+    # Create cache directory in workspace if persistent cache is enabled
     if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ]; then
-        # Use centralized configuration
-        local host_cache_base="${BUILDKITE_CACHE_BASE:-./buildkite-cache}"
-        local vm_cache_path="${BUILDKITE_CACHE_MOUNT_PATH:-/buildkite-cache}"
+        local cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}"
+        log "🔧 Creating workspace cache directory: $cache_dir"
         
-        # Convert relative path to absolute path
-        host_cache_base="$(realpath "$host_cache_base")"
+        # Create cache structure in workspace - will be copied to VM via rsync
+        mkdir -p "$cache_dir"/{zig/global,zig/local,ccache,npm}
         
-        log "🔧 Setting up persistent cache mount: $host_cache_base -> $vm_cache_path"
-        
-        # Ensure host cache directory exists (should work now since it's workspace-relative)
-        if ! mkdir -p "$host_cache_base" 2>/dev/null; then
-            log "❌ Failed to create cache directory: $host_cache_base"
-            log "   Make sure the workspace is writable"
-            exit 1
-        fi
-        
-        # Create basic cache structure 
-        mkdir -p "$host_cache_base"/{zig/global,zig/local,ccache,npm}
-        
-        # Set proper permissions for cache directories
-        chmod -R 755 "$host_cache_base"
-        
-        # Add cache mount argument for Tart VM (remove leading slash for Tart mount name)
-        local mount_name=$(echo "$vm_cache_path" | sed 's|^/||')
-        cache_mount_args="--dir=${mount_name}:$host_cache_base"
-        
-        log "✅ Cache mount configured: ${mount_name} -> $host_cache_base"
-        log "   VM will access cache at: $vm_cache_path"
+        log "✅ Cache directory created in workspace (will be copied to VM)"
     fi
     
     log "Starting VM with workspace: $actual_workspace_dir"
-    if [ -n "$cache_mount_args" ]; then
-        log "Starting VM with persistent cache: $cache_mount_args"
-        tart run "$vm_name" --no-graphics --dir=workspace:"$actual_workspace_dir" $cache_mount_args > vm.log 2>&1 &
-    else
-        tart run "$vm_name" --no-graphics --dir=workspace:"$actual_workspace_dir" > vm.log 2>&1 &
-    fi
+    # Note: Cache will be part of workspace, so only need workspace mount
+    # run-vm-command.sh will rsync the entire workspace including cache
+    tart run "$vm_name" --no-graphics --dir=workspace:"$actual_workspace_dir" > vm.log 2>&1 &
     local vm_pid=$!
     
     # Wait for VM to be ready

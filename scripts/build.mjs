@@ -356,21 +356,21 @@ function printDuration(label, duration) {
 }
 
 async function downloadBuildArtifacts() {
-  // For persistent cache (macOS), just set environment variables to point cache to mounted directory
+  // For persistent cache (macOS), just set environment variables to point cache to workspace directory
   if (process.env.BUILDKITE_CACHE_TYPE === "persistent") {
     console.log("🔧 Setting up persistent cache environment for macOS build...");
     
-    // Use centralized cache mount path from environment
-    const cacheBase = process.env.BUILDKITE_CACHE_MOUNT_PATH || "/buildkite-cache";
+    // Use workspace-relative cache path (will be copied to VM via rsync)
+    const cacheBase = process.env.BUILDKITE_CACHE_BASE || "./buildkite-cache";
     
-    // Set environment variables for CMake and build tools to use persistent cache
+    // Set environment variables for CMake and build tools to use workspace cache
     process.env.ZIG_GLOBAL_CACHE_DIR = `${cacheBase}/zig/global`;
     process.env.ZIG_LOCAL_CACHE_DIR = `${cacheBase}/zig/local`;
     process.env.CCACHE_DIR = `${cacheBase}/ccache`;
     process.env.NPM_CONFIG_CACHE = `${cacheBase}/npm`;
     
     console.log("✅ Persistent cache environment configured:");
-    console.log(`   Cache mount path: ${cacheBase}`);
+    console.log(`   Cache base path: ${cacheBase} (workspace-relative)`);
     console.log(`   ZIG_GLOBAL_CACHE_DIR=${process.env.ZIG_GLOBAL_CACHE_DIR}`);
     console.log(`   ZIG_LOCAL_CACHE_DIR=${process.env.ZIG_LOCAL_CACHE_DIR}`);
     console.log(`   CCACHE_DIR=${process.env.CCACHE_DIR}`);

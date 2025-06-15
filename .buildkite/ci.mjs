@@ -414,12 +414,10 @@ function getBuildEnv(target, options) {
   if (os === "darwin") {
     env.BUILDKITE_CACHE_RESTORE = "ON";
     env.BUILDKITE_CACHE_SAVE = "ON";
-    // Use persistent cache - mounted from host to VM
+    // Use persistent cache - workspace-relative directory
     env.BUILDKITE_CACHE_TYPE = "persistent";
     // Host cache directory (workspace-relative for CI)
     env.BUILDKITE_CACHE_BASE = env.BUILDKITE_CACHE_BASE || "./buildkite-cache";
-    // Cache will be mounted at this path inside VM
-    env.BUILDKITE_CACHE_MOUNT_PATH = "/buildkite-cache";
   }
 
   return env;
