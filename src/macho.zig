@@ -145,7 +145,11 @@ pub const MachoFile = struct {
 
         // So, total increase in size is size of new section + size of hashes for the new pages added
         // due to the section
-        try self.data.ensureUnusedCapacity(@intCast(size_diff + size_of_new_hashes));
+        if (size_diff > 0) {
+            try self.data.ensureUnusedCapacity(@as(usize, @intCast(size_diff)) + size_of_new_hashes);
+        } else {
+            try self.data.ensureUnusedCapacity(size_of_new_hashes);
+        }
 
         const code_sign_cmd: ?*align(1) macho.linkedit_data_command =
             if (code_sign_cmd_idx) |idx|
