@@ -349,13 +349,36 @@ create_and_run_vm() {
     # Clean workspace to prevent build pollution (preserve cache)
     log "🧹 Cleaning workspace to prevent build pollution..."
     
-    # Always clean build artifacts and temporary files to ensure fresh builds
+    # First, ensure source code is in clean state (handle incremental Buildkite checkouts)
+    log "🔄 Ensuring clean git state..."
+    
+    # Clean any untracked files and reset working directory
+    if [ -d ".git" ]; then
+        # Remove all untracked files and directories (including ignored ones)
+        git clean -fxd || true
+        
+        # Reset any modified files to HEAD state
+        git reset --hard HEAD || true
+        
+        # Clean any git cruft
+        git gc --prune=now || true
+        
+        log "✅ Git workspace cleaned - fresh source code state"
+    else
+        log "⚠️  No .git directory found - assuming fresh checkout"
+    fi
+    
+    # Then clean build artifacts and temporary files to ensure fresh builds
+    log "🗑️  Removing build artifacts and temporary files..."
     rm -rf ./build ./artifacts ./dist ./tmp ./.temp || true
     rm -rf ./node_modules/.cache || true  # Clear npm cache but keep node_modules
     
     # Clean any CMake cache files (but preserve our buildkite-cache)
     find . -name "CMakeCache.txt" -delete 2>/dev/null || true
     find . -name "CMakeFiles" -type d -exec rm -rf {} + 2>/dev/null || true
+    
+    # Clean any other common build/temp directories (but preserve source and cache)
+    rm -rf ./.cache ./coverage ./logs || true
     
     # For linking steps, ensure completely fresh environment (no cache pollution)
     if [ "${BUN_LINK_ONLY:-}" = "ON" ]; then

@@ -418,6 +418,10 @@ function getBuildEnv(target, options) {
     env.BUILDKITE_CACHE_TYPE = "persistent";
     // Host cache directory (workspace-relative for CI)
     env.BUILDKITE_CACHE_BASE = env.BUILDKITE_CACHE_BASE || "./buildkite-cache";
+    
+    // Force clean checkout to ensure source code consistency
+    // This disables cache reading (as per build.mjs logic) but ensures fresh source
+    env.BUILDKITE_CLEAN_CHECKOUT = "true";
   }
 
   return env;
