@@ -350,28 +350,26 @@ create_and_run_vm() {
     local cache_mount_args=""
     if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ]; then
         # Use centralized configuration
-        local host_cache_base="${BUILDKITE_CACHE_BASE:-/opt/buildkite-cache}"
+        local host_cache_base="${BUILDKITE_CACHE_BASE:-./buildkite-cache}"
         local vm_cache_path="${BUILDKITE_CACHE_MOUNT_PATH:-/buildkite-cache}"
+        
+        # Convert relative path to absolute path
+        host_cache_base="$(realpath "$host_cache_base")"
         
         log "🔧 Setting up persistent cache mount: $host_cache_base -> $vm_cache_path"
         
-        # Ensure host cache directory exists with proper permissions
+        # Ensure host cache directory exists (should work now since it's workspace-relative)
         if ! mkdir -p "$host_cache_base" 2>/dev/null; then
-            log "⚠️  Cannot create cache directory as current user, trying with sudo..."
-            sudo mkdir -p "$host_cache_base"
-            sudo chmod 755 "$host_cache_base"
+            log "❌ Failed to create cache directory: $host_cache_base"
+            log "   Make sure the workspace is writable"
+            exit 1
         fi
         
-        # Ensure the directory is accessible by the buildkite-agent user
-        # Set permissions to allow read/write access for everyone (cache is ephemeral anyway)
-        chmod -R 777 "$host_cache_base" 2>/dev/null || sudo chmod -R 777 "$host_cache_base"
+        # Create basic cache structure 
+        mkdir -p "$host_cache_base"/{zig/global,zig/local,ccache,npm}
         
-        # Create basic cache structure
-        mkdir -p "$host_cache_base"/{zig/global,zig/local,ccache,npm} 2>/dev/null || \
-        sudo mkdir -p "$host_cache_base"/{zig/global,zig/local,ccache,npm}
-        
-        # Ensure subdirectories also have proper permissions
-        chmod -R 777 "$host_cache_base" 2>/dev/null || sudo chmod -R 777 "$host_cache_base"
+        # Set proper permissions for cache directories
+        chmod -R 755 "$host_cache_base"
         
         # Add cache mount argument for Tart VM (remove leading slash for Tart mount name)
         local mount_name=$(echo "$vm_cache_path" | sed 's|^/||')

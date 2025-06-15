@@ -416,8 +416,8 @@ function getBuildEnv(target, options) {
     env.BUILDKITE_CACHE_SAVE = "ON";
     // Use persistent cache - mounted from host to VM
     env.BUILDKITE_CACHE_TYPE = "persistent";
-    // Host cache directory (can be customized per agent)
-    env.BUILDKITE_CACHE_BASE = env.BUILDKITE_CACHE_BASE || "/opt/buildkite-cache";
+    // Host cache directory (workspace-relative for CI)
+    env.BUILDKITE_CACHE_BASE = env.BUILDKITE_CACHE_BASE || "./buildkite-cache";
     // Cache will be mounted at this path inside VM
     env.BUILDKITE_CACHE_MOUNT_PATH = "/buildkite-cache";
   }
