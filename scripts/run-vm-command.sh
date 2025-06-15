@@ -335,13 +335,15 @@ echo "📤 ===== COPYING ARTIFACTS BACK ====="
 # Always copy build artifacts
 artifact_dirs=("build" "artifacts" "dist")
 
-# Add cache to copy back if persistent cache is enabled
-if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ]; then
+# Add cache to copy back if persistent cache is enabled AND this is not a linking step
+if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ] && [ "${BUN_LINK_ONLY:-}" != "ON" ]; then
     cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}"
     # Remove ./ prefix if present for directory name check
     cache_dir_name=$(echo "$cache_dir" | sed 's|^\./||')
     artifact_dirs+=("$cache_dir_name")
     echo "📦 Persistent cache enabled - will copy cache back from VM"
+elif [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ] && [ "${BUN_LINK_ONLY:-}" = "ON" ]; then
+    echo "🔗 Linking step detected - skipping cache copy back (linking doesn't generate cache)"
 fi
 
 # Check if any artifact directories exist
