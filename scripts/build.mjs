@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { spawn as nodeSpawn } from "node:child_process";
+import { spawn as nodeSpawn, execSync } from "node:child_process";
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, join, relative, resolve } from "node:path";
 import {
@@ -385,22 +385,41 @@ async function downloadBuildArtifacts() {
     console.log(`   ZIG_LOCAL_CACHE_DIR=${process.env.ZIG_LOCAL_CACHE_DIR}`);
     console.log(`   CCACHE_DIR=${process.env.CCACHE_DIR}`);
     console.log(`   NPM_CONFIG_CACHE=${process.env.NPM_CONFIG_CACHE}`);
-    
-    return;
   }
   
-  // Original artifact download logic for non-macOS platforms
+  // Check for required artifacts when BUN_LINK_ONLY=ON (regardless of cache type)
   if (process.env.BUN_LINK_ONLY === "ON") {
     console.log("🔗 BUN_LINK_ONLY=ON detected");
     
-    // Get build path from environment or default
+    // Use the same path resolution as before but add debugging
     const buildPath = process.env.CMAKE_BINARY_DIR || resolve("build");
+    
+    console.log(`CMAKE_BINARY_DIR: ${process.env.CMAKE_BINARY_DIR}`);
+    console.log(`Build path: ${buildPath}`);
+    console.log(`Current working directory: ${process.cwd()}`);
     
     // Check for required artifacts in expected locations
     const requiredArtifacts = [
       join(buildPath, "libbun-profile.a"),
       join(buildPath, "bun-zig.o"),
     ];
+    
+    console.log("Required artifacts:");
+    requiredArtifacts.forEach(file => console.log(`   ${file}`));
+    
+    // List what's actually in the build directory
+    const buildDir = resolve("build");
+    if (existsSync(buildDir)) {
+      console.log(`Contents of ${buildDir}:`);
+      try {
+        const output = execSync(`find "${buildDir}" -name "*.a" -o -name "*.o" | head -20`, { encoding: "utf8" });
+        console.log(output || "  No .a or .o files found");
+      } catch (error) {
+        console.log("  Error listing files");
+      }
+    } else {
+      console.log(`Build directory ${buildDir} does not exist`);
+    }
     
     const missingArtifacts = requiredArtifacts.filter(file => !existsSync(file));
     
