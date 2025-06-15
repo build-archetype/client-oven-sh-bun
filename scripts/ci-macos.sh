@@ -6,6 +6,81 @@ BASE_VM_IMAGE="${BASE_VM_IMAGE:-}"  # Will be determined based on platform
 FORCE_BASE_IMAGE_REBUILD="${FORCE_BASE_IMAGE_REBUILD:-false}"
 DISK_USAGE_THRESHOLD="${DISK_USAGE_THRESHOLD:-80}"  # For monitoring only, no cleanup action
 
+# Build Result Caching Functions (using persistent filesystem cache)
+generate_cache_key() {
+    local build_type="$1"  # "cpp" or "zig"
+    local base_key="${BUILDKITE_COMMIT}"
+    
+    case "$build_type" in
+        "cpp")
+            # Hash all C++ source files that affect C++ compilation
+            local cpp_hash=$(find src/ cmake/ -name '*.cpp' -o -name '*.c' -o -name '*.h' -o -name '*.hpp' -o -name 'CMakeLists.txt' 2>/dev/null | sort | xargs sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1)
+            echo "${base_key}-${cpp_hash}"
+            ;;
+        "zig") 
+            # Hash all Zig source files that affect Zig compilation
+            local zig_hash=$(find src/ -name '*.zig' 2>/dev/null | sort | xargs sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1)
+            echo "${base_key}-${zig_hash}"
+            ;;
+    esac
+}
+
+check_build_cache() {
+    local build_type="$1"  # "cpp" or "zig"
+    local cache_key=$(generate_cache_key "$build_type")
+    local cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}/build-results"
+    
+    log "🔍 Checking build cache for ${build_type} (key: ${cache_key})"
+    
+    # Check if cached build result exists in persistent cache
+    case "$build_type" in
+        "cpp")
+            if [ -f "${cache_dir}/${cache_key}/libbun-profile.a" ]; then
+                log "✅ Build cache HIT for C++ compilation"
+                mkdir -p build/release
+                cp "${cache_dir}/${cache_key}/libbun-profile.a" build/release/
+                return 0
+            fi
+            ;;
+        "zig")
+            if [ -f "${cache_dir}/${cache_key}/bun-zig.o" ]; then
+                log "✅ Build cache HIT for Zig compilation"
+                mkdir -p build/release  
+                cp "${cache_dir}/${cache_key}/bun-zig.o" build/release/
+                return 0
+            fi
+            ;;
+    esac
+    
+    log "❌ Build cache MISS for ${build_type} - will build from source"
+    return 1
+}
+
+upload_build_cache() {
+    local build_type="$1"  # "cpp" or "zig"
+    local cache_key=$(generate_cache_key "$build_type")
+    local cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}/build-results"
+    
+    log "📦 Caching build results for ${build_type} (key: ${cache_key})"
+    
+    case "$build_type" in
+        "cpp")
+            if [ -f "build/release/libbun-profile.a" ]; then
+                mkdir -p "${cache_dir}/${cache_key}"
+                cp "build/release/libbun-profile.a" "${cache_dir}/${cache_key}/"
+                log "✅ C++ build results cached to ${cache_dir}/${cache_key}/"
+            fi
+            ;;
+        "zig")
+            if [ -f "build/release/bun-zig.o" ]; then
+                mkdir -p "${cache_dir}/${cache_key}"
+                cp "build/release/bun-zig.o" "${cache_dir}/${cache_key}/"
+                log "✅ Zig build results cached to ${cache_dir}/${cache_key}/"
+            fi
+            ;;
+    esac
+}
+
 # Function to log messages with timestamps
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
@@ -460,10 +535,17 @@ create_and_run_vm() {
 
     # Execute the command
     log "Executing command in VM: $command"
-    ./scripts/run-vm-command.sh "$vm_name" "$command"
+    profile_build_step "VM-$BUILD_TYPE-Build" ./scripts/run-vm-command.sh "$vm_name" "$command"
 
-    # Upload logs
+    # Upload build result cache after successful build
+    if [ "$BUILD_TYPE" = "cpp" ] || [ "$BUILD_TYPE" = "zig" ]; then
+        log "🎯 Uploading build result cache for future builds..."
+        upload_build_cache "$BUILD_TYPE"
+    fi
+
+    # Upload logs and timing data
     buildkite-agent artifact upload vm.log || true
+    buildkite-agent artifact upload build_timings.csv || true
 
     # Cleanup - use robust cleanup function
     cleanup_vm "$vm_name"
@@ -499,6 +581,115 @@ show_usage() {
     echo "  BASE_VM_IMAGE=my-custom-image $0            # Use custom base image"
     echo ""
     echo "Note: For VM cleanup, use ./scripts/build-macos-vm.sh which handles all cleanup operations"
+}
+
+# Build Time Profiling Functions  
+profile_build_step() {
+    local step_name="$1"
+    shift  # Remove step_name from arguments
+    local start_time=$(date +%s)
+    local start_readable=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    log "⏱️  Starting: $step_name at $start_readable"
+    
+    # Execute the actual command
+    "$@"
+    local exit_code=$?
+    
+    local end_time=$(date +%s)
+    local end_readable=$(date '+%Y-%m-%d %H:%M:%S')
+    local duration=$((end_time - start_time))
+    local duration_readable=$(format_duration $duration)
+    
+    log "⏱️  Completed: $step_name in $duration_readable"
+    
+    # Report to Buildkite with annotation
+    if command -v buildkite-agent >/dev/null 2>&1; then
+        buildkite-agent annotate --style info "⏱️ **$step_name**: $duration_readable" --context "build-timing-$step_name"
+    fi
+    
+    # Store timing data for analysis
+    echo "$(date '+%Y-%m-%d %H:%M:%S'),$step_name,$duration,$start_time,$end_time" >> build_timings.csv
+    
+    return $exit_code
+}
+
+format_duration() {
+    local seconds=$1
+    if [ $seconds -ge 3600 ]; then
+        printf "%dh %dm %ds" $((seconds/3600)) $((seconds%3600/60)) $((seconds%60))
+    elif [ $seconds -ge 60 ]; then
+        printf "%dm %ds" $((seconds/60)) $((seconds%60))
+    else
+        printf "%ds" $seconds
+    fi
+}
+
+# Hermetic Dependency Verification Functions
+verify_tool_versions() {
+    log "🔒 Verifying hermetic tool versions for reproducible builds..."
+    
+    # Create dependency manifest
+    local manifest_file="dependency_manifest.txt"
+    echo "# Build Tool Versions - $(date '+%Y-%m-%d %H:%M:%S')" > "$manifest_file"
+    echo "# Commit: ${BUILDKITE_COMMIT:-unknown}" >> "$manifest_file"
+    echo "# Build: ${BUILDKITE_BUILD_NUMBER:-unknown}" >> "$manifest_file"
+    echo "" >> "$manifest_file"
+    
+    # Check and record key tool versions
+    local tools=(
+        "bun:bun --version"
+        "cmake:cmake --version | head -1"
+        "ninja:ninja --version"
+        "clang:clang --version | head -1"
+        "rustc:rustc --version"
+        "cargo:cargo --version"
+        "llvm-config:llvm-config --version"
+        "ccache:ccache --version | head -1"
+        "buildkite-agent:buildkite-agent --version"
+        "git:git --version"
+        "make:make --version | head -1"
+        "python3:python3 --version"
+    )
+    
+    local all_versions_ok=true
+    
+    for tool_spec in "${tools[@]}"; do
+        local tool_name="${tool_spec%%:*}"
+        local version_cmd="${tool_spec#*:}"
+        
+        if command -v "${tool_name}" >/dev/null 2>&1; then
+            local version_output=$(eval "$version_cmd" 2>/dev/null || echo "version check failed")
+            echo "$tool_name=$version_output" >> "$manifest_file"
+            log "✅ $tool_name: $version_output"
+        else
+            echo "$tool_name=NOT_FOUND" >> "$manifest_file"
+            log "❌ $tool_name: NOT FOUND"
+            all_versions_ok=false
+        fi
+    done
+    
+    # Report to Buildkite
+    if command -v buildkite-agent >/dev/null 2>&1; then
+        local status_emoji="✅"
+        local status_text="All tools verified"
+        if [ "$all_versions_ok" = false ]; then
+            status_emoji="⚠️"
+            status_text="Some tools missing"
+        fi
+        buildkite-agent annotate --style info "$status_emoji **Tool Versions**: $status_text - see artifact" --context "tool-versions"
+    fi
+    
+    # Upload manifest for debugging/auditing
+    if command -v buildkite-agent >/dev/null 2>&1; then
+        buildkite-agent artifact upload "$manifest_file" || true
+    fi
+    
+    if [ "$all_versions_ok" = false ]; then
+        log "⚠️ Some tools are missing - build may fail"
+    else
+        log "🔒 All hermetic dependencies verified"
+    fi
 }
 
 # Main execution
@@ -593,6 +784,37 @@ main() {
     log "VM Name: $vm_name"
     log "Command: $full_command"
     log "Workspace: $workspace_dir"
+
+    # Verify hermetic dependencies before build
+    verify_tool_versions
+
+    # Check build result cache before VM creation
+    log "🎯 Checking build result cache..."
+    
+    # Determine build type from environment variables
+    if [ "${BUN_CPP_ONLY:-}" = "ON" ]; then
+        if check_build_cache "cpp"; then
+            log "🚀 C++ build cache hit - skipping VM build entirely"
+            # Upload artifact as if we built it (for downstream steps)
+            buildkite-agent artifact upload "build/release/libbun-profile.a"
+            return 0
+        fi
+        BUILD_TYPE="cpp"
+    elif [ "${BUN_ZIG_ONLY:-}" = "ON" ] || [[ "$full_command" == *"--target bun-zig"* ]]; then
+        if check_build_cache "zig"; then
+            log "🚀 Zig build cache hit - skipping VM build entirely"
+            # Upload artifact as if we built it (for downstream steps)
+            buildkite-agent artifact upload "build/release/bun-zig.o"
+            return 0
+        fi
+        BUILD_TYPE="zig"
+    elif [ "${BUN_LINK_ONLY:-}" = "ON" ]; then
+        log "🔗 Linking step - no build result caching (always fresh)"
+        BUILD_TYPE="link"
+    else
+        log "📋 Full build - no build result caching" 
+        BUILD_TYPE="full"
+    fi
 
     # Setup cache environment
     setup_cache_environment

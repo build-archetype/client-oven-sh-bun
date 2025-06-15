@@ -412,8 +412,6 @@ function getBuildEnv(target, options) {
 
   // Add persistent cache configuration for macOS only
   if (os === "darwin") {
-    env.BUILDKITE_CACHE_RESTORE = "ON";
-    env.BUILDKITE_CACHE_SAVE = "ON";
     // Use persistent cache - workspace-relative directory
     env.BUILDKITE_CACHE_TYPE = "persistent";
     // Host cache directory (workspace-relative for CI)
