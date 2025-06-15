@@ -402,7 +402,7 @@ function printDuration(label, duration) {
 }
 
 async function downloadBuildArtifacts() {
-  // For persistent cache (macOS), set environment variables to point cache to workspace directory
+  // Set up persistent cache environment for ALL macOS build steps (not just linking)
   if (process.env.BUILDKITE_CACHE_TYPE === "persistent") {
     console.log("🔧 Setting up persistent cache environment for macOS build...");
     
@@ -423,7 +423,7 @@ async function downloadBuildArtifacts() {
     console.log(`   NPM_CONFIG_CACHE=${process.env.NPM_CONFIG_CACHE}`);
   }
   
-  // Download build artifacts when BUN_LINK_ONLY=ON (linking step)
+  // Download build artifacts when BUN_LINK_ONLY=ON (linking step only)
   if (process.env.BUN_LINK_ONLY === "ON") {
     console.log("🔗 BUN_LINK_ONLY=ON detected - downloading artifacts from previous build steps");
     
