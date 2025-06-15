@@ -13,6 +13,10 @@ if(NOT DEFINED BUILD_PATH)
   message(FATAL_ERROR "BUILD_PATH must be defined")
 endif()
 
+if(NOT DEFINED WORKSPACE_DIR)
+  message(FATAL_ERROR "WORKSPACE_DIR must be defined")
+endif()
+
 if(NOT DEFINED CCACHE_CACHE_DIR)
   set(CCACHE_CACHE_DIR "${BUILD_PATH}/cache-ephemeral/ccache")
 endif()
@@ -108,8 +112,7 @@ function(restore_cache CACHE_TYPE CACHE_DIR)
   # This implements: current branch -> main branch -> fresh build
   find_program(NODE node REQUIRED)
   execute_process(
-    COMMAND ${NODE} scripts/get-last-build-id.mjs
-    WORKING_DIRECTORY ${BUILD_PATH}/..
+    COMMAND ${NODE} ${WORKSPACE_DIR}/scripts/get-last-build-id.mjs
     OUTPUT_VARIABLE CACHE_BUILD_ID
     ERROR_VARIABLE CACHE_SEARCH_LOG
     RESULT_VARIABLE CACHE_SEARCH_RESULT

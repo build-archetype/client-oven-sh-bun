@@ -50,6 +50,7 @@ if(BUILDKITE_CACHE_RESTORE)
       -DCCACHE_CACHE_DIR=${EPHEMERAL_CCACHE_DIR}
       -DZIG_CACHE_DIR=${EPHEMERAL_ZIG_DIR}
       -DBUILD_PATH=${BUILD_PATH}
+      -DWORKSPACE_DIR=${CMAKE_SOURCE_DIR}
       -DACTION=restore
       -P ${CMAKE_SOURCE_DIR}/cmake/scripts/ManageBuildkiteCache.cmake
     COMMENT "Restoring build caches from Buildkite artifacts"
@@ -65,6 +66,7 @@ if(BUILDKITE_CACHE_SAVE)
       -DCCACHE_CACHE_DIR=${EPHEMERAL_CCACHE_DIR}
       -DZIG_CACHE_DIR=${EPHEMERAL_ZIG_DIR}
       -DBUILD_PATH=${BUILD_PATH}
+      -DWORKSPACE_DIR=${CMAKE_SOURCE_DIR}
       -DACTION=save
       -P ${CMAKE_SOURCE_DIR}/cmake/scripts/ManageBuildkiteCache.cmake
     COMMENT "Saving build caches to Buildkite artifacts"
