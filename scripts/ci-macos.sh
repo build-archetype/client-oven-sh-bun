@@ -510,6 +510,32 @@ main() {
     # Get the command to run (default to build command if none provided)
     local command="${1:-./scripts/runner.node.mjs --step=darwin-x64-build-bun}"
     
+    # Add cache configure flags to the command if cache operations are enabled
+    if [ "$cache_restore" = true ] || [ "$cache_save" = true ]; then
+        log "Cache operations enabled - adding cmake configure flags"
+        
+        # Extract the base command and add cache flags
+        if [[ "$command" =~ ^(.*)(bun run build:[a-z]+)(.*)$ ]]; then
+            local prefix="${BASH_REMATCH[1]}"
+            local build_cmd="${BASH_REMATCH[2]}"
+            local suffix="${BASH_REMATCH[3]}"
+            
+            # Add cache flags to the build command
+            local cache_flags=""
+            if [ "$cache_restore" = true ]; then
+                cache_flags="$cache_flags -DBUILDKITE_CACHE_RESTORE=ON"
+            fi
+            if [ "$cache_save" = true ]; then
+                cache_flags="$cache_flags -DBUILDKITE_CACHE_SAVE=ON"
+            fi
+            
+            command="$prefix$build_cmd$cache_flags$suffix"
+            log "Updated command with cache flags: $command"
+        else
+            log "Warning: Could not parse build command to add cache flags: $command"
+        fi
+    fi
+    
     # Build the full command with cache operations if requested
     local full_command=""
     

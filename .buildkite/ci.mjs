@@ -417,19 +417,10 @@ function getBuildEnv(target, options) {
  * @returns {string}
  */
 function getBuildCommand(target, options) {
-  const { os, profile } = target;
-  
-  // For ephemeral macOS VMs, enable cache management
-  const cacheFlags = os === "darwin" ? 
-    ["-DBUILDKITE_CACHE_RESTORE=ON", "-DBUILDKITE_CACHE_SAVE=ON"] : 
-    [];
+  const { profile } = target;
   
   const label = profile || "release";
   const baseCommand = `bun run build:${label}`;
-  
-  if (cacheFlags.length > 0) {
-    return `${baseCommand} ${cacheFlags.join(" ")}`;
-  }
   
   return baseCommand;
 }
@@ -574,16 +565,13 @@ function getLinkBunStep(platform, options) {
       BUN_LINK_ONLY: "ON",
       ...getBuildEnv(platform, options),
     },
-    command: os === "darwin" ? [
-      "cmake --build . --target cache-restore || true",
-      `${command} --target bun`
-    ] : `${command} --target bun`,
+    command: `${command} --target bun`,
   };
-  // If macOS, run in VM - use new cache flags for cleaner commands
+  // If macOS, run in VM - no cache operations, just link the artifacts from current build
   if (platform.os === "darwin") {
     step.command = [
       `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} --cache-restore "${command} --target bun" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target bun" "${process.cwd()}"`
     ];
   }
   return step;
