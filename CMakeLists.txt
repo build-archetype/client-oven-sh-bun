@@ -37,7 +37,7 @@ include(CompilerFlags)
 # --- Tools ---
 
 include(SetupGit)
-include(SetupBuildkite)
+include(SetupBuildkiteCache)
 include(SetupBun)
 include(SetupEsbuild)
 include(SetupZig)

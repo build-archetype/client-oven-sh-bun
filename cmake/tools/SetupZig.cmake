@@ -52,28 +52,33 @@ optionx(ZIG_OPTIMIZE "ReleaseFast|ReleaseSafe|ReleaseSmall|Debug" "The Zig optim
 # Change to "bc" to experiment, "Invalid record" means it is not valid output.
 optionx(ZIG_OBJECT_FORMAT "obj|bc" "Output file format for Zig object files" DEFAULT obj)
 
-# Setup Zig cache directories - prioritize CACHE_PATH over environment variables
-if(CACHE_PATH)
-  # Use CACHE_PATH if explicitly set (our cache strategy)
-  optionx(ZIG_LOCAL_CACHE_DIR FILEPATH "The path to local the zig cache directory" DEFAULT ${CACHE_PATH}/zig/local)
-  optionx(ZIG_GLOBAL_CACHE_DIR FILEPATH "The path to the global zig cache directory" DEFAULT ${CACHE_PATH}/zig/global)
-  message(STATUS "Using Zig cache directories from CACHE_PATH:")
-  message(STATUS "  ZIG_LOCAL_CACHE_DIR: ${ZIG_LOCAL_CACHE_DIR}")
-  message(STATUS "  ZIG_GLOBAL_CACHE_DIR: ${ZIG_GLOBAL_CACHE_DIR}")
-elseif(DEFINED ENV{ZIG_LOCAL_CACHE_DIR} AND DEFINED ENV{ZIG_GLOBAL_CACHE_DIR})
-  # Use environment variables as fallback (for legacy compatibility)
-  set(ZIG_LOCAL_CACHE_DIR $ENV{ZIG_LOCAL_CACHE_DIR})
-  set(ZIG_GLOBAL_CACHE_DIR $ENV{ZIG_GLOBAL_CACHE_DIR})
-  message(STATUS "Using Zig cache directories from environment:")
-  message(STATUS "  ZIG_LOCAL_CACHE_DIR: ${ZIG_LOCAL_CACHE_DIR}")
-  message(STATUS "  ZIG_GLOBAL_CACHE_DIR: ${ZIG_GLOBAL_CACHE_DIR}")
-else()
-  # Default fallback
+# Use overrides from cache manager if set, otherwise use defaults
+if(DEFINED ZIG_LOCAL_CACHE_DIR_OVERRIDE)
+  optionx(ZIG_LOCAL_CACHE_DIR FILEPATH "The path to local the zig cache directory" DEFAULT ${ZIG_LOCAL_CACHE_DIR_OVERRIDE})
+  optionx(ZIG_GLOBAL_CACHE_DIR FILEPATH "The path to the global zig cache directory" DEFAULT ${ZIG_GLOBAL_CACHE_DIR_OVERRIDE})
+  # Ensure the override directories exist
+  file(MAKE_DIRECTORY ${ZIG_LOCAL_CACHE_DIR_OVERRIDE})
+  file(MAKE_DIRECTORY ${ZIG_GLOBAL_CACHE_DIR_OVERRIDE})
+  message(STATUS "Using ephemeral Zig cache directories:")
+  message(STATUS "  Local: ${ZIG_LOCAL_CACHE_DIR_OVERRIDE}")
+  message(STATUS "  Global: ${ZIG_GLOBAL_CACHE_DIR_OVERRIDE}")
+elseif(CI AND APPLE)
+  # For CI on macOS, use build directory for reliable permissions
   optionx(ZIG_LOCAL_CACHE_DIR FILEPATH "The path to local the zig cache directory" DEFAULT ${BUILD_PATH}/cache/zig/local)
   optionx(ZIG_GLOBAL_CACHE_DIR FILEPATH "The path to the global zig cache directory" DEFAULT ${BUILD_PATH}/cache/zig/global)
+  file(MAKE_DIRECTORY ${BUILD_PATH}/cache/zig/local)
+  file(MAKE_DIRECTORY ${BUILD_PATH}/cache/zig/global)
+  message(STATUS "Using macOS CI Zig cache directories:")
+  message(STATUS "  Local: ${BUILD_PATH}/cache/zig/local")
+  message(STATUS "  Global: ${BUILD_PATH}/cache/zig/global")
+else()
+  optionx(ZIG_LOCAL_CACHE_DIR FILEPATH "The path to local the zig cache directory" DEFAULT ${BUILD_PATH}/cache/zig/local)
+  optionx(ZIG_GLOBAL_CACHE_DIR FILEPATH "The path to the global zig cache directory" DEFAULT ${BUILD_PATH}/cache/zig/global)
+  file(MAKE_DIRECTORY ${BUILD_PATH}/cache/zig/local)
+  file(MAKE_DIRECTORY ${BUILD_PATH}/cache/zig/global)
   message(STATUS "Using default Zig cache directories:")
-  message(STATUS "  ZIG_LOCAL_CACHE_DIR: ${ZIG_LOCAL_CACHE_DIR}")
-  message(STATUS "  ZIG_GLOBAL_CACHE_DIR: ${ZIG_GLOBAL_CACHE_DIR}")
+  message(STATUS "  Local: ${BUILD_PATH}/cache/zig/local")
+  message(STATUS "  Global: ${BUILD_PATH}/cache/zig/global")
 endif()
 
 # TEMPORARY FIX: Commented out to avoid Zig compiler crash in Response.zig

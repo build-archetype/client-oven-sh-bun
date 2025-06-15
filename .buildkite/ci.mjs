@@ -297,11 +297,13 @@ function getCppAgent(platform, options) {
   const { os, arch } = platform;
 
   if (os === "darwin") {
+    // Use Tart VMs for macOS
     return {
-      queue: "darwin",
+      queue: `tart-darwin`,
       os,
-      arch: arch === "aarch64" ? "arm64" : arch,
-      tart: "true"
+      arch,
+      "vm-image": `macos-${arch}-build`,
+      "ephemeral": true,
     };
   }
 
@@ -406,14 +408,6 @@ function getBuildEnv(target, options) {
     MACOS_VM_MEMORY: macOSVmResources.memory.toString(),
     MACOS_VM_CPU: macOSVmResources.cpu.toString(),
     MACOS_VM_CONFIG_DESCRIPTION: macOSVmResources.description,
-    // ccache environment variables (managed via CACHE_PATH in CMake)
-    CCACHE_BASEDIR: "$PWD",
-    CCACHE_NOHASHDIR: "1", 
-    CCACHE_FILECLONE: "1",
-    CCACHE_DEBUG: "1",
-    CCACHE_MAXSIZE: "100G",
-    CCACHE_SLOPPINESS: "pch_defines,time_macros,locale,random_seed,clang_index_store,gcno_cwd",
-    // Note: Zig cache directories are now managed via CACHE_PATH in CMake, not environment variables
   };
 }
 
@@ -423,10 +417,21 @@ function getBuildEnv(target, options) {
  * @returns {string}
  */
 function getBuildCommand(target, options) {
-  const { profile } = target;
-
+  const { os, profile } = target;
+  
+  // For ephemeral macOS VMs, enable cache management
+  const cacheFlags = os === "darwin" ? 
+    ["-DBUILDKITE_CACHE_RESTORE=ON", "-DBUILDKITE_CACHE_SAVE=ON"] : 
+    [];
+  
   const label = profile || "release";
-  return `bun run build:${label}`;
+  const baseCommand = `bun run build:${label}`;
+  
+  if (cacheFlags.length > 0) {
+    return `${baseCommand} ${cacheFlags.join(" ")}`;
+  }
+  
+  return baseCommand;
 }
 
 /**
@@ -442,8 +447,6 @@ function getBuildVendorStep(platform, options) {
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
     env: {
-      BUILDKITE_CACHE: "ON",
-      BUILDKITE_GROUP_KEY: getTargetKey(platform),
       ...getBuildEnv(platform, options),
     },
     command: `${getBuildCommand(platform, options)} --target dependencies`,
@@ -465,6 +468,8 @@ function getBuildVendorStep(platform, options) {
  */
 function getBuildCppStep(platform, options) {
   const command = getBuildCommand(platform, options);
+  const { os } = platform;
+  
   const step = {
     key: `${getTargetKey(platform)}-build-cpp`,
     label: `${getTargetLabel(platform)} - build-cpp`,
@@ -473,22 +478,23 @@ function getBuildCppStep(platform, options) {
     cancel_on_build_failing: isMergeQueue(),
     env: {
       BUN_CPP_ONLY: "ON",
-      BUILDKITE_CACHE: "ON",
-      BUILDKITE_GROUP_KEY: getTargetKey(platform),
       ...getBuildEnv(platform, options),
     },
     // Build C++ components and dependencies separately for better caching
     command: [
+      // Add cache restore before build
+      os === "darwin" ? "cmake --build . --target cache-restore || true" : "",
       `${command} --target bun`, 
       `${command} --target dependencies`,
-      `${command} --target upload-all-caches || echo "Cache upload failed (non-fatal)"`
-    ],
+      // Add cache save after build
+      os === "darwin" ? "cmake --build . --target cache-save || true" : "",
+    ].filter(Boolean),
   };
   // If macOS, run in VM - combine all commands in single VM to preserve ccache
   if (platform.os === "darwin") {
     step.command = [
       `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target bun && ${command} --target dependencies && (${command} --target upload-all-caches || echo 'Cache upload failed (non-fatal)')" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} "cmake --build . --target cache-restore || true && ${command} --target bun && ${command} --target dependencies && (cmake --build . --target cache-save || true)" "${process.cwd()}"`
     ];
   }
   return step;
@@ -517,6 +523,9 @@ function getBuildToolchain(target) {
  */
 function getBuildZigStep(platform, options) {
   const toolchain = getBuildToolchain(platform);
+  const { os } = platform;
+  const command = getBuildCommand(platform, options);
+  
   const step = {
     key: `${getTargetKey(platform)}-build-zig`,
     label: `${getTargetLabel(platform)} - build-zig`,
@@ -524,21 +533,22 @@ function getBuildZigStep(platform, options) {
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
     env: {
-      BUILDKITE_CACHE: "ON",
-      BUILDKITE_GROUP_KEY: getTargetKey(platform),
       ...getBuildEnv(platform, options),
     },
     command: [
-      `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
-      `${getBuildCommand(platform, options)} --target upload-all-caches || echo "Cache upload failed (non-fatal)"`
-    ],
+      // Add cache restore before build
+      os === "darwin" ? "cmake --build . --target cache-restore || true" : "",
+      `${command} --target bun-zig --toolchain ${toolchain}`,
+      // Add cache save after build
+      os === "darwin" ? "cmake --build . --target cache-save || true" : "",
+    ].filter(Boolean),
     timeout_in_minutes: 35,
   };
   // If macOS, run in VM - combine all commands in single VM to preserve zig cache
   if (platform.os === "darwin") {
     step.command = [
       `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain} && (${getBuildCommand(platform, options)} --target upload-all-caches || echo 'Cache upload failed (non-fatal)')" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} "cmake --build . --target cache-restore || true && ${command} --target bun-zig --toolchain ${toolchain} && (cmake --build . --target cache-save || true)" "${process.cwd()}"`
     ];
   }
   return step;
@@ -550,6 +560,9 @@ function getBuildZigStep(platform, options) {
  * @returns {Step}
  */
 function getLinkBunStep(platform, options) {
+  const { os } = platform;
+  const command = getBuildCommand(platform, options);
+  
   const step = {
     key: `${getTargetKey(platform)}-build-bun`,
     label: `${getTargetLabel(platform)} - build-bun (link)`,
@@ -559,17 +572,18 @@ function getLinkBunStep(platform, options) {
     cancel_on_build_failing: isMergeQueue(),
     env: {
       BUN_LINK_ONLY: "ON",
-      BUILDKITE_CACHE: "ON",
-      BUILDKITE_GROUP_KEY: getTargetKey(platform),
       ...getBuildEnv(platform, options),
     },
-    command: `${getBuildCommand(platform, options)} --target bun`,
+    command: os === "darwin" ? [
+      "cmake --build . --target cache-restore || true",
+      `${command} --target bun`
+    ] : `${command} --target bun`,
   };
   // If macOS, run in VM
   if (platform.os === "darwin") {
     step.command = [
       `./scripts/build-macos-vm.sh --release=${platform.release}`,
-      `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target bun" "${process.cwd()}"`
+      `./scripts/ci-macos.sh --release=${platform.release} "cmake --build . --target cache-restore || true && ${command} --target bun" "${process.cwd()}"`
     ];
   }
   return step;
@@ -588,8 +602,6 @@ function getBuildBunStep(platform, options) {
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
     env: {
-      BUILDKITE_CACHE: "ON",
-      BUILDKITE_GROUP_KEY: getTargetKey(platform),
       ...getBuildEnv(platform, options),
     },
     command: getBuildCommand(platform, options),

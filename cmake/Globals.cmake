@@ -955,4 +955,4 @@ function(print_compiler_flags)
   endforeach()
 endfunction()
 
-# Cache upload targets will be created in SetupBuildkite.cmake after variables are properly set
+print_compiler_flags()
