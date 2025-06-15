@@ -346,25 +346,21 @@ create_and_run_vm() {
     
     log "✅ Workspace directory validated: $actual_workspace_dir"
     
-    # Create cache directory in host if persistent cache is enabled
-    local cache_mount_args=""
+    # Create cache directory inside workspace if persistent cache is enabled
     if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ]; then
         local cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}"
-        log "🔧 Creating persistent cache directory: $cache_dir"
+        log "🔧 Creating persistent cache directory inside workspace: $cache_dir"
         
-        # Create cache structure on host - will be mounted directly to VM
+        # Create cache structure inside workspace - will be mounted with workspace
         mkdir -p "$cache_dir"/{zig/global,zig/local,ccache,npm}
         
-        # Prepare cache mount arguments
-        cache_mount_args="--dir=cache:$cache_dir"
-        
-        log "✅ Cache directory created and will be mounted directly to VM"
-        log "   Cache mount: $cache_dir -> VM:/Volumes/cache"
+        log "✅ Cache directory created inside workspace (mounted with workspace)"
+        log "   Cache path in VM: /Volumes/workspace/buildkite-cache"
     fi
     
     log "Starting VM with workspace: $actual_workspace_dir"
-    # Mount workspace and cache (if enabled) directly - no rsync needed
-    tart run "$vm_name" --no-graphics --dir=workspace:"$actual_workspace_dir" $cache_mount_args > vm.log 2>&1 &
+    # Mount workspace only (cache is inside workspace) - single mount, more reliable
+    tart run "$vm_name" --no-graphics --dir=workspace:"$actual_workspace_dir" > vm.log 2>&1 &
     local vm_pid=$!
     
     # Wait for VM to be ready

@@ -407,17 +407,19 @@ async function downloadBuildArtifacts() {
   if (process.env.BUILDKITE_CACHE_TYPE === "persistent" && process.env.BUN_LINK_ONLY !== "ON") {
     console.log("🔧 Setting up persistent cache environment for macOS compilation...");
     
-    // Check if cache is mounted directly to VM (preferred) or in workspace (fallback)
-    const mountedCachePath = "/Volumes/cache";
+    // Check if workspace is mounted (preferred) or use workspace-relative path (fallback)
+    const mountedWorkspacePath = "/Volumes/workspace";
     const workspaceCachePath = process.env.BUILDKITE_CACHE_BASE || "./buildkite-cache";
     
     let cacheBase;
-    if (existsSync(mountedCachePath)) {
-      cacheBase = mountedCachePath;
-      console.log("✅ Using mounted cache directory (fast direct mount)");
+    if (existsSync(mountedWorkspacePath)) {
+      // Cache is inside mounted workspace at /Volumes/workspace/buildkite-cache
+      cacheBase = `${mountedWorkspacePath}/buildkite-cache`;
+      console.log("✅ Using mounted workspace cache directory (fast direct mount)");
     } else {
+      // Fallback to workspace-relative cache
       cacheBase = workspaceCachePath;
-      console.log("⚠️  Using workspace cache directory (slower rsync fallback)");
+      console.log("⚠️  Using workspace cache directory (rsync fallback)");
     }
     
     // Set environment variables for CMake and build tools to use mounted cache

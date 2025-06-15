@@ -172,8 +172,8 @@ echo "🔗 ===== WORKSPACE AND CACHE MOUNTED ====="
 # ===== WORKSPACE AND CACHE ALREADY MOUNTED =====
 echo "✅ Workspace already mounted to VM via Tart at /Volumes/workspace"
 if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ]; then
-    echo "✅ Cache already mounted to VM via Tart at /Volumes/cache" 
-    echo "🚀 Using fast direct mount - no rsync needed!"
+    echo "✅ Cache directory inside mounted workspace at /Volumes/workspace/buildkite-cache" 
+    echo "🚀 Using fast workspace mount - no rsync needed!"
 else
     echo "📋 No persistent cache configured"
 fi
@@ -205,16 +205,17 @@ ls -la /Volumes/ || true
 if [ -d "/Volumes/workspace" ]; then
     echo "✅ Workspace mounted at /Volumes/workspace"
     ls -la /Volumes/workspace/ | head -10
+    
+    # Check if cache directory exists inside workspace
+    if [ -d "/Volumes/workspace/buildkite-cache" ]; then
+        echo "✅ Cache directory found inside workspace"
+        ls -la /Volumes/workspace/buildkite-cache/ || true
+    else
+        echo "📋 No cache directory (normal for linking steps)"
+    fi
 else
     echo "❌ Workspace not mounted properly"
     exit 1
-fi
-
-if [ -d "/Volumes/cache" ]; then
-    echo "✅ Cache mounted at /Volumes/cache"
-    ls -la /Volumes/cache/ || true
-else
-    echo "📋 No cache mount (normal for linking steps)"
 fi
 
 # Ensure required tools are available
