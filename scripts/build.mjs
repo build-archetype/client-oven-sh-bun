@@ -117,15 +117,7 @@ async function build(args) {
   }
 
   // Download build artifacts if BUN_LINK_ONLY is enabled
-  if (process.env.BUN_LINK_ONLY === "ON") {
-    console.log("BUN_LINK_ONLY detected - downloading build artifacts...");
-    try {
-      await downloadBuildArtifacts(buildPath);
-    } catch (error) {
-      console.error("Failed to download build artifacts:", error.message);
-      process.exit(1);
-    }
-  }
+  await downloadBuildArtifacts();
 
   const toolchain = generateOptions["--toolchain"];
   if (toolchain) {
@@ -363,55 +355,30 @@ function printDuration(label, duration) {
   }
 }
 
-async function downloadBuildArtifacts(buildPath) {
-  console.log("Downloading build artifacts for linking...");
+async function downloadBuildArtifacts() {
+  // REMOVED: Complex artifact download logic
+  // Now using persistent host cache - no downloads needed!
   
-  // Download C++ artifact: libbun-profile.a.gz
-  const cppArtifactFile = "libbun-profile.a.gz";
-  try {
-    await spawn("buildkite-agent", ["artifact", "download", cppArtifactFile, buildPath]);
-    console.log(`✅ Downloaded ${cppArtifactFile}`);
-  } catch (error) {
-    throw new Error(`Failed to download ${cppArtifactFile}: ${error.message}`);
+  if (process.env.BUN_LINK_ONLY === "ON") {
+    console.log("🔗 BUN_LINK_ONLY=ON detected");
+    
+    // Check for required artifacts in expected locations
+    const requiredArtifacts = [
+      path.join(BUILD_PATH, "libbun-profile.a"),
+      path.join(BUILD_PATH, "bun-zig.o"),
+    ];
+    
+    const missingArtifacts = requiredArtifacts.filter(file => !existsSync(file));
+    
+    if (missingArtifacts.length > 0) {
+      console.error("❌ Missing required build artifacts:");
+      missingArtifacts.forEach(file => console.error(`   ${file}`));
+      console.error("\nRun build-cpp and build-zig steps first, or disable BUN_LINK_ONLY");
+      process.exit(1);
+    }
+    
+    console.log("✅ All required artifacts found");
   }
-
-  // Download Zig artifact: bun-zig.o
-  const zigArtifactFile = "bun-zig.o";
-  try {
-    await spawn("buildkite-agent", ["artifact", "download", zigArtifactFile, buildPath]);
-    console.log(`✅ Downloaded ${zigArtifactFile}`);
-  } catch (error) {
-    throw new Error(`Failed to download ${zigArtifactFile}: ${error.message}`);
-  }
-
-  // Decompress the C++ artifact
-  const compressedPath = join(buildPath, cppArtifactFile);
-  const decompressedPath = join(buildPath, "libbun-profile.a");
-  
-  if (!existsSync(compressedPath)) {
-    throw new Error(`Compressed C++ artifact not found: ${compressedPath}`);
-  }
-
-  try {
-    await spawn("gzip", ["-d", compressedPath]);
-    console.log(`✅ Decompressed to ${decompressedPath}`);
-  } catch (error) {
-    throw new Error(`Failed to decompress ${cppArtifactFile}: ${error.message}`);
-  }
-
-  // Verify both artifacts exist
-  if (!existsSync(decompressedPath)) {
-    throw new Error(`Decompressed C++ artifact not found: ${decompressedPath}`);
-  }
-
-  const zigArtifactPath = join(buildPath, zigArtifactFile);
-  if (!existsSync(zigArtifactPath)) {
-    throw new Error(`Zig artifact not found: ${zigArtifactPath}`);
-  }
-
-  console.log("✅ All build artifacts ready for linking");
-  console.log(`   C++: ${decompressedPath}`);
-  console.log(`   Zig: ${zigArtifactPath}`);
 }
 
 build(process.argv.slice(2));
