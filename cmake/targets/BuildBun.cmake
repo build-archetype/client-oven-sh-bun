@@ -552,40 +552,87 @@ if(NOT "${REVISION}" STREQUAL "")
   set(ZIG_FLAGS_BUN ${ZIG_FLAGS_BUN} -Dsha=${REVISION})
 endif()
 
-register_command(
-  TARGET
-    bun-zig
-  GROUP
-    console
-  COMMENT
-    "Building src/*.zig into ${BUN_ZIG_OUTPUT} for ${ZIG_TARGET}"
-  COMMAND
-    ${ZIG_EXECUTABLE}
-      build ${ZIG_STEPS}
-      ${CMAKE_ZIG_FLAGS}
-      --prefix ${BUILD_PATH}
-      -Dobj_format=${ZIG_OBJECT_FORMAT}
-      -Dtarget=${ZIG_TARGET}
-      -Doptimize=${ZIG_OPTIMIZE}
-      -Dcpu=${ZIG_CPU}
-      -Denable_logs=$<IF:$<BOOL:${ENABLE_LOGS}>,true,false>
-      -Denable_asan=$<IF:$<BOOL:${ENABLE_ASAN}>,true,false>
-      -Dversion=${VERSION}
-      -Dreported_nodejs_version=${NODEJS_VERSION}
-      -Dcanary=${CANARY_REVISION}
-      -Dcodegen_path=${CODEGEN_PATH}
-      -Dcodegen_embed=$<IF:$<BOOL:${CODEGEN_EMBED}>,true,false>
-      --prominent-compile-errors
-      --summary all
-      ${ZIG_FLAGS_BUN}
-  ARTIFACTS
-    ${BUN_ZIG_OUTPUT}
-  TARGETS
-    clone-zig
-  SOURCES
-    ${BUN_ZIG_SOURCES}
-    ${BUN_ZIG_GENERATED_SOURCES}
-)
+# Check if we're in a Tart mounted directory and set up Zig build commands accordingly
+string(FIND "${CMAKE_BUILD_ROOT}" "My Shared Files" TART_MOUNT_FOUND)
+if(TART_MOUNT_FOUND GREATER -1)
+  # Tart environment - use cache sync for persistent incremental builds
+  set(ZIG_CACHE_SYNC_SCRIPT "${CMAKE_BINARY_DIR}/sync-zig-cache.sh")
+  
+  register_command(
+    TARGET
+      bun-zig
+    GROUP
+      console
+    COMMENT
+      "Building src/*.zig with persistent cache sync for ${ZIG_TARGET}"
+    COMMAND
+      ${ZIG_CACHE_SYNC_SCRIPT} before
+    COMMAND
+      ${ZIG_EXECUTABLE}
+        build ${ZIG_STEPS}
+        ${CMAKE_ZIG_FLAGS}
+        --prefix ${BUILD_PATH}
+        -Dobj_format=${ZIG_OBJECT_FORMAT}
+        -Dtarget=${ZIG_TARGET}
+        -Doptimize=${ZIG_OPTIMIZE}
+        -Dcpu=${ZIG_CPU}
+        -Denable_logs=$<IF:$<BOOL:${ENABLE_LOGS}>,true,false>
+        -Denable_asan=$<IF:$<BOOL:${ENABLE_ASAN}>,true,false>
+        -Dversion=${VERSION}
+        -Dreported_nodejs_version=${NODEJS_VERSION}
+        -Dcanary=${CANARY_REVISION}
+        -Dcodegen_path=${CODEGEN_PATH}
+        -Dcodegen_embed=$<IF:$<BOOL:${CODEGEN_EMBED}>,true,false>
+        --prominent-compile-errors
+        --summary all
+        ${ZIG_FLAGS_BUN}
+    COMMAND
+      ${ZIG_CACHE_SYNC_SCRIPT} after
+    ARTIFACTS
+      ${BUN_ZIG_OUTPUT}
+    TARGETS
+      clone-zig
+    SOURCES
+      ${BUN_ZIG_SOURCES}
+      ${BUN_ZIG_GENERATED_SOURCES}
+  )
+else()
+  # Normal environment - direct cache access
+  register_command(
+    TARGET
+      bun-zig
+    GROUP
+      console
+    COMMENT
+      "Building src/*.zig into ${BUN_ZIG_OUTPUT} for ${ZIG_TARGET}"
+    COMMAND
+      ${ZIG_EXECUTABLE}
+        build ${ZIG_STEPS}
+        ${CMAKE_ZIG_FLAGS}
+        --prefix ${BUILD_PATH}
+        -Dobj_format=${ZIG_OBJECT_FORMAT}
+        -Dtarget=${ZIG_TARGET}
+        -Doptimize=${ZIG_OPTIMIZE}
+        -Dcpu=${ZIG_CPU}
+        -Denable_logs=$<IF:$<BOOL:${ENABLE_LOGS}>,true,false>
+        -Denable_asan=$<IF:$<BOOL:${ENABLE_ASAN}>,true,false>
+        -Dversion=${VERSION}
+        -Dreported_nodejs_version=${NODEJS_VERSION}
+        -Dcanary=${CANARY_REVISION}
+        -Dcodegen_path=${CODEGEN_PATH}
+        -Dcodegen_embed=$<IF:$<BOOL:${CODEGEN_EMBED}>,true,false>
+        --prominent-compile-errors
+        --summary all
+        ${ZIG_FLAGS_BUN}
+    ARTIFACTS
+      ${BUN_ZIG_OUTPUT}
+    TARGETS
+      clone-zig
+    SOURCES
+      ${BUN_ZIG_SOURCES}
+      ${BUN_ZIG_GENERATED_SOURCES}
+  )
+endif()
 
 set_property(TARGET bun-zig PROPERTY JOB_POOL compile_pool)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "build.zig")

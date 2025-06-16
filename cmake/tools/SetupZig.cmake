@@ -144,3 +144,54 @@ register_command(
   OUTPUTS
     ${ZIG_EXECUTABLE}
 )
+
+# Check if we're in a Tart mounted directory (containing "My Shared Files")
+string(FIND "${CMAKE_BUILD_ROOT}" "My Shared Files" TART_MOUNT_FOUND)
+if(TART_MOUNT_FOUND GREATER -1)
+  message(STATUS "🔧 Detected Tart mounted directory - using hybrid Zig cache strategy")
+  message(STATUS "   Persistent cache: ${ZIG_LOCAL_CACHE_DIR} (mounted)")
+  message(STATUS "   Execution cache: /tmp/zig-cache/* (VM-local)")
+  
+  # Use VM-local cache directories for execution (avoids AccessDenied errors)
+  set(ENV{ZIG_LOCAL_CACHE_DIR_OVERRIDE} "/tmp/zig-cache/local")
+  set(ENV{ZIG_GLOBAL_CACHE_DIR_OVERRIDE} "/tmp/zig-cache/global")
+  
+  # Add cache synchronization to the Zig build process
+  # Before Zig build: Copy persistent cache to VM-local
+  # After Zig build: Copy VM-local cache back to persistent
+  set(ZIG_CACHE_SYNC_SCRIPT "${CMAKE_BINARY_DIR}/sync-zig-cache.sh")
+  file(WRITE "${ZIG_CACHE_SYNC_SCRIPT}" "#!/bin/bash\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "set -euo pipefail\n\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "# Sync Zig cache between persistent (mounted) and VM-local directories\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "PERSISTENT_LOCAL=\"${ZIG_LOCAL_CACHE_DIR}\"\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "PERSISTENT_GLOBAL=\"${ZIG_GLOBAL_CACHE_DIR}\"\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "VM_LOCAL=\"/tmp/zig-cache/local\"\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "VM_GLOBAL=\"/tmp/zig-cache/global\"\n\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "if [[ \"$1\" == \"before\" ]]; then\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  echo \"📥 Copying persistent Zig cache to VM-local for execution...\"\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  mkdir -p \"$VM_LOCAL\" \"$VM_GLOBAL\"\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  if [[ -d \"$PERSISTENT_LOCAL\" ]]; then\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "    rsync -a \"$PERSISTENT_LOCAL/\" \"$VM_LOCAL/\" || true\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  fi\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  if [[ -d \"$PERSISTENT_GLOBAL\" ]]; then\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "    rsync -a \"$PERSISTENT_GLOBAL/\" \"$VM_GLOBAL/\" || true\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  fi\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "elif [[ \"$1\" == \"after\" ]]; then\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  echo \"📤 Copying VM-local Zig cache back to persistent storage...\"\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  mkdir -p \"$PERSISTENT_LOCAL\" \"$PERSISTENT_GLOBAL\"\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  if [[ -d \"$VM_LOCAL\" ]]; then\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "    rsync -a \"$VM_LOCAL/\" \"$PERSISTENT_LOCAL/\" || true\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  fi\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  if [[ -d \"$VM_GLOBAL\" ]]; then\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "    rsync -a \"$VM_GLOBAL/\" \"$PERSISTENT_GLOBAL/\" || true\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  fi\n")
+  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "fi\n")
+  
+  # Make the script executable
+  file(CHMOD "${ZIG_CACHE_SYNC_SCRIPT}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+  
+else()
+  # Normal environment - use mounted cache directories directly
+  set(ENV{ZIG_LOCAL_CACHE_DIR_OVERRIDE} "${ZIG_LOCAL_CACHE_DIR}")
+  set(ENV{ZIG_GLOBAL_CACHE_DIR_OVERRIDE} "${ZIG_GLOBAL_CACHE_DIR}")
+endif()
