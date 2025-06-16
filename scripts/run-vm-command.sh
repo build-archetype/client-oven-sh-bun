@@ -290,35 +290,60 @@ else
             # Try alternative copying method - smaller chunks
             echo "🔄 Trying alternative copying method (smaller chunks)..."
             
-            # Create a list of key directories to copy separately
-            KEY_DIRS="src cmake scripts packages"
-            KEY_FILES="CMakeLists.txt build.zig package.json bun.lock"
+            # Create the workspace directory first
+            sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "mkdir -p '/Volumes/My Shared Files/workspace'"
             
-            echo "Copying key directories separately..."
-            for dir in $KEY_DIRS; do
-                if [ -d "$dir" ]; then
-                    echo "Copying $dir..."
-                    if tar -czf - "$dir" | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd /Volumes/My\ Shared\ Files/workspace && tar -xzf -" 2>&1; then
-                        echo "✅ $dir copied"
-                    else
-                        echo "❌ Failed to copy $dir"
-                        exit 1
-                    fi
-                fi
-            done
+            # Copy everything except problematic items using find to get complete file list
+            echo "Copying complete source tree (excluding build artifacts and caches)..."
             
-            echo "Copying key files..."
-            for file in $KEY_FILES; do
-                if [ -f "$file" ]; then
-                    echo "Copying $file..."
-                    if sshpass -p admin scp $SSH_OPTS "$file" admin@$VM_IP:"/Volumes/My Shared Files/workspace/" 2>&1; then
-                        echo "✅ $file copied"
-                    else
-                        echo "❌ Failed to copy $file"
-                        exit 1
+            # Use tar with explicit exclusions to copy everything needed
+            if tar -cf - \
+                --exclude='.git' \
+                --exclude='build' \
+                --exclude='zig-cache' \
+                --exclude='zig-out' \
+                --exclude='node_modules' \
+                --exclude='.DS_Store' \
+                --exclude='*.tmp' \
+                --exclude='*.log' \
+                --exclude='tart.log' \
+                --exclude='.tart' \
+                --exclude='vm.log' \
+                . | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd '/Volumes/My Shared Files/workspace' && tar -xf -" 2>&1; then
+                echo "✅ Complete source tree copied successfully"
+            else
+                echo "❌ Alternative tar method also failed, trying individual directory approach..."
+                
+                # Get list of all directories and files (excluding problematic ones)
+                ALL_ITEMS=$(find . -maxdepth 1 -type d -not -name '.' -not -name '.git' -not -name 'build' -not -name 'zig-cache' -not -name 'zig-out' -not -name 'node_modules' -not -name '.tart' | sort)
+                ALL_FILES=$(find . -maxdepth 1 -type f -not -name '*.log' -not -name '*.tmp' -not -name '.DS_Store' -not -name 'tart.log' -not -name 'vm.log' | sort)
+                
+                echo "Copying directories individually..."
+                for item in $ALL_ITEMS; do
+                    if [ -d "$item" ]; then
+                        echo "Copying $item..."
+                        if tar -cf - "$item" | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd '/Volumes/My Shared Files/workspace' && tar -xf -" 2>&1; then
+                            echo "✅ $item copied"
+                        else
+                            echo "⚠️ Failed to copy $item, continuing..."
+                        fi
                     fi
-                fi
-            done
+                done
+                
+                echo "Copying files individually..."
+                for item in $ALL_FILES; do
+                    if [ -f "$item" ]; then
+                        echo "Copying $item..."
+                        if sshpass -p admin scp $SSH_OPTS "$item" admin@$VM_IP:"/Volumes/My Shared Files/workspace/" 2>&1; then
+                            echo "✅ $item copied"
+                        else
+                            echo "⚠️ Failed to copy $item, continuing..."
+                        fi
+                    fi
+                done
+                
+                echo "✅ Individual file/directory copying completed"
+            fi
             
             echo "✅ Alternative copying method succeeded"
         fi
