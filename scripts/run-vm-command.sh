@@ -299,7 +299,21 @@ if [ "$should_copy" = true ]; then
     for dir in "${artifact_dirs[@]}"; do
         if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d \"/Volumes/My Shared Files/workspace/$dir\" ]"; then
             echo "Copying $dir/ back..."
-            rsync -av -e "sshpass -p admin ssh $SSH_OPTS" "admin@$VM_IP:/Volumes/My Shared Files/workspace/$dir/" ./$dir/ || true
+            
+            # Try rsync first (with proper escaping)
+            if rsync -av -e "sshpass -p admin ssh $SSH_OPTS" "admin@$VM_IP:\"/Volumes/My Shared Files/workspace/$dir/\"" ./$dir/ 2>/dev/null; then
+                echo "✅ rsync succeeded for $dir"
+            else
+                echo "⚠️ rsync failed, trying tar+ssh fallback for $dir..."
+                
+                # Fallback: use tar over SSH to avoid path escaping issues
+                mkdir -p "./$dir"
+                if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"/Volumes/My Shared Files/workspace\" && tar -cf - \"$dir\"" | tar -xf - 2>/dev/null; then
+                    echo "✅ tar+ssh fallback succeeded for $dir"
+                else
+                    echo "❌ Both rsync and tar+ssh failed for $dir"
+                fi
+            fi
         fi
     done
     
