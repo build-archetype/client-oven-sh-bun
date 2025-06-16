@@ -238,10 +238,18 @@ export ZIG_GLOBAL_CACHE_DIR_OVERRIDE="/tmp/zig-cache/global"
 # Create VM-local Zig cache directories
 mkdir -p "/tmp/zig-cache/local" "/tmp/zig-cache/global"
 
-echo "🔧 Using VM-local Zig cache directories:"
-echo "  Local: /tmp/zig-cache/local" 
-echo "  Global: /tmp/zig-cache/global"
-echo "  (This avoids AccessDenied errors on mounted filesystems)"
+# Override ccache directory to use VM-local filesystem to avoid permission errors
+# ccache needs to write cache files which mounted filesystems don't support well
+export CCACHE_DIR="/tmp/ccache"
+
+# Create VM-local ccache directory
+mkdir -p "/tmp/ccache"
+
+echo "🔧 Using VM-local cache directories:"
+echo "  Zig Local: /tmp/zig-cache/local" 
+echo "  Zig Global: /tmp/zig-cache/global"
+echo "  Ccache: /tmp/ccache"
+echo "  (This avoids permission errors on mounted filesystems)"
 
 # Verify mount points
 echo "🔍 Verifying mount points..."
