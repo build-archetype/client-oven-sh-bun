@@ -163,28 +163,8 @@ async function build(args) {
 
   await startGroup("CMake Build", () => spawn("cmake", buildArgs, { env }));
 
-  // Upload build artifacts for linking step
-  if (process.env.BUN_CPP_ONLY === "ON") {
-    console.log("📤 Uploading C++ build artifacts for linking step...");
-    try {
-      // Check for both compressed and uncompressed versions
-      const artifacts = ["build/release/libbun-profile.a", "build/release/libbun-profile.a.gz"];
-      const artifactToUpload = artifacts.find(path => existsSync(path));
-      
-      if (artifactToUpload) {
-        await spawn("buildkite-agent", ["artifact", "upload", artifactToUpload], {
-          stdio: "inherit"
-        });
-        console.log(`✅ C++ artifacts uploaded successfully: ${artifactToUpload}`);
-      } else {
-        console.warn("⚠️ No C++ artifacts found to upload:", artifacts);
-      }
-    } catch (error) {
-      console.warn("⚠️ Failed to upload C++ artifacts:", error.message);
-    }
-  }
-  
   // Upload zig artifacts if they exist (for zig build step)
+  // Note: Zig artifacts are NOT automatically uploaded by CMake (uses OUTPUTS not ARTIFACTS)
   const zigArtifacts = ["build/release/bun-zig.o", "build/release/bun-zig.o.gz"];
   const zigArtifactToUpload = zigArtifacts.find(path => existsSync(path));
   if (zigArtifactToUpload) {
