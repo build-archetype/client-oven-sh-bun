@@ -308,13 +308,20 @@ endif()
 
 # --- Tart mounted filesystem header fixes ---
 if(UNIX AND CI)
-  string(FIND "${CWD}" "My Shared Files" TART_MOUNT_FOUND)
-  if(TART_MOUNT_FOUND GREATER -1)
-    # On Tart mounted filesystems, #pragma once fails when the same header
-    # is included via different paths. Create symlinks without spaces.
-    message(STATUS "Detected Tart mounted directory - creating space-free symlinks for headers")
+  # Check multiple variables to detect Tart mounted directories more reliably
+  set(TART_MOUNT_FOUND -1)
+  string(FIND "${CWD}" "My Shared Files" TART_MOUNT_FOUND_CWD)
+  string(FIND "${CMAKE_SOURCE_DIR}" "My Shared Files" TART_MOUNT_FOUND_SRC)
+  string(FIND "${CMAKE_BUILD_ROOT}" "My Shared Files" TART_MOUNT_FOUND_BUILD)
+  
+  if(TART_MOUNT_FOUND_CWD GREATER -1 OR TART_MOUNT_FOUND_SRC GREATER -1 OR TART_MOUNT_FOUND_BUILD GREATER -1)
+    set(TART_MOUNT_FOUND 1)
+    message(STATUS "Detected Tart mounted directory - applying header duplication fixes")
+    message(STATUS "  CWD: ${CWD}")
+    message(STATUS "  CMAKE_SOURCE_DIR: ${CMAKE_SOURCE_DIR}")
+    message(STATUS "  CMAKE_BUILD_ROOT: ${CMAKE_BUILD_ROOT}")
     
-    # Create symlinks without spaces for problematic directories
+    # Primary fix: Create symlinks without spaces for problematic directories
     set(TART_BINDINGS_LINK "/tmp/bun-bindings")
     set(TART_MODULES_LINK "/tmp/bun-modules") 
     set(TART_BUNJS_LINK "/tmp/bun-js")
@@ -327,16 +334,21 @@ if(UNIX AND CI)
     execute_process(COMMAND ln -sf "${CWD}/src/bun.js/modules" "${TART_MODULES_LINK}")
     execute_process(COMMAND ln -sf "${CWD}/src/bun.js" "${TART_BUNJS_LINK}")
     
+    message(STATUS "Created symlinks: ${TART_BINDINGS_LINK}, ${TART_MODULES_LINK}, ${TART_BUNJS_LINK}")
+    
     # Use symlinks for include directories 
     register_compiler_flags(
-      DESCRIPTION "Fix header path resolution using space-free symlinks"
+      DESCRIPTION "Fix header path resolution using space-free symlinks on mounted filesystems"
       LANGUAGES C CXX
       -isystem "${TART_BINDINGS_LINK}"
       -isystem "${TART_MODULES_LINK}"
       -isystem "${TART_BUNJS_LINK}"
       -fno-working-directory
       -fmodules-cache-path=/tmp/clang-modules-cache
+      -fcanonicalize-system-headers
     )
+    
+    message(STATUS "Applied Tart header duplication fixes")
   endif()
 endif()
 
