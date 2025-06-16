@@ -227,18 +227,9 @@ else
     exit 1
 fi
 
-# Verify hermetic dependencies inside VM (where tools actually exist)
-echo "🔒 Verifying hermetic tool versions inside VM..."
-
-# Check key tools that should be available in the VM
-echo "🔍 Checking build tools:"
+# Ensure required tools are available
+echo "🔧 Verifying tools..."
 command -v bun >/dev/null 2>&1 && echo "✅ Bun: \$(bun --version)" || echo "❌ Bun not found"
-command -v cmake >/dev/null 2>&1 && echo "✅ CMake: \$(cmake --version | head -1)" || echo "❌ CMake not found"
-command -v ninja >/dev/null 2>&1 && echo "✅ Ninja: \$(ninja --version)" || echo "❌ Ninja not found"
-command -v clang >/dev/null 2>&1 && echo "✅ Clang: \$(clang --version | head -1)" || echo "❌ Clang not found"
-command -v rustc >/dev/null 2>&1 && echo "✅ Rustc: \$(rustc --version)" || echo "❌ Rustc not found"
-command -v cargo >/dev/null 2>&1 && echo "✅ Cargo: \$(cargo --version)" || echo "❌ Cargo not found"
-command -v ccache >/dev/null 2>&1 && echo "✅ Ccache: \$(ccache --version | head -1)" || echo "❌ Ccache not found"
 command -v buildkite-agent >/dev/null 2>&1 && echo "✅ buildkite-agent available" || echo "❌ buildkite-agent not found"
 
 echo "🚀 Executing: $COMMAND"
