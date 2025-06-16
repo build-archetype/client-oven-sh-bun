@@ -387,31 +387,122 @@ async function downloadBuildArtifacts() {
   if (process.env.BUILDKITE_CACHE_TYPE === "persistent" && process.env.BUN_LINK_ONLY !== "ON") {
     console.log("🔧 Setting up persistent cache environment for macOS compilation...");
     
+    // Debug: Show current working directory and filesystem state
+    console.log("🔍 Debug: Current working directory:", process.cwd());
+    console.log("🔍 Debug: Current directory contents:");
+    try {
+      const dirContents = await import('fs').then(fs => fs.readdirSync('.'));
+      dirContents.forEach(item => console.log(`   ${item}`));
+    } catch (error) {
+      console.log("   Error reading directory:", error.message);
+    }
+    
     // Check if workspace is mounted (preferred) or use workspace-relative path (fallback)
     const mountedWorkspacePath = "/Volumes/workspace";
     const workspaceCachePath = process.env.BUILDKITE_CACHE_BASE || "./buildkite-cache";
+    
+    console.log("🔍 Debug: Checking cache path options:");
+    console.log(`   Mounted workspace path: ${mountedWorkspacePath} (exists: ${existsSync(mountedWorkspacePath)})`);
+    console.log(`   Workspace cache path: ${workspaceCachePath} (exists: ${existsSync(workspaceCachePath)})`);
     
     let cacheBase;
     if (existsSync(mountedWorkspacePath)) {
       // Cache is inside mounted workspace at /Volumes/workspace/buildkite-cache
       cacheBase = `${mountedWorkspacePath}/buildkite-cache`;
       console.log("✅ Using mounted workspace cache directory (fast direct mount)");
+      
+      // Debug: Check if cache exists in mounted location
+      console.log(`🔍 Debug: Checking mounted cache at ${cacheBase}: ${existsSync(cacheBase)}`);
+      if (existsSync(cacheBase)) {
+        try {
+          const cacheContents = await import('fs').then(fs => fs.readdirSync(cacheBase));
+          console.log("🔍 Debug: Mounted cache contents:");
+          cacheContents.forEach(item => console.log(`   ${item}`));
+        } catch (error) {
+          console.log("   Error reading mounted cache:", error.message);
+        }
+      }
     } else {
       // Fallback to workspace-relative cache
       cacheBase = workspaceCachePath;
       console.log("⚠️  Using workspace cache directory (rsync fallback)");
+      
+      // Debug: Check if cache exists in local location
+      console.log(`🔍 Debug: Checking local cache at ${cacheBase}: ${existsSync(cacheBase)}`);
+      if (existsSync(cacheBase)) {
+        try {
+          const cacheContents = await import('fs').then(fs => fs.readdirSync(cacheBase));
+          console.log("🔍 Debug: Local cache contents:");
+          cacheContents.forEach(item => console.log(`   ${item}`));
+        } catch (error) {
+          console.log("   Error reading local cache:", error.message);
+        }
+      }
+    }
+    
+    // Debug: Show resolved cache base path
+    console.log(`🔍 Debug: Final cache base path: ${cacheBase}`);
+    console.log(`🔍 Debug: Cache base exists: ${existsSync(cacheBase)}`);
+    
+    // Check if this is a fresh build or if we should expect cache
+    console.log("🔍 Debug: Build environment info:");
+    console.log(`   BUILDKITE_BUILD_NUMBER: ${process.env.BUILDKITE_BUILD_NUMBER}`);
+    console.log(`   BUILDKITE_COMMIT: ${process.env.BUILDKITE_COMMIT}`);
+    console.log(`   BUILDKITE_BRANCH: ${process.env.BUILDKITE_BRANCH}`);
+    console.log(`   BUN_CPP_ONLY: ${process.env.BUN_CPP_ONLY}`);
+    console.log(`   BUN_ZIG_ONLY: ${process.env.BUN_ZIG_ONLY}`);
+    
+    // Check for CMake cache directory (the new system I added)
+    const cmakeCacheBase = "./buildkite-cache/build-results";
+    const cmakeCacheCommitDir = `${cmakeCacheBase}/${process.env.BUILDKITE_COMMIT}`;
+    console.log("🔍 Debug: CMake cache system paths:");
+    console.log(`   CMake cache base: ${cmakeCacheBase} (exists: ${existsSync(cmakeCacheBase)})`);
+    console.log(`   CMake cache for commit: ${cmakeCacheCommitDir} (exists: ${existsSync(cmakeCacheCommitDir)})`);
+    
+    if (existsSync(cmakeCacheBase)) {
+      try {
+        const cmakeCacheContents = await import('fs').then(fs => fs.readdirSync(cmakeCacheBase));
+        console.log("🔍 Debug: CMake cache contents:");
+        cmakeCacheContents.forEach(item => console.log(`   ${item}`));
+      } catch (error) {
+        console.log("   Error reading CMake cache:", error.message);
+      }
     }
     
     // Verify cache directory exists before setting up environment
     if (!existsSync(cacheBase)) {
       console.log("⚠️  Cache directory not found, creating it...");
+      console.log(`🔍 Debug: Creating cache directory structure at ${cacheBase}`);
       mkdirSync(cacheBase, { recursive: true });
       mkdirSync(`${cacheBase}/zig/global`, { recursive: true });
       mkdirSync(`${cacheBase}/zig/local`, { recursive: true });
       mkdirSync(`${cacheBase}/ccache`, { recursive: true });
       mkdirSync(`${cacheBase}/npm`, { recursive: true });
+      console.log("✅ Created fresh cache directory structure");
+    } else {
+      console.log("✅ Found existing cache directory");
+      
+      // Debug: Show what's in each cache subdirectory
+      const cacheSubdirs = ['zig/global', 'zig/local', 'ccache', 'npm'];
+      for (const subdir of cacheSubdirs) {
+        const subdirPath = `${cacheBase}/${subdir}`;
+        if (existsSync(subdirPath)) {
+          try {
+            const subdirContents = await import('fs').then(fs => fs.readdirSync(subdirPath));
+            console.log(`🔍 Debug: ${subdir} cache (${subdirContents.length} items):`);
+            subdirContents.slice(0, 5).forEach(item => console.log(`   ${item}`));
+            if (subdirContents.length > 5) {
+              console.log(`   ... and ${subdirContents.length - 5} more items`);
+            }
+          } catch (error) {
+            console.log(`   Error reading ${subdir}:`, error.message);
+          }
+        } else {
+          console.log(`🔍 Debug: ${subdir} cache: not found`);
+        }
+      }
     }
-    
+
     // Set environment variables for CMake and build tools to use mounted cache
     process.env.ZIG_GLOBAL_CACHE_DIR = `${cacheBase}/zig/global`;
     process.env.ZIG_LOCAL_CACHE_DIR = `${cacheBase}/zig/local`;
