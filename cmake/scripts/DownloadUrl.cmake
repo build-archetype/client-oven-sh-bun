@@ -116,10 +116,18 @@ endif()
 
 if(DOWNLOAD_FILTERS)
   foreach(file ${DOWNLOAD_TMP_FILE})
-    # Check if we're copying to a Tart mounted directory (which has permission restrictions)
+    # Check if we're copying to a Tart mounted directory (which has many filesystem restrictions)
     if(DOWNLOAD_PATH MATCHES "My Shared Files")
-      # Use NO_SOURCE_PERMISSIONS for Tart mounted directories to avoid permission errors
-      file(INSTALL ${file} DESTINATION ${DOWNLOAD_PATH} NO_SOURCE_PERMISSIONS)
+      # Use cmake -E copy for Tart mounted directories (more reliable than file() commands)
+      message(STATUS "Using cmake -E copy for Tart mounted directory...")
+      execute_process(
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${file} ${DOWNLOAD_PATH}
+        RESULT_VARIABLE COPY_RESULT
+      )
+      
+      if(NOT COPY_RESULT EQUAL 0)
+        message(FATAL_ERROR "Failed to copy ${file} to Tart mounted directory ${DOWNLOAD_PATH}")
+      endif()
     else()
       # Use normal COPY for other destinations to preserve permissions
       file(COPY ${file} DESTINATION ${DOWNLOAD_PATH})
@@ -131,18 +139,26 @@ else()
   get_filename_component(DOWNLOAD_PARENT_PATH ${DOWNLOAD_PATH} DIRECTORY)
   file(MAKE_DIRECTORY ${DOWNLOAD_PARENT_PATH})
   
-  # Check if we're copying to a Tart mounted directory (which has permission restrictions)
+  # Check if we're copying to a Tart mounted directory (which has many filesystem restrictions)
   if(DOWNLOAD_PATH MATCHES "My Shared Files")
-    # Use NO_SOURCE_PERMISSIONS for Tart mounted directories to avoid permission errors
-    file(INSTALL ${DOWNLOAD_TMP_FILE} DESTINATION ${DOWNLOAD_PARENT_PATH} NO_SOURCE_PERMISSIONS)
+    # Use cmake -E copy for Tart mounted directories (more reliable than file() commands)
+    message(STATUS "Using cmake -E copy for Tart mounted directory...")
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} -E copy_directory ${DOWNLOAD_TMP_FILE} ${DOWNLOAD_PATH}
+      RESULT_VARIABLE COPY_RESULT
+    )
+    
+    if(NOT COPY_RESULT EQUAL 0)
+      message(FATAL_ERROR "Failed to copy ${DOWNLOAD_TMP_FILE} to Tart mounted directory ${DOWNLOAD_PATH}")
+    endif()
   else()
     # Use normal COPY for other destinations to preserve permissions
     file(COPY ${DOWNLOAD_TMP_FILE} DESTINATION ${DOWNLOAD_PARENT_PATH})
-  endif()
-  get_filename_component(DOWNLOAD_TMP_NAME ${DOWNLOAD_TMP_FILE} NAME)
-  set(COPIED_PATH ${DOWNLOAD_PARENT_PATH}/${DOWNLOAD_TMP_NAME})
-  if(NOT ${COPIED_PATH} STREQUAL ${DOWNLOAD_PATH})
-    file(RENAME ${COPIED_PATH} ${DOWNLOAD_PATH})
+    get_filename_component(DOWNLOAD_TMP_NAME ${DOWNLOAD_TMP_FILE} NAME)
+    set(COPIED_PATH ${DOWNLOAD_PARENT_PATH}/${DOWNLOAD_TMP_NAME})
+    if(NOT ${COPIED_PATH} STREQUAL ${DOWNLOAD_PATH})
+      file(RENAME ${COPIED_PATH} ${DOWNLOAD_PATH})
+    endif()
   endif()
 endif()
 
