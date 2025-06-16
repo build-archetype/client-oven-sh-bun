@@ -6,81 +6,6 @@ BASE_VM_IMAGE="${BASE_VM_IMAGE:-}"  # Will be determined based on platform
 FORCE_BASE_IMAGE_REBUILD="${FORCE_BASE_IMAGE_REBUILD:-false}"
 DISK_USAGE_THRESHOLD="${DISK_USAGE_THRESHOLD:-80}"  # For monitoring only, no cleanup action
 
-# Build Result Caching Functions (using persistent filesystem cache)
-generate_cache_key() {
-    local build_type="$1"  # "cpp" or "zig"
-    local base_key="${BUILDKITE_COMMIT}"
-    
-    case "$build_type" in
-        "cpp")
-            # Hash all C++ source files that affect C++ compilation
-            local cpp_hash=$(find src/ cmake/ -name '*.cpp' -o -name '*.c' -o -name '*.h' -o -name '*.hpp' -o -name 'CMakeLists.txt' 2>/dev/null | sort | xargs sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1)
-            echo "${base_key}-${cpp_hash}"
-            ;;
-        "zig") 
-            # Hash all Zig source files that affect Zig compilation
-            local zig_hash=$(find src/ -name '*.zig' 2>/dev/null | sort | xargs sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1)
-            echo "${base_key}-${zig_hash}"
-            ;;
-    esac
-}
-
-check_build_cache() {
-    local build_type="$1"  # "cpp" or "zig"
-    local cache_key=$(generate_cache_key "$build_type")
-    local cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}/build-results"
-    
-    log "🔍 Checking build cache for ${build_type} (key: ${cache_key})"
-    
-    # Check if cached build result exists in persistent cache
-    case "$build_type" in
-        "cpp")
-            if [ -f "${cache_dir}/${cache_key}/libbun-profile.a" ]; then
-                log "✅ Build cache HIT for C++ compilation"
-                mkdir -p build/release
-                cp "${cache_dir}/${cache_key}/libbun-profile.a" build/release/
-                return 0
-            fi
-            ;;
-        "zig")
-            if [ -f "${cache_dir}/${cache_key}/bun-zig.o" ]; then
-                log "✅ Build cache HIT for Zig compilation"
-                mkdir -p build/release  
-                cp "${cache_dir}/${cache_key}/bun-zig.o" build/release/
-                return 0
-            fi
-            ;;
-    esac
-    
-    log "❌ Build cache MISS for ${build_type} - will build from source"
-    return 1
-}
-
-upload_build_cache() {
-    local build_type="$1"  # "cpp" or "zig"
-    local cache_key=$(generate_cache_key "$build_type")
-    local cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}/build-results"
-    
-    log "📦 Caching build results for ${build_type} (key: ${cache_key})"
-    
-    case "$build_type" in
-        "cpp")
-            if [ -f "build/release/libbun-profile.a" ]; then
-                mkdir -p "${cache_dir}/${cache_key}"
-                cp "build/release/libbun-profile.a" "${cache_dir}/${cache_key}/"
-                log "✅ C++ build results cached to ${cache_dir}/${cache_key}/"
-            fi
-            ;;
-        "zig")
-            if [ -f "build/release/bun-zig.o" ]; then
-                mkdir -p "${cache_dir}/${cache_key}"
-                cp "build/release/bun-zig.o" "${cache_dir}/${cache_key}/"
-                log "✅ Zig build results cached to ${cache_dir}/${cache_key}/"
-            fi
-            ;;
-    esac
-}
-
 # Function to log messages with timestamps
 log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
@@ -659,12 +584,6 @@ create_and_run_vm() {
     log "Executing command in VM: $command"
     profile_build_step "VM-$BUILD_TYPE-Build" ./scripts/run-vm-command.sh "$vm_name" "$command"
 
-    # Upload build result cache after successful build
-    if [ "$BUILD_TYPE" = "cpp" ] || [ "$BUILD_TYPE" = "zig" ]; then
-        log "🎯 Uploading build result cache for future builds..."
-        upload_build_cache "$BUILD_TYPE"
-    fi
-
     # Upload logs and timing data
     buildkite-agent artifact upload vm.log || true
     buildkite-agent artifact upload build_timings.csv || true
@@ -841,30 +760,20 @@ main() {
     log "Workspace: $workspace_dir"
 
     # Check build result cache before VM creation
-    log "🎯 Checking build result cache..."
+    log "🎯 Build caching is now handled by CMake for better incremental builds"
     
-    # Determine build type from environment variables
+    # Determine build type from environment variables (for logging only)
     if [ "${BUN_CPP_ONLY:-}" = "ON" ]; then
-        if check_build_cache "cpp"; then
-            log "🚀 C++ build cache hit - skipping VM build entirely"
-            # Upload artifact as if we built it (for downstream steps)
-            buildkite-agent artifact upload "build/release/libbun-profile.a"
-            return 0
-        fi
         BUILD_TYPE="cpp"
+        log "🔧 C++-only build - CMake will handle incremental compilation"
     elif [ "${BUN_ZIG_ONLY:-}" = "ON" ] || [[ "$full_command" == *"--target bun-zig"* ]]; then
-        if check_build_cache "zig"; then
-            log "🚀 Zig build cache hit - skipping VM build entirely"
-            # Upload artifact as if we built it (for downstream steps)
-            buildkite-agent artifact upload "build/release/bun-zig.o"
-            return 0
-        fi
-        BUILD_TYPE="zig"
+        BUILD_TYPE="zig"  
+        log "⚡ Zig-only build - CMake will handle incremental compilation"
     elif [ "${BUN_LINK_ONLY:-}" = "ON" ]; then
         log "🔗 Linking step - no build result caching (always fresh)"
         BUILD_TYPE="link"
     else
-        log "📋 Full build - no build result caching" 
+        log "📋 Full build - CMake will handle incremental compilation" 
         BUILD_TYPE="full"
     fi
 

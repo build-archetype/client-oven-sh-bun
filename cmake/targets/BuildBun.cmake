@@ -1324,3 +1324,75 @@ if(NOT BUN_CPP_ONLY)
     endif()
   endif()
 endif()
+
+# Cache setup for macOS Darwin CI
+if(APPLE AND BUILDKITE AND (BUILDKITE_CACHE_RESTORE STREQUAL "ON" OR BUILDKITE_CACHE_SAVE STREQUAL "ON"))
+  # Define cache paths and keys (shared between restore and save)
+  set(CACHE_BASE_DIR "${CMAKE_SOURCE_DIR}/buildkite-cache/build-results")
+  set(CPP_CACHE_KEY "${BUILDKITE_COMMIT}")
+  set(ZIG_CACHE_KEY "${BUILDKITE_COMMIT}")
+endif()
+
+# Early cache restoration (before build targets are processed)
+if(APPLE AND BUILDKITE AND BUILDKITE_CACHE_RESTORE STREQUAL "ON")
+  message(STATUS "🔧 Setting up incremental cache restore for macOS Darwin CI...")
+  
+  # Pre-populate C++ artifacts if cache exists
+  set(CPP_CACHE_PATH "${CACHE_BASE_DIR}/${CPP_CACHE_KEY}")
+  if(EXISTS "${CPP_CACHE_PATH}/libbun-profile.a")
+    message(STATUS "✅ Found C++ cache - pre-populating build directory")
+    file(COPY "${CPP_CACHE_PATH}/libbun-profile.a" 
+         DESTINATION "${BUILD_PATH}")
+  else()
+    message(STATUS "❌ No C++ cache found - will build from scratch")
+  endif()
+  
+  # Pre-populate Zig artifacts if cache exists  
+  set(ZIG_CACHE_PATH "${CACHE_BASE_DIR}/${ZIG_CACHE_KEY}")
+  if(EXISTS "${ZIG_CACHE_PATH}/bun-zig.o")
+    message(STATUS "✅ Found Zig cache - pre-populating build directory")
+    file(COPY "${ZIG_CACHE_PATH}/bun-zig.o"
+         DESTINATION "${BUILD_PATH}")
+  else()
+    message(STATUS "❌ No Zig cache found - will build from scratch") 
+  endif()
+endif()
+
+# Cache save logic (after successful builds)
+if(APPLE AND BUILDKITE AND BUILDKITE_CACHE_SAVE STREQUAL "ON")
+  message(STATUS "🔧 Setting up incremental cache save for macOS Darwin CI...")
+  
+  # Save C++ artifacts after successful build
+  if(BUN_CPP_ONLY OR NOT DEFINED BUN_CPP_ONLY)
+    register_command(
+      TARGET
+        ${bun}
+      TARGET_PHASE
+        POST_BUILD
+      COMMENT
+        "Saving C++ artifacts to cache"
+      COMMAND
+        ${CMAKE_COMMAND} -E make_directory "${CACHE_BASE_DIR}/${CPP_CACHE_KEY}"
+        && ${CMAKE_COMMAND} -E copy_if_different 
+           "${BUILD_PATH}/libbun-profile.a" 
+           "${CACHE_BASE_DIR}/${CPP_CACHE_KEY}/"
+    )
+  endif()
+  
+  # Save Zig artifacts after successful build  
+  if(NOT BUN_CPP_ONLY)
+    register_command(
+      TARGET
+        bun-zig
+      TARGET_PHASE
+        POST_BUILD
+      COMMENT
+        "Saving Zig artifacts to cache"
+      COMMAND
+        ${CMAKE_COMMAND} -E make_directory "${CACHE_BASE_DIR}/${ZIG_CACHE_KEY}"
+        && ${CMAKE_COMMAND} -E copy_if_different
+           "${BUILD_PATH}/bun-zig.o"
+           "${CACHE_BASE_DIR}/${ZIG_CACHE_KEY}/"
+    )
+  endif()
+endif()
