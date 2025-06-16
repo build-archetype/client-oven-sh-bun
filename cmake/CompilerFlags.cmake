@@ -311,11 +311,18 @@ if(UNIX AND CI)
   string(FIND "${CWD}" "My Shared Files" TART_MOUNT_FOUND)
   if(TART_MOUNT_FOUND GREATER -1)
     # On Tart mounted filesystems, #pragma once fails when the same header
-    # is included via different paths. Add include directories to normalize paths.
+    # is included via different paths. Use explicit system includes to force path resolution.
     message(STATUS "Detected Tart mounted directory - adding header path fixes")
     
-    # Ensure the modules directory can find bindings headers without relative paths
-    include_directories(BEFORE SYSTEM "${CWD}/src/bun.js/bindings")
+    # Use explicit system include flags to override path resolution issues
+    register_compiler_flags(
+      DESCRIPTION "Fix header path resolution on mounted filesystems"
+      -isystem "${CWD}/src/bun.js/bindings"
+      -isystem "${CWD}/src/bun.js/modules"
+      -isystem "${CWD}/src/bun.js"
+      -fno-working-directory
+      -fmodules-cache-path=/tmp/clang-modules-cache
+    )
   endif()
 endif()
 
