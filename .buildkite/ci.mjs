@@ -417,9 +417,11 @@ function getBuildEnv(target, options) {
     // Host cache directory (workspace-relative for CI)
     env.BUILDKITE_CACHE_BASE = env.BUILDKITE_CACHE_BASE || "./buildkite-cache";
     
-    // NOTE: Do NOT set BUILDKITE_CACHE_RESTORE=ON or BUILDKITE_CACHE_SAVE=ON
-    // for persistent cache type - the new copy-based VM cache system handles
-    // caching automatically without the old Buildkite artifact-based system
+    // Enable cache save for persistent cache (needed by CMake cache save logic)
+    env.BUILDKITE_CACHE_SAVE = "ON";
+    
+    // Keep BUILDKITE_CACHE_RESTORE disabled to prevent old artifact-based cache system
+    // The new copy-based VM cache system handles cache restoration automatically
     
     // Force clean checkout to ensure source code consistency
     // This disables cache reading (as per build.mjs logic) but ensures fresh source
