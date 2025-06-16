@@ -446,20 +446,15 @@ export VENDOR_PATH="$VM_WORKSPACE/vendor"
 export TMPDIR="/tmp"
 export LD_SUPPORT_TMPDIR="/tmp"
 
-# Use standard local cache directories (no overrides needed)
-export ZIG_LOCAL_CACHE_DIR="/tmp/zig-cache/local"
-export ZIG_GLOBAL_CACHE_DIR="/tmp/zig-cache/global"
-export CCACHE_DIR="/tmp/ccache"
+# Don't override cache directories - let build.mjs persistent cache settings be used
+# The cache directories will be set by build.mjs to point to persistent locations
+# instead of /tmp which gets lost when VM is destroyed
 
-# Create cache directories
-mkdir -p "/tmp/zig-cache/local" "/tmp/zig-cache/global" "/tmp/ccache"
-
-echo "🔧 Using local filesystem cache directories:"
+echo "🔧 Using persistent cache directories (set by build.mjs):"
 echo "  Workspace: $VM_WORKSPACE (local filesystem)"
 echo "  Build: $VM_WORKSPACE/build"
-echo "  Zig Cache: /tmp/zig-cache/"
-echo "  Ccache: /tmp/ccache"
-echo "  ✅ No mounted filesystem issues!"
+echo "  Cache: Using build.mjs persistent cache configuration"
+echo "  ✅ Cache will persist across builds!"
 
 # Verify workspace setup
 echo "🔍 Verifying workspace setup..."
