@@ -5,8 +5,19 @@ set -euo pipefail
 if [ -z "${HOME:-}" ]; then
     # Determine appropriate HOME directory based on current user
     if [ "$(id -u)" = "0" ]; then
-        # Running as root
-        export HOME="/root"
+        # Running as root - use a writable directory since /root is often read-only in CI
+        # Try writable locations in order of preference
+        for potential_home in "/tmp/root-home" "/var/tmp/root-home" "/opt/buildkite-agent/root-home" "/tmp"; do
+            if mkdir -p "$potential_home" 2>/dev/null; then
+                export HOME="$potential_home"
+                break
+            fi
+        done
+        
+        # Fallback if all else fails
+        if [ -z "${HOME:-}" ]; then
+            export HOME="/tmp"
+        fi
     else
         # Try to get HOME from current user
         HOME=$(getent passwd "$(whoami)" | cut -d: -f6 2>/dev/null || echo "/tmp")
