@@ -471,6 +471,50 @@ create_and_run_vm() {
         fi
     fi
     
+    # TEMPORARY DEBUG: Verify cache state after cleanup/setup (for C++ and Zig builds)
+    if [ "${BUN_CPP_ONLY:-}" = "ON" ] || [ "${BUN_ZIG_ONLY:-}" = "ON" ] || [[ "$command" == *"--target bun-zig"* ]] || [[ "$command" == *"--target bun"* ]]; then
+        log "🔍 TEMPORARY DEBUG: Verifying cache state after workspace setup..."
+        local cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}"
+        
+        if [ -d "$cache_dir" ]; then
+            local cache_size=$(du -sh "$cache_dir" 2>/dev/null | cut -f1 || echo "unknown")
+            log "   ✅ Cache directory exists: $cache_dir"
+            log "   📊 Cache size: $cache_size"
+            
+            # Check each cache subdirectory
+            for subdir in "zig/global" "zig/local" "ccache" "npm" "build-results"; do
+                if [ -d "$cache_dir/$subdir" ]; then
+                    local subdir_size=$(du -sh "$cache_dir/$subdir" 2>/dev/null | cut -f1 || echo "unknown")
+                    local item_count=$(find "$cache_dir/$subdir" -type f 2>/dev/null | wc -l | tr -d ' ')
+                    log "   📁 $subdir: $subdir_size ($item_count files)"
+                    
+                    # Show a few sample files for non-empty directories
+                    if [ "$item_count" -gt 0 ]; then
+                        log "      Sample files:"
+                        find "$cache_dir/$subdir" -type f 2>/dev/null | head -3 | while read -r file; do
+                            local rel_file=${file#$cache_dir/}
+                            log "        $rel_file"
+                        done
+                        [ "$item_count" -gt 3 ] && log "        ... and $((item_count - 3)) more files"
+                    fi
+                else
+                    log "   📋 $subdir: not found"
+                fi
+            done
+            
+            # Overall assessment
+            if [ "$cache_size" = "0B" ] || [ "$cache_size" = "unknown" ]; then
+                log "   ⚠️  WARNING: Cache appears to be empty - expecting incremental build benefits may not materialize"
+            else
+                log "   🎉 Cache contains data - incremental build should be faster!"
+            fi
+        else
+            log "   ❌ Cache directory not found: $cache_dir"
+            log "   This indicates the cache preservation/setup logic may have failed"
+        fi
+        log "🔍 END TEMPORARY DEBUG: Cache state verification complete"
+    fi
+    
     log "✅ Workspace cleaned and prepared for fresh build"
     
     # Debug the workspace mounting setup
