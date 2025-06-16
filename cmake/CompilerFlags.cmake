@@ -311,21 +311,29 @@ if(UNIX AND CI)
   string(FIND "${CWD}" "My Shared Files" TART_MOUNT_FOUND)
   if(TART_MOUNT_FOUND GREATER -1)
     # On Tart mounted filesystems, #pragma once fails when the same header
-    # is included via different paths. Use explicit system includes to force path resolution.
-    message(STATUS "Detected Tart mounted directory - adding header path fixes")
+    # is included via different paths. Create symlinks without spaces.
+    message(STATUS "Detected Tart mounted directory - creating space-free symlinks for headers")
     
-    # Use explicit system include flags to override path resolution issues
-    # Escape spaces in paths to prevent shell argument splitting
-    string(REPLACE " " "\\ " CWD_BINDINGS_ESCAPED "${CWD}/src/bun.js/bindings")
-    string(REPLACE " " "\\ " CWD_MODULES_ESCAPED "${CWD}/src/bun.js/modules")
-    string(REPLACE " " "\\ " CWD_BUNJS_ESCAPED "${CWD}/src/bun.js")
+    # Create symlinks without spaces for problematic directories
+    set(TART_BINDINGS_LINK "/tmp/bun-bindings")
+    set(TART_MODULES_LINK "/tmp/bun-modules") 
+    set(TART_BUNJS_LINK "/tmp/bun-js")
     
+    # Clean up any existing symlinks
+    execute_process(COMMAND rm -f "${TART_BINDINGS_LINK}" "${TART_MODULES_LINK}" "${TART_BUNJS_LINK}")
+    
+    # Create new symlinks
+    execute_process(COMMAND ln -sf "${CWD}/src/bun.js/bindings" "${TART_BINDINGS_LINK}")
+    execute_process(COMMAND ln -sf "${CWD}/src/bun.js/modules" "${TART_MODULES_LINK}")
+    execute_process(COMMAND ln -sf "${CWD}/src/bun.js" "${TART_BUNJS_LINK}")
+    
+    # Use symlinks for include directories 
     register_compiler_flags(
-      DESCRIPTION "Fix header path resolution on mounted filesystems"
+      DESCRIPTION "Fix header path resolution using space-free symlinks"
       LANGUAGES C CXX
-      -isystem "${CWD_BINDINGS_ESCAPED}"
-      -isystem "${CWD_MODULES_ESCAPED}"
-      -isystem "${CWD_BUNJS_ESCAPED}"
+      -isystem "${TART_BINDINGS_LINK}"
+      -isystem "${TART_MODULES_LINK}"
+      -isystem "${TART_BUNJS_LINK}"
       -fno-working-directory
       -fmodules-cache-path=/tmp/clang-modules-cache
     )
