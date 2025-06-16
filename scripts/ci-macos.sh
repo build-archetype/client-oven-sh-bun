@@ -419,9 +419,11 @@ create_and_run_vm() {
             
             # Add cleanup for symlink
             cleanup_symlink() {
-                if [ -L "$simple_path" ]; then
-                    rm -f "$simple_path"
-                    log "🧹 Cleaned up workspace symlink: $simple_path"
+                # Hardcode the path since it's always /tmp/bun-workspace (avoids variable scoping issues)
+                local symlink_path="/tmp/bun-workspace"
+                if [ -L "$symlink_path" ]; then
+                    rm -f "$symlink_path"
+                    log "🧹 Cleaned up workspace symlink: $symlink_path"
                 fi
             }
             trap cleanup_symlink EXIT
