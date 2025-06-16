@@ -230,6 +230,19 @@ export VENDOR_PATH="/Volumes/My Shared Files/workspace/vendor"
 export TMPDIR="/tmp"
 export LD_SUPPORT_TMPDIR="/tmp"
 
+# Override Zig cache directories to use VM-local filesystem to avoid AccessDenied errors
+# Zig translate-c and other operations don't work well on mounted filesystems
+export ZIG_LOCAL_CACHE_DIR_OVERRIDE="/tmp/zig-cache/local"
+export ZIG_GLOBAL_CACHE_DIR_OVERRIDE="/tmp/zig-cache/global"
+
+# Create VM-local Zig cache directories
+mkdir -p "/tmp/zig-cache/local" "/tmp/zig-cache/global"
+
+echo "🔧 Using VM-local Zig cache directories:"
+echo "  Local: /tmp/zig-cache/local" 
+echo "  Global: /tmp/zig-cache/global"
+echo "  (This avoids AccessDenied errors on mounted filesystems)"
+
 # Verify mount points
 echo "🔍 Verifying mount points..."
 ls -la /Volumes/ || true
