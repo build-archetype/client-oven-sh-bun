@@ -497,7 +497,7 @@ create_and_run_vm() {
             mkdir -p "$cache_dir"/{zig/global,zig/local,ccache,npm}
             
             log "✅ Cache directory created inside workspace (mounted with workspace)"
-            log "   Cache path in VM: /Volumes/workspace/buildkite-cache"
+            log "   Cache path in VM: /Volumes/My Shared Files/workspace/buildkite-cache"
         fi
     fi
     

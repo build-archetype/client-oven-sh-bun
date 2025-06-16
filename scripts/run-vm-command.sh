@@ -153,7 +153,7 @@ while IFS='=' read -r -d '' name value; do
         
         # Override build path to use VM workspace
         if [[ "$name" == "BUILDKITE_BUILD_PATH" ]]; then
-            value="/Volumes/workspace/build-workdir"
+            value="/Volumes/My Shared Files/workspace/build-workdir"
         fi
         
         printf 'export %s=%q\n' "$name" "$value" >> "$ENV_FILE"
@@ -170,9 +170,9 @@ echo "✅ Exported $env_count environment variables ($buildkite_count BUILDKITE_
 echo "🔗 ===== WORKSPACE AND CACHE MOUNTED ====="
 
 # ===== WORKSPACE AND CACHE ALREADY MOUNTED =====
-echo "✅ Workspace already mounted to VM via Tart at /Volumes/workspace"
+echo "✅ Workspace already mounted to VM via Tart at /Volumes/My Shared Files/workspace"
 if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ] && [ "${BUN_LINK_ONLY:-}" != "ON" ]; then
-    echo "✅ Cache directory inside mounted workspace at /Volumes/workspace/buildkite-cache" 
+    echo "✅ Cache directory inside mounted workspace at /Volumes/My Shared Files/workspace/buildkite-cache" 
     echo "🚀 Using fast workspace mount with persistent cache!"
 elif [ "${BUN_LINK_ONLY:-}" = "ON" ]; then
     echo "🔗 Linking step - using completely fresh environment (no cache directory)"
@@ -195,16 +195,16 @@ echo "Available volumes:"
 ls -la /Volumes/ || echo "No /Volumes directory found"
 
 # Check if workspace mount exists
-if [ -d "/Volumes/workspace" ]; then
-    echo "✅ /Volumes/workspace exists"
+if [ -d "/Volumes/My Shared Files/workspace" ]; then
+    echo "✅ /Volumes/My Shared Files/workspace exists"
     echo "Contents:"
-    ls -la /Volumes/workspace/ | head -5 || echo "Cannot list workspace contents"
+    ls -la "/Volumes/My Shared Files/workspace/" | head -5 || echo "Cannot list workspace contents"
     
     # Change to mounted workspace directory 
-    cd /Volumes/workspace
-    echo "✅ Successfully changed to /Volumes/workspace"
+    cd "/Volumes/My Shared Files/workspace"
+    echo "✅ Successfully changed to /Volumes/My Shared Files/workspace"
 else
-    echo "❌ /Volumes/workspace does not exist - mount failed"
+    echo "❌ /Volumes/My Shared Files/workspace does not exist - mount failed"
     echo "Trying alternative workspace locations..."
     
     # Try alternative locations
@@ -224,26 +224,26 @@ fi
 source ./buildkite_env.sh
 
 # Set VM-specific paths for mounted directories
-export WORKSPACE="/Volumes/workspace"
-export BUILDKITE_BUILD_PATH="/Volumes/workspace/build-workdir"
-export VENDOR_PATH="/Volumes/workspace/vendor"
+export WORKSPACE="/Volumes/My Shared Files/workspace"
+export BUILDKITE_BUILD_PATH="/Volumes/My Shared Files/workspace/build-workdir"
+export VENDOR_PATH="/Volumes/My Shared Files/workspace/vendor"
 export TMPDIR="/tmp"
 export LD_SUPPORT_TMPDIR="/tmp"
 
 # Verify mount points
 echo "🔍 Verifying mount points..."
 ls -la /Volumes/ || true
-if [ -d "/Volumes/workspace" ]; then
-    echo "✅ Workspace mounted at /Volumes/workspace"
-    ls -la /Volumes/workspace/ | head -10
+if [ -d "/Volumes/My Shared Files/workspace" ]; then
+    echo "✅ Workspace mounted at /Volumes/My Shared Files/workspace"
+    ls -la "/Volumes/My Shared Files/workspace/" | head -10
     
     # Check if cache directory exists inside workspace
     if [ "${BUN_LINK_ONLY:-}" = "ON" ]; then
         echo "🔗 Linking step - cache directory intentionally not created for fresh environment"
     elif [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ]; then
-        if [ -d "/Volumes/workspace/buildkite-cache" ]; then
+        if [ -d "/Volumes/My Shared Files/workspace/buildkite-cache" ]; then
             echo "✅ Cache directory found inside workspace"
-            ls -la /Volumes/workspace/buildkite-cache/ || true
+            ls -la "/Volumes/My Shared Files/workspace/buildkite-cache/" || true
         else
             echo "⚠️  Cache directory not found (will be created by build script)"
         fi
@@ -297,9 +297,9 @@ if [ "$should_copy" = true ]; then
     
     # Copy only final artifacts back (much faster than full rsync)
     for dir in "${artifact_dirs[@]}"; do
-        if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d /Volumes/workspace/$dir ]"; then
+        if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d \"/Volumes/My Shared Files/workspace/$dir\" ]"; then
             echo "Copying $dir/ back..."
-            rsync -av -e "sshpass -p admin ssh $SSH_OPTS" admin@$VM_IP:/Volumes/workspace/$dir/ ./$dir/ || true
+            rsync -av -e "sshpass -p admin ssh $SSH_OPTS" "admin@$VM_IP:/Volumes/My Shared Files/workspace/$dir/" ./$dir/ || true
         fi
     done
     
