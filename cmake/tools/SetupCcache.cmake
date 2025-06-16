@@ -30,6 +30,15 @@ if(DEFINED CCACHE_DIR_OVERRIDE)
   # Ensure the override directory exists
   file(MAKE_DIRECTORY ${CCACHE_DIR_OVERRIDE})
   message(STATUS "Using ephemeral ccache directory: ${CCACHE_DIR_OVERRIDE}")
+elseif(CMAKE_CURRENT_SOURCE_DIR MATCHES "My Shared Files")
+  # Auto-detect Tart mounted directories and use VM-local cache to avoid permission denied errors
+  # ccache needs to write cache files which mounted filesystems don't support well
+  set(TART_VM_CCACHE_DIR "/tmp/ccache")
+  setenv(CCACHE_DIR ${TART_VM_CCACHE_DIR})
+  file(MAKE_DIRECTORY ${TART_VM_CCACHE_DIR})
+  message(STATUS "🔧 Detected Tart mounted directory - using VM-local ccache directory:")
+  message(STATUS "  Directory: ${TART_VM_CCACHE_DIR}")
+  message(STATUS "  (This avoids permission denied errors during C++ compilation)")
 elseif(CI AND APPLE)
   # For CI on macOS, use build directory for reliable permissions
   set(MACOS_CCACHE_DIR ${BUILD_PATH}/cache/ccache)
