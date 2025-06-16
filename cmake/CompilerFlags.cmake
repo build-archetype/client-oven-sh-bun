@@ -288,12 +288,22 @@ endif()
 
 # --- Remapping ---
 if(UNIX AND CI)
-  register_compiler_flags(
-    DESCRIPTION "Remap source files"
-    -ffile-prefix-map=${CWD}=.
-    -ffile-prefix-map=${VENDOR_PATH}=vendor
-    -ffile-prefix-map=${CACHE_PATH}=cache
-  )
+  # Check if we're in a Tart mounted directory (paths containing "My Shared Files")
+  # If so, skip file prefix mapping to avoid compiler flag parsing issues with spaces
+  string(FIND "${CWD}" "My Shared Files" TART_MOUNT_FOUND)
+  
+  if(TART_MOUNT_FOUND EQUAL -1)
+    # Normal environment - use file prefix mapping
+    register_compiler_flags(
+      DESCRIPTION "Remap source files"
+      -ffile-prefix-map=${CWD}=.
+      -ffile-prefix-map=${VENDOR_PATH}=vendor
+      -ffile-prefix-map=${CACHE_PATH}=cache
+    )
+  else()
+    # Tart mounted directory - skip remapping to avoid space-in-path issues
+    message(STATUS "Detected Tart mounted directory - skipping file prefix remapping")
+  endif()
 endif()
 
 # --- Features ---
