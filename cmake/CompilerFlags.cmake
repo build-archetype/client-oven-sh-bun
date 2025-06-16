@@ -315,12 +315,17 @@ if(UNIX AND CI)
     message(STATUS "Detected Tart mounted directory - adding header path fixes")
     
     # Use explicit system include flags to override path resolution issues
+    # Escape spaces in paths to prevent shell argument splitting
+    string(REPLACE " " "\\ " CWD_BINDINGS_ESCAPED "${CWD}/src/bun.js/bindings")
+    string(REPLACE " " "\\ " CWD_MODULES_ESCAPED "${CWD}/src/bun.js/modules")
+    string(REPLACE " " "\\ " CWD_BUNJS_ESCAPED "${CWD}/src/bun.js")
+    
     register_compiler_flags(
       DESCRIPTION "Fix header path resolution on mounted filesystems"
       LANGUAGES C CXX
-      -isystem "${CWD}/src/bun.js/bindings"
-      -isystem "${CWD}/src/bun.js/modules"
-      -isystem "${CWD}/src/bun.js"
+      -isystem "${CWD_BINDINGS_ESCAPED}"
+      -isystem "${CWD_MODULES_ESCAPED}"
+      -isystem "${CWD_BUNJS_ESCAPED}"
       -fno-working-directory
       -fmodules-cache-path=/tmp/clang-modules-cache
     )
