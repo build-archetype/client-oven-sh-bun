@@ -393,12 +393,39 @@ create_and_run_vm() {
     log "🔍 Validating workspace directory: $workspace_dir"
     local actual_workspace_dir="$workspace_dir"
 
-    # If we have a complex/long path, use current directory for reliability (like C++ build)
-    if [[ "$workspace_dir" =~ /builds/.*/build-archetype.*/ ]] || [ "${#workspace_dir}" -gt 100 ]; then
-        log "🔄 Detected complex BuildKite workspace path, using current directory for reliability"
+    # If we have a complex/long path, create a simple symlink for Tart mounting (Tart has issues with complex paths)
+    if [[ "$workspace_dir" =~ /builds/.*/build-archetype.*/ ]] || [ "${#workspace_dir}" -gt 80 ]; then
+        log "🔄 Detected complex BuildKite workspace path, creating simple symlink for Tart"
         log "   Complex path: $workspace_dir"
-        log "   Using instead: $PWD"
-        actual_workspace_dir="$PWD"
+        
+        # Create a very simple symlink that Tart can handle reliably
+        local simple_path="/tmp/bun-workspace"
+        
+        # Remove any existing symlink first
+        rm -f "$simple_path" 2>/dev/null || true
+        
+        # Create the symlink
+        ln -sf "$workspace_dir" "$simple_path"
+        actual_workspace_dir="$simple_path"
+        
+        log "   Created simple symlink: $simple_path -> $workspace_dir"
+        
+        # Verify the symlink works
+        if [ ! -d "$simple_path" ] || [ ! -r "$simple_path" ]; then
+            log "❌ Symlink creation failed, falling back to current directory"
+            actual_workspace_dir="$PWD"
+        else
+            log "✅ Symlink verified working"
+            
+            # Add cleanup for symlink
+            cleanup_symlink() {
+                if [ -L "$simple_path" ]; then
+                    rm -f "$simple_path"
+                    log "🧹 Cleaned up workspace symlink: $simple_path"
+                fi
+            }
+            trap cleanup_symlink EXIT
+        fi
     fi
 
     if [ ! -d "$actual_workspace_dir" ]; then
