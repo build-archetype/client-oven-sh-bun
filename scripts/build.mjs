@@ -533,7 +533,7 @@ async function downloadBuildArtifacts() {
       console.log("📥 Downloading libbun-profile.a from build-cpp step...");
       // Try downloading compressed version first, then uncompressed
       try {
-        await spawn("buildkite-agent", ["artifact", "download", "--step", buildCppJob, "--state", "passed", "build/release/libbun-profile.a.gz", "."], {
+        await spawn("buildkite-agent", ["artifact", "download", "--step", buildCppJob, "build/release/libbun-profile.a.gz", "."], {
           stdio: "inherit"
         });
         
@@ -543,38 +543,40 @@ async function downloadBuildArtifacts() {
         if (existsSync(compressedPath)) {
           console.log("🗜️  Decompressing libbun-profile.a.gz...");
           await spawn("gunzip", [compressedPath], { stdio: "inherit" });
-          console.log("✅ Decompressed libbun-profile.a");
+          console.log("✅ Decompressed libbun-profile.a.gz successfully");
         }
       } catch (error) {
-        console.log("Compressed version not found, trying uncompressed...");
-        await spawn("buildkite-agent", ["artifact", "download", "--step", buildCppJob, "--state", "passed", "build/release/libbun-profile.a", "."], {
+        console.log("📥 Compressed version not found, trying uncompressed...");
+        await spawn("buildkite-agent", ["artifact", "download", "--step", buildCppJob, "build/release/libbun-profile.a", "."], {
           stdio: "inherit"
         });
       }
+      console.log("✅ libbun-profile.a downloaded successfully");
+    
+    // Download Zig artifacts 
+    console.log("📥 Downloading bun-zig.o from build-zig step...");
+    // Try downloading compressed version first, then uncompressed
+    try {
+      await spawn("buildkite-agent", ["artifact", "download", "--step", buildZigJob, "bun-zig.o.gz", "."], {
+        stdio: "inherit"
+      });
       
-      console.log("📥 Downloading bun-zig.o from build-zig step...");
-      // Try downloading compressed version first, then uncompressed
-      try {
-        await spawn("buildkite-agent", ["artifact", "download", "--step", buildZigJob, "--state", "passed", "bun-zig.o.gz", "."], {
-          stdio: "inherit"
-        });
-        
-        // If compressed version downloaded, decompress it
-        const compressedPath = join(buildPath, "bun-zig.o.gz");
-        const uncompressedPath = join(buildPath, "bun-zig.o");
-        if (existsSync(compressedPath)) {
-          console.log("🗜️  Decompressing bun-zig.o.gz...");
-          await spawn("gunzip", [compressedPath], { stdio: "inherit" });
-          console.log("✅ Decompressed bun-zig.o");
-        }
-      } catch (error) {
-        console.log("Compressed version not found, trying uncompressed...");
-        await spawn("buildkite-agent", ["artifact", "download", "--step", buildZigJob, "--state", "passed", "bun-zig.o", "."], {
-          stdio: "inherit"
-        });
+      // If compressed version downloaded, decompress it
+      const compressedPath = join(buildPath, "bun-zig.o.gz");
+      const uncompressedPath = join(buildPath, "bun-zig.o");
+      if (existsSync(compressedPath)) {
+        console.log("🗜️  Decompressing bun-zig.o.gz...");
+        await spawn("gunzip", [compressedPath], { stdio: "inherit" });
+        console.log("✅ Decompressed bun-zig.o.gz successfully");
       }
-      
-      console.log("✅ Build artifacts downloaded successfully");
+    } catch (error) {
+      console.log("📥 Compressed version not found, trying uncompressed...");
+      await spawn("buildkite-agent", ["artifact", "download", "--step", buildZigJob, "bun-zig.o", "."], {
+        stdio: "inherit"
+      });
+    }
+    console.log("✅ bun-zig.o downloaded successfully");
+    
     } catch (error) {
       console.error("❌ Failed to download build artifacts:", error.message);
       console.error("Make sure build-cpp and build-zig steps completed successfully");
