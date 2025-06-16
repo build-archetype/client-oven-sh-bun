@@ -508,6 +508,14 @@ check_remote_image() {
     local force_remote_refresh="${2:-false}"
     log "🌐 Checking remote image: $remote_url" >&2
     
+    # TEMPORARY: Skip remote check if authentication token looks like Buildkite token
+    if [[ "${GITHUB_TOKEN:-}" =~ ^bkct_ ]]; then
+        log "⚠️  Detected Buildkite token instead of GitHub token - skipping remote registry check" >&2
+        log "   Buildkite tokens (bkct_*) cannot authenticate to GitHub Container Registry" >&2
+        log "   Need GitHub token (ghp_* or gho_*) for registry access" >&2
+        return 1
+    fi
+    
     # Fix permissions before trying to use tart (redirect output)
     fix_tart_permissions >&2
     
