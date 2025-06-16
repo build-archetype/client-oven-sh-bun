@@ -306,6 +306,19 @@ if(UNIX AND CI)
   endif()
 endif()
 
+# --- Tart mounted filesystem header fixes ---
+if(UNIX AND CI)
+  string(FIND "${CWD}" "My Shared Files" TART_MOUNT_FOUND)
+  if(TART_MOUNT_FOUND GREATER -1)
+    # On Tart mounted filesystems, #pragma once fails when the same header
+    # is included via different paths. Add include directories to normalize paths.
+    message(STATUS "Detected Tart mounted directory - adding header path fixes")
+    
+    # Ensure the modules directory can find bindings headers without relative paths
+    include_directories(BEFORE SYSTEM "${CWD}/src/bun.js/bindings")
+  endif()
+endif()
+
 # --- Features ---
 
 # Valgrind cannot handle SSE4.2 instructions
