@@ -153,7 +153,7 @@ while IFS='=' read -r -d '' name value; do
         
         # Override build path to use VM workspace
         if [[ "$name" == "BUILDKITE_BUILD_PATH" ]]; then
-            value="/Volumes/My Shared Files/workspace/build-workdir"
+            value="/Users/admin/workspace/build"
         fi
         
         printf 'export %s=%q\n' "$name" "$value" >> "$ENV_FILE"
@@ -167,128 +167,86 @@ done < <(env -0)
 
 echo "✅ Exported $env_count environment variables ($buildkite_count BUILDKITE_* vars)"
 
-echo "🔗 ===== WORKSPACE AND CACHE MOUNTED ====="
+echo "🔗 ===== COPYING SOURCE TO VM ====="
 
-# ===== WORKSPACE AND CACHE ALREADY MOUNTED =====
-echo "✅ Workspace already mounted to VM via Tart at /Volumes/My Shared Files/workspace"
-if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ] && [ "${BUN_LINK_ONLY:-}" != "ON" ]; then
-    echo "✅ Cache directory inside mounted workspace at /Volumes/My Shared Files/workspace/buildkite-cache" 
-    echo "🚀 Using fast workspace mount with persistent cache!"
-elif [ "${BUN_LINK_ONLY:-}" = "ON" ]; then
-    echo "🔗 Linking step - using completely fresh environment (no cache directory)"
-    echo "🚀 Using fast workspace mount with fresh build environment!"
-else
-    echo "📋 No persistent cache configured"
-fi
+# ===== COPY SOURCE TO VM =====
+echo "📁 Copying source code to VM (eliminates mounted filesystem issues)..."
+
+# Create VM workspace directory
+VM_WORKSPACE="/Users/admin/workspace"
+sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "mkdir -p $VM_WORKSPACE"
+
+# Copy source files to VM (excluding build artifacts and cache)
+echo "Copying source files to VM..."
+rsync -av \
+    --exclude 'build/' \
+    --exclude 'buildkite-cache/' \
+    --exclude '.git/' \
+    --exclude 'node_modules/' \
+    --exclude '*.o' \
+    --exclude '*.a' \
+    --exclude 'zig-cache/' \
+    --exclude 'zig-out/' \
+    -e "sshpass -p admin ssh $SSH_OPTS" \
+    ./ admin@$VM_IP:$VM_WORKSPACE/
+
+echo "✅ Source code copied to VM"
+
+# Copy environment file to VM  
+sshpass -p admin scp $SSH_OPTS "$ENV_FILE" admin@$VM_IP:$VM_WORKSPACE/buildkite_env.sh
+echo "✅ Environment file copied to VM"
 
 echo "🎬 ===== EXECUTING COMMAND ====="
 
 # ===== EXECUTE COMMAND =====
 
-# Execute the user command in the VM using mounted directories
+# Execute the user command in the VM using copied workspace
 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -s <<REMOTE_EXEC
 set -eo pipefail
 
-echo "🔍 Debugging workspace mount issue..."
+echo "🔍 Working in copied workspace..."
 echo "Current directory: \$(pwd)"
-echo "Available volumes:"
-ls -la /Volumes/ || echo "No /Volumes directory found"
 
-# Check if workspace mount exists
-if [ -d "/Volumes/My Shared Files/workspace" ]; then
-    echo "✅ /Volumes/My Shared Files/workspace exists"
-    echo "Contents:"
-    ls -la "/Volumes/My Shared Files/workspace/" | head -5 || echo "Cannot list workspace contents"
-    
-    # Change to mounted workspace directory 
-    cd "/Volumes/My Shared Files/workspace"
-    echo "✅ Successfully changed to /Volumes/My Shared Files/workspace"
-else
-    echo "❌ /Volumes/My Shared Files/workspace does not exist - mount failed"
-    echo "Trying alternative workspace locations..."
-    
-    # Try alternative locations
-    if [ -d "/Users/admin/workspace" ]; then
-        echo "Found workspace at /Users/admin/workspace"
-        cd /Users/admin/workspace
-    elif [ -d "/home/admin/workspace" ]; then
-        echo "Found workspace at /home/admin/workspace"  
-        cd /home/admin/workspace
-    else
-        echo "❌ No workspace found anywhere"
-        exit 1
-    fi
-fi
+# Change to copied workspace directory 
+cd "$VM_WORKSPACE"
+echo "✅ Changed to workspace: $VM_WORKSPACE"
 
-# Source environment variables (from mounted workspace)
+# Source environment variables
 source ./buildkite_env.sh
 
-# Set VM-specific paths for mounted directories
-export WORKSPACE="/Volumes/My Shared Files/workspace"
-export BUILDKITE_BUILD_PATH="/Volumes/My Shared Files/workspace/build-workdir"
-export VENDOR_PATH="/Volumes/My Shared Files/workspace/vendor"
+# Set VM workspace paths (using local filesystem - no mounted paths!)
+export WORKSPACE="$VM_WORKSPACE"
+export BUILDKITE_BUILD_PATH="$VM_WORKSPACE/build"
+export VENDOR_PATH="$VM_WORKSPACE/vendor"
 export TMPDIR="/tmp"
 export LD_SUPPORT_TMPDIR="/tmp"
 
-# Override Zig cache directories to use VM-local filesystem to avoid AccessDenied errors
-# Zig translate-c and other operations don't work well on mounted filesystems
-export ZIG_LOCAL_CACHE_DIR_OVERRIDE="/tmp/zig-cache/local"
-export ZIG_GLOBAL_CACHE_DIR_OVERRIDE="/tmp/zig-cache/global"
-
-# Create VM-local Zig cache directories
-mkdir -p "/tmp/zig-cache/local" "/tmp/zig-cache/global"
-
-# Override ccache directory to use VM-local filesystem to avoid permission errors
-# ccache needs to write cache files which mounted filesystems don't support well
+# Use standard local cache directories (no overrides needed)
+export ZIG_LOCAL_CACHE_DIR="/tmp/zig-cache/local"
+export ZIG_GLOBAL_CACHE_DIR="/tmp/zig-cache/global"
 export CCACHE_DIR="/tmp/ccache"
 
-# Create VM-local ccache directory
-mkdir -p "/tmp/ccache"
+# Create cache directories
+mkdir -p "/tmp/zig-cache/local" "/tmp/zig-cache/global" "/tmp/ccache"
 
-echo "🔧 Using VM-local cache directories:"
-echo "  Zig Local: /tmp/zig-cache/local" 
-echo "  Zig Global: /tmp/zig-cache/global"
+echo "🔧 Using local filesystem cache directories:"
+echo "  Workspace: $VM_WORKSPACE (local filesystem)"
+echo "  Build: $VM_WORKSPACE/build"
+echo "  Zig Cache: /tmp/zig-cache/"
 echo "  Ccache: /tmp/ccache"
-echo "  (This avoids permission errors on mounted filesystems)"
+echo "  ✅ No mounted filesystem issues!"
 
-# Verify mount points
-echo "🔍 Verifying mount points..."
-ls -la /Volumes/ || true
-if [ -d "/Volumes/My Shared Files/workspace" ]; then
-    echo "✅ Workspace mounted at /Volumes/My Shared Files/workspace"
-    ls -la "/Volumes/My Shared Files/workspace/" | head -10
-    
-    # Check if cache directory exists inside workspace
-    if [ "${BUN_LINK_ONLY:-}" = "ON" ]; then
-        echo "🔗 Linking step - cache directory intentionally not created for fresh environment"
-    elif [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ]; then
-        if [ -d "/Volumes/My Shared Files/workspace/buildkite-cache" ]; then
-            echo "✅ Cache directory found inside workspace"
-            ls -la "/Volumes/My Shared Files/workspace/buildkite-cache/" || true
-        else
-            echo "⚠️  Cache directory not found (will be created by build script)"
-        fi
-    else
-        echo "📋 No persistent cache configured"
-    fi
-else
-    echo "❌ Workspace not mounted properly"
-    exit 1
-fi
+# Verify workspace setup
+echo "🔍 Verifying workspace setup..."
+ls -la "$VM_WORKSPACE/" | head -10
+echo "📁 Workspace contents look good"
 
-# Verify hermetic dependencies inside VM (where tools actually exist)
-echo "🔒 Verifying hermetic tool versions inside VM..."
-
-# Check key tools that should be available in the VM
-echo "🔍 Checking build tools:"
+# Verify tools are available
+echo "🔒 Verifying build tools..."
 command -v bun >/dev/null 2>&1 && echo "✅ Bun: \$(bun --version)" || echo "❌ Bun not found"
 command -v cmake >/dev/null 2>&1 && echo "✅ CMake: \$(cmake --version | head -1)" || echo "❌ CMake not found"
 command -v ninja >/dev/null 2>&1 && echo "✅ Ninja: \$(ninja --version)" || echo "❌ Ninja not found"
 command -v clang >/dev/null 2>&1 && echo "✅ Clang: \$(clang --version | head -1)" || echo "❌ Clang not found"
-command -v rustc >/dev/null 2>&1 && echo "✅ Rustc: \$(rustc --version)" || echo "❌ Rustc not found"
-command -v cargo >/dev/null 2>&1 && echo "✅ Cargo: \$(cargo --version)" || echo "❌ Cargo not found"
-command -v ccache >/dev/null 2>&1 && echo "✅ Ccache: \$(ccache --version | head -1)" || echo "❌ Ccache not found"
-command -v buildkite-agent >/dev/null 2>&1 && echo "✅ buildkite-agent available" || echo "❌ buildkite-agent not found"
 
 echo "🚀 Executing: $COMMAND"
 $COMMAND
@@ -297,17 +255,16 @@ EXIT_CODE=$?
 
 echo "📤 ===== COPYING FINAL ARTIFACTS BACK ====="
 
-# ===== COPY ONLY FINAL ARTIFACTS BACK =====
+# ===== COPY BUILD ARTIFACTS BACK =====
 
-# Only copy build artifacts back (cache is mounted so no need to copy)
 artifact_dirs=("build" "artifacts" "dist")
 
-echo "📦 Copying final build artifacts only (cache stays mounted)"
+echo "📦 Copying build artifacts back from VM..."
 
-# Check if any artifact directories exist in the workspace
+# Check if any artifact directories exist in the VM workspace
 should_copy=false
 for dir in "${artifact_dirs[@]}"; do
-    if [ -d "./$dir" ]; then
+    if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d \"$VM_WORKSPACE/$dir\" ]"; then
         should_copy=true
         break
     fi
@@ -316,20 +273,20 @@ done
 if [ "$should_copy" = true ]; then
     echo "Copying final artifacts back from VM..."
     
-    # Copy only final artifacts back (much faster than full rsync)
+    # Copy artifacts back from VM workspace
     for dir in "${artifact_dirs[@]}"; do
-        if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d \"/Volumes/My Shared Files/workspace/$dir\" ]"; then
+        if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d \"$VM_WORKSPACE/$dir\" ]"; then
             echo "Copying $dir/ back..."
             
-            # Try rsync first (with proper escaping)
-            if rsync -av -e "sshpass -p admin ssh $SSH_OPTS" "admin@$VM_IP:\"/Volumes/My Shared Files/workspace/$dir/\"" ./$dir/ 2>/dev/null; then
+            # Use rsync to copy artifacts back efficiently
+            if rsync -av -e "sshpass -p admin ssh $SSH_OPTS" "admin@$VM_IP:$VM_WORKSPACE/$dir/" ./$dir/ 2>/dev/null; then
                 echo "✅ rsync succeeded for $dir"
             else
                 echo "⚠️ rsync failed, trying tar+ssh fallback for $dir..."
                 
-                # Fallback: use tar over SSH to avoid path escaping issues
+                # Fallback: use tar over SSH
                 mkdir -p "./$dir"
-                if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"/Volumes/My Shared Files/workspace\" && tar -cf - \"$dir\"" | tar -xf - 2>/dev/null; then
+                if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\"" | tar -xf - 2>/dev/null; then
                     echo "✅ tar+ssh fallback succeeded for $dir"
                 else
                     echo "❌ Both rsync and tar+ssh failed for $dir"
@@ -342,9 +299,6 @@ if [ "$should_copy" = true ]; then
 else
     echo "No final artifact directories found, skipping artifact copy"
 fi
-
-# Note: Cache is not copied back because it's mounted directly - 
-# changes persist automatically on the host filesystem!
 
 echo "🧹 ===== CLEANUP ====="
 

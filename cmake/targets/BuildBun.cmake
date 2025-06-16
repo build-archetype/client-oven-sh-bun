@@ -551,123 +551,40 @@ if(NOT "${REVISION}" STREQUAL "")
 endif()
 
 # Check if we're in a Tart mounted directory and set up Zig build commands accordingly
-string(FIND "${CMAKE_BUILD_ROOT}" "My Shared Files" TART_MOUNT_FOUND)
-if(TART_MOUNT_FOUND GREATER -1)
-  # Tart environment - use cache sync for persistent incremental builds
-  set(ZIG_CACHE_SYNC_SCRIPT "${CMAKE_BINARY_DIR}/sync-zig-cache.sh")
-  set(ZIG_ARTIFACT_CACHE_SCRIPT "${CMAKE_BINARY_DIR}/zig-artifact-cache.sh")
-  set(ZIG_BUILD_WRAPPER_SCRIPT "${CMAKE_BINARY_DIR}/zig-build-wrapper.sh")
-  
-  # Create artifact caching script
-  file(WRITE "${ZIG_ARTIFACT_CACHE_SCRIPT}" "#!/bin/bash\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "set -euo pipefail\n\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "# Zig artifact caching based on source file hashes\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "ARTIFACT_CACHE_DIR=\"${BUILD_PATH}/cache/zig-artifacts\"\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "SOURCE_HASH_FILE=\"$ARTIFACT_CACHE_DIR/source-hash.txt\"\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "CACHED_ARTIFACT=\"$ARTIFACT_CACHE_DIR/bun-zig.o\"\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "TARGET_ARTIFACT=\"${BUN_ZIG_OUTPUT}\"\n\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "mkdir -p \"$ARTIFACT_CACHE_DIR\"\n\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "# Compute hash of all Zig source files and generated sources\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "compute_source_hash() {\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "  find \"${CWD}/src\" -name '*.zig' -type f -exec sha256sum {} \\; | sort | sha256sum\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "  find \"${CODEGEN_PATH}\" -name '*.zig' -o -name '*.h' -o -name '*.js' -type f -exec sha256sum {} \\; 2>/dev/null | sort | sha256sum || true\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "  echo \"${ZIG_FLAGS_BUN}\" | sha256sum\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "}\n\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "if [[ \"$1\" == \"check\" ]]; then\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "  # Check if cached artifact is valid\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "  if [[ -f \"$CACHED_ARTIFACT\" && -f \"$SOURCE_HASH_FILE\" ]]; then\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "    CURRENT_HASH=$(compute_source_hash | sha256sum)\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "    CACHED_HASH=$(cat \"$SOURCE_HASH_FILE\")\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "    if [[ \"$CURRENT_HASH\" == \"$CACHED_HASH\" ]]; then\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "      echo \"🎯 Zig sources unchanged - using cached artifact (saves ~4min)\"\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "      cp \"$CACHED_ARTIFACT\" \"$TARGET_ARTIFACT\"\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "      exit 0\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "    fi\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "  fi\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "  echo \"🔨 Zig sources changed - full build required\"\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "  exit 1\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "elif [[ \"$1\" == \"save\" ]]; then\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "  # Save artifact and hash after successful build\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "  if [[ -f \"$TARGET_ARTIFACT\" ]]; then\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "    cp \"$TARGET_ARTIFACT\" \"$CACHED_ARTIFACT\"\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "    compute_source_hash | sha256sum > \"$SOURCE_HASH_FILE\"\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "    echo \"💾 Cached Zig artifact for future builds\"\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "  fi\n")
-  file(APPEND "${ZIG_ARTIFACT_CACHE_SCRIPT}" "fi\n")
-  
-  # Create build wrapper script that handles the complete logic
-  file(WRITE "${ZIG_BUILD_WRAPPER_SCRIPT}" "#!/bin/bash\n")
-  file(APPEND "${ZIG_BUILD_WRAPPER_SCRIPT}" "set -euo pipefail\n\n")
-  file(APPEND "${ZIG_BUILD_WRAPPER_SCRIPT}" "# Try to use cached artifact first\n")
-  file(APPEND "${ZIG_BUILD_WRAPPER_SCRIPT}" "if \"${ZIG_ARTIFACT_CACHE_SCRIPT}\" check; then\n")
-  file(APPEND "${ZIG_BUILD_WRAPPER_SCRIPT}" "  # Cache hit - artifact copied, we're done\n")
-  file(APPEND "${ZIG_BUILD_WRAPPER_SCRIPT}" "  exit 0\n")
-  file(APPEND "${ZIG_BUILD_WRAPPER_SCRIPT}" "fi\n\n")
-  file(APPEND "${ZIG_BUILD_WRAPPER_SCRIPT}" "# Cache miss - perform full build with incremental cache sync\n")
-  file(APPEND "${ZIG_BUILD_WRAPPER_SCRIPT}" "echo \"🔧 Running full Zig build with cache sync...\"\n")
-  file(APPEND "${ZIG_BUILD_WRAPPER_SCRIPT}" "\"${ZIG_CACHE_SYNC_SCRIPT}\" before\n")
-  file(APPEND "${ZIG_BUILD_WRAPPER_SCRIPT}" "\"${ZIG_EXECUTABLE}\" build ${ZIG_STEPS} ${CMAKE_ZIG_FLAGS} --prefix \"${BUILD_PATH}\" -Dobj_format=${ZIG_OBJECT_FORMAT} -Dtarget=${ZIG_TARGET} -Doptimize=${ZIG_OPTIMIZE} -Dcpu=${ZIG_CPU} -Denable_logs=$<IF:$<BOOL:${ENABLE_LOGS}>,true,false> -Denable_asan=$<IF:$<BOOL:${ENABLE_ASAN}>,true,false> -Dversion=${VERSION} -Dreported_nodejs_version=${NODEJS_VERSION} -Dcanary=${CANARY_REVISION} -Dcodegen_path=${CODEGEN_PATH} -Dcodegen_embed=$<IF:$<BOOL:${CODEGEN_EMBED}>,true,false> --prominent-compile-errors --summary all ${ZIG_FLAGS_BUN}\n")
-  file(APPEND "${ZIG_BUILD_WRAPPER_SCRIPT}" "\"${ZIG_CACHE_SYNC_SCRIPT}\" after\n")
-  file(APPEND "${ZIG_BUILD_WRAPPER_SCRIPT}" "\"${ZIG_ARTIFACT_CACHE_SCRIPT}\" save\n")
-  
-  # Make all scripts executable
-  file(CHMOD "${ZIG_ARTIFACT_CACHE_SCRIPT}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
-  file(CHMOD "${ZIG_BUILD_WRAPPER_SCRIPT}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
-  
-  register_command(
-    TARGET
-      bun-zig
-    GROUP
-      console
-    COMMENT
-      "Building src/*.zig with artifact and incremental caching for ${ZIG_TARGET}"
-    COMMAND
-      ${ZIG_BUILD_WRAPPER_SCRIPT}
-    ARTIFACTS
-      ${BUN_ZIG_OUTPUT}
-    TARGETS
-      clone-zig
-    SOURCES
-      ${BUN_ZIG_SOURCES}
-      ${BUN_ZIG_GENERATED_SOURCES}
-  )
-else()
-  # Normal environment - direct cache access
-  register_command(
-    TARGET
-      bun-zig
-    GROUP
-      console
-    COMMENT
-      "Building src/*.zig into ${BUN_ZIG_OUTPUT} for ${ZIG_TARGET}"
-    COMMAND
-      ${ZIG_EXECUTABLE}
-        build ${ZIG_STEPS}
-        ${CMAKE_ZIG_FLAGS}
-        --prefix ${BUILD_PATH}
-        -Dobj_format=${ZIG_OBJECT_FORMAT}
-        -Dtarget=${ZIG_TARGET}
-        -Doptimize=${ZIG_OPTIMIZE}
-        -Dcpu=${ZIG_CPU}
-        -Denable_logs=$<IF:$<BOOL:${ENABLE_LOGS}>,true,false>
-        -Denable_asan=$<IF:$<BOOL:${ENABLE_ASAN}>,true,false>
-        -Dversion=${VERSION}
-        -Dreported_nodejs_version=${NODEJS_VERSION}
-        -Dcanary=${CANARY_REVISION}
-        -Dcodegen_path=${CODEGEN_PATH}
-        -Dcodegen_embed=$<IF:$<BOOL:${CODEGEN_EMBED}>,true,false>
-        --prominent-compile-errors
-        --summary all
-        ${ZIG_FLAGS_BUN}
-    ARTIFACTS
-      ${BUN_ZIG_OUTPUT}
-    TARGETS
-      clone-zig
-    SOURCES
-      ${BUN_ZIG_SOURCES}
-      ${BUN_ZIG_GENERATED_SOURCES}
-  )
-endif()
+register_command(
+  TARGET
+    bun-zig
+  GROUP
+    console
+  COMMENT
+    "Building src/*.zig into ${BUN_ZIG_OUTPUT} for ${ZIG_TARGET}"
+  COMMAND
+    ${ZIG_EXECUTABLE}
+      build ${ZIG_STEPS}
+      ${CMAKE_ZIG_FLAGS}
+      --prefix ${BUILD_PATH}
+      -Dobj_format=${ZIG_OBJECT_FORMAT}
+      -Dtarget=${ZIG_TARGET}
+      -Doptimize=${ZIG_OPTIMIZE}
+      -Dcpu=${ZIG_CPU}
+      -Denable_logs=$<IF:$<BOOL:${ENABLE_LOGS}>,true,false>
+      -Denable_asan=$<IF:$<BOOL:${ENABLE_ASAN}>,true,false>
+      -Dversion=${VERSION}
+      -Dreported_nodejs_version=${NODEJS_VERSION}
+      -Dcanary=${CANARY_REVISION}
+      -Dcodegen_path=${CODEGEN_PATH}
+      -Dcodegen_embed=$<IF:$<BOOL:${CODEGEN_EMBED}>,true,false>
+      --prominent-compile-errors
+      --summary all
+      ${ZIG_FLAGS_BUN}
+  ARTIFACTS
+    ${BUN_ZIG_OUTPUT}
+  TARGETS
+    clone-zig
+  SOURCES
+    ${BUN_ZIG_SOURCES}
+    ${BUN_ZIG_GENERATED_SOURCES}
+)
 
 set_property(TARGET bun-zig PROPERTY JOB_POOL compile_pool)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "build.zig")

@@ -288,68 +288,12 @@ endif()
 
 # --- Remapping ---
 if(UNIX AND CI)
-  # Check if we're in a Tart mounted directory (paths containing "My Shared Files")
-  # If so, skip file prefix mapping to avoid compiler flag parsing issues with spaces
-  string(FIND "${CWD}" "My Shared Files" TART_MOUNT_FOUND)
-  
-  if(TART_MOUNT_FOUND EQUAL -1)
-    # Normal environment - use file prefix mapping
-    register_compiler_flags(
-      DESCRIPTION "Remap source files"
-      -ffile-prefix-map=${CWD}=.
-      -ffile-prefix-map=${VENDOR_PATH}=vendor
-      -ffile-prefix-map=${CACHE_PATH}=cache
-    )
-  else()
-    # Tart mounted directory - skip remapping to avoid space-in-path issues
-    message(STATUS "Detected Tart mounted directory - skipping file prefix remapping")
-  endif()
-endif()
-
-# --- Tart mounted filesystem header fixes ---
-if(UNIX AND CI)
-  # Check multiple variables to detect Tart mounted directories more reliably
-  set(TART_MOUNT_FOUND -1)
-  string(FIND "${CWD}" "My Shared Files" TART_MOUNT_FOUND_CWD)
-  string(FIND "${CMAKE_SOURCE_DIR}" "My Shared Files" TART_MOUNT_FOUND_SRC)
-  string(FIND "${CMAKE_BUILD_ROOT}" "My Shared Files" TART_MOUNT_FOUND_BUILD)
-  
-  if(TART_MOUNT_FOUND_CWD GREATER -1 OR TART_MOUNT_FOUND_SRC GREATER -1 OR TART_MOUNT_FOUND_BUILD GREATER -1)
-    set(TART_MOUNT_FOUND 1)
-    message(STATUS "Detected Tart mounted directory - applying header duplication fixes")
-    message(STATUS "  CWD: ${CWD}")
-    message(STATUS "  CMAKE_SOURCE_DIR: ${CMAKE_SOURCE_DIR}")
-    message(STATUS "  CMAKE_BUILD_ROOT: ${CMAKE_BUILD_ROOT}")
-    
-    # Primary fix: Create symlinks without spaces for problematic directories
-    set(TART_BINDINGS_LINK "/tmp/bun-bindings")
-    set(TART_MODULES_LINK "/tmp/bun-modules") 
-    set(TART_BUNJS_LINK "/tmp/bun-js")
-    
-    # Clean up any existing symlinks
-    execute_process(COMMAND rm -f "${TART_BINDINGS_LINK}" "${TART_MODULES_LINK}" "${TART_BUNJS_LINK}")
-    
-    # Create new symlinks
-    execute_process(COMMAND ln -sf "${CWD}/src/bun.js/bindings" "${TART_BINDINGS_LINK}")
-    execute_process(COMMAND ln -sf "${CWD}/src/bun.js/modules" "${TART_MODULES_LINK}")
-    execute_process(COMMAND ln -sf "${CWD}/src/bun.js" "${TART_BUNJS_LINK}")
-    
-    message(STATUS "Created symlinks: ${TART_BINDINGS_LINK}, ${TART_MODULES_LINK}, ${TART_BUNJS_LINK}")
-    
-    # Use symlinks for include directories 
-    register_compiler_flags(
-      DESCRIPTION "Fix header path resolution using space-free symlinks on mounted filesystems"
-      LANGUAGES C CXX
-      -isystem "${TART_BINDINGS_LINK}"
-      -isystem "${TART_MODULES_LINK}"
-      -isystem "${TART_BUNJS_LINK}"
-      -fno-working-directory
-      -fmodules-cache-path=/tmp/clang-modules-cache
-      -fcanonicalize-system-headers
-    )
-    
-    message(STATUS "Applied Tart header duplication fixes")
-  endif()
+  register_compiler_flags(
+    DESCRIPTION "Remap source files"
+    -ffile-prefix-map=${CWD}=.
+    -ffile-prefix-map=${VENDOR_PATH}=vendor
+    -ffile-prefix-map=${CACHE_PATH}=cache
+  )
 endif()
 
 # --- Features ---
