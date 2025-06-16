@@ -49,6 +49,9 @@ fi
 # SSH options for reliability - comprehensive host key bypass
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
 
+# SSH options with debugging for troubleshooting authentication issues
+SSH_DEBUG_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=DEBUG -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -o PreferredAuthentications=password -o PubkeyAuthentication=no"
+
 echo "🔍 ===== WAITING FOR VM ====="
 
 # Function to wait for VM and get IP
@@ -124,6 +127,19 @@ VM_IP=$(tart ip "$VM_NAME")
 echo "🌐 VM IP: $VM_IP"
 echo "Running command in VM: $COMMAND"
 
+# Give SSH service a moment to fully stabilize before starting operations
+echo "⏳ Waiting 3 seconds for SSH service to fully stabilize..."
+sleep 3
+
+# Check for SSH keys that might interfere with password authentication
+echo "🔍 Checking for SSH keys that might interfere..."
+if [ -f ~/.ssh/id_rsa ] || [ -f ~/.ssh/id_ed25519 ] || [ -f ~/.ssh/id_ecdsa ]; then
+    echo "⚠️  Found SSH keys in ~/.ssh/ - these might interfere with password auth"
+    ls -la ~/.ssh/id_* 2>/dev/null || true
+else
+    echo "✅ No SSH keys found in ~/.ssh/"
+fi
+
 echo "📝 ===== CREATING ENVIRONMENT FILE ====="
 
 # ===== CREATE ENVIRONMENT FILE =====
@@ -172,60 +188,149 @@ echo "🔗 ===== COPYING SOURCE TO VM ====="
 # ===== COPY SOURCE TO VM =====
 echo "📁 Copying source code to VM (eliminates mounted filesystem issues)..."
 
-# Debug: Show current host filesystem state BEFORE copying
-echo "🔍 Debug: HOST filesystem state before copying:"
-echo "   Current working directory: $(pwd)"
-echo "   Host directory contents:"
-ls -la . | head -20
-echo ""
-
-echo "🔍 Debug: Checking for cache directories on HOST:"
-echo "   build/ directory: $([ -d "./build" ] && echo "EXISTS ($(ls -1 ./build 2>/dev/null | wc -l) items)" || echo "NOT FOUND")"
-echo "   zig-cache/ directory: $([ -d "./zig-cache" ] && echo "EXISTS ($(find ./zig-cache -type f 2>/dev/null | wc -l) files)" || echo "NOT FOUND")"
-echo "   buildkite-cache/ directory: $([ -d "./buildkite-cache" ] && echo "EXISTS ($(ls -1 ./buildkite-cache 2>/dev/null | wc -l) items)" || echo "NOT FOUND")"
-
-# Show build directory contents if it exists
-if [ -d "./build" ]; then
-    echo "🔍 Debug: HOST build/ directory contents:"
-    find ./build -name "*.a" -o -name "*.o" -o -name "bun*" 2>/dev/null | head -10 || echo "   No build artifacts found"
+# Test SSH connection before copying
+echo "🔍 Testing SSH connection before copying..."
+if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "echo 'SSH test successful'" 2>&1; then
+    echo "✅ SSH connection test passed"
+else
+    echo "❌ SSH connection test failed - trying with debug options..."
+    echo "SSH Debug output:"
+    sshpass -p admin ssh $SSH_DEBUG_OPTS admin@$VM_IP "echo 'SSH debug test'" 2>&1 || true
+    
+    echo "Checking VM SSH service status..."
+    if nc -z "$VM_IP" 22 >/dev/null 2>&1; then
+        echo "✅ SSH port 22 is still open"
+    else
+        echo "❌ SSH port 22 is no longer accessible"
+        exit 1
+    fi
+    
+    echo "Trying SSH with password-only authentication..."
+    if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no admin@$VM_IP "echo 'Password-only SSH test successful'" 2>&1; then
+        echo "✅ Password-only SSH works"
+        SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no -o LogLevel=ERROR"
+    else
+        echo "❌ Even password-only SSH failed"
+        exit 1
+    fi
 fi
-
-# Show zig-cache directory info if it exists  
-if [ -d "./zig-cache" ]; then
-    echo "🔍 Debug: HOST zig-cache/ directory info:"
-    echo "   Total size: $(du -sh ./zig-cache 2>/dev/null | cut -f1)"
-    echo "   File count: $(find ./zig-cache -type f 2>/dev/null | wc -l)"
-fi
-
-# Show buildkite-cache directory contents if it exists
-if [ -d "./buildkite-cache" ]; then
-    echo "🔍 Debug: HOST buildkite-cache/ directory contents:"
-    ls -la ./buildkite-cache/ | head -10
-fi
-
-echo ""
 
 # Create VM workspace directory
 VM_WORKSPACE="/Users/admin/workspace"
 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "mkdir -p $VM_WORKSPACE"
 
-# Copy source files to VM (excluding build artifacts and cache)
+# Copy source files (exclude build artifacts but include cache structure)
 echo "Copying source files to VM..."
-
-# Create a tar archive excluding build artifacts and copy via SSH
-# This is more reliable than rsync with sshpass authentication
-if tar --exclude='build/' \
-       --exclude='buildkite-cache/' \
-       --exclude='.git/' \
-       --exclude='node_modules/' \
-       --exclude='*.o' \
-       --exclude='*.a' \
-       --exclude='zig-out/' \
-       -cf - . | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd $VM_WORKSPACE && tar -xf -"; then
-    echo "✅ Source code copied to VM via tar+ssh"
+if tar -czf - \
+    --exclude='.git' \
+    --exclude='build' \
+    --exclude='zig-cache' \
+    --exclude='zig-out' \
+    --exclude='node_modules' \
+    --exclude='.DS_Store' \
+    --exclude='*.tmp' \
+    --exclude='*.log' \
+    . | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd /Volumes/My\ Shared\ Files/workspace && tar -xzf -" 2>&1; then
+    echo "✅ Source code copied successfully"
 else
     echo "❌ Failed to copy source code to VM"
-    exit 1
+    
+    # Additional debugging
+    echo "🔍 Debug: Testing individual SSH components..."
+    
+    # Test if we can still SSH at all
+    echo "Testing basic SSH connectivity..."
+    if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "echo 'Basic SSH still works'" 2>&1; then
+        echo "✅ Basic SSH still functional"
+    else
+        echo "❌ Basic SSH no longer working"
+        exit 1
+    fi
+    
+    # Test if we can access the target directory
+    echo "Testing VM workspace directory access..."
+    if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "ls -la '/Volumes/My Shared Files/workspace'" 2>&1; then
+        echo "✅ Can access VM workspace directory"
+    else
+        echo "❌ Cannot access VM workspace directory"
+        echo "Trying to create it..."
+        sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "mkdir -p '/Volumes/My Shared Files/workspace'" 2>&1 || true
+    fi
+    
+    # Test a simpler copy operation
+    echo "Testing simple file copy..."
+    echo "test content" | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cat > '/Volumes/My Shared Files/workspace/test.txt'" 2>&1
+    if [ $? -eq 0 ]; then
+        echo "✅ Simple file copy works"
+        # Try the full copy again with more verbose error reporting
+        echo "Retrying full copy with detailed error output..."
+        tar -czf - \
+            --exclude='.git' \
+            --exclude='build' \
+            --exclude='zig-cache' \
+            --exclude='zig-out' \
+            --exclude='node_modules' \
+            --exclude='.DS_Store' \
+            --exclude='*.tmp' \
+            --exclude='*.log' \
+            . | sshpass -p admin ssh -v $SSH_OPTS admin@$VM_IP "cd /Volumes/My\ Shared\ Files/workspace && tar -xzf -" 2>&1
+        if [ $? -eq 0 ]; then
+            echo "✅ Retry succeeded"
+        else
+            echo "❌ Retry also failed"
+            
+            # Check SSH daemon configuration
+            echo "🔍 Checking SSH daemon configuration..."
+            sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "sudo grep -E '^(MaxAuthTries|PasswordAuthentication|PubkeyAuthentication)' /etc/ssh/sshd_config 2>/dev/null || echo 'Could not check SSH config'" 2>&1 || true
+            
+            # Check system authentication logs  
+            echo "🔍 Checking recent SSH authentication logs..."
+            sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "tail -10 /var/log/auth.log 2>/dev/null || tail -10 /var/log/secure 2>/dev/null || echo 'No auth logs found'" 2>&1 || true
+            
+            # Try alternative copying method - smaller chunks
+            echo "🔄 Trying alternative copying method (smaller chunks)..."
+            
+            # Create a list of key directories to copy separately
+            KEY_DIRS="src cmake scripts packages"
+            KEY_FILES="CMakeLists.txt build.zig package.json bun.lock"
+            
+            echo "Copying key directories separately..."
+            for dir in $KEY_DIRS; do
+                if [ -d "$dir" ]; then
+                    echo "Copying $dir..."
+                    if tar -czf - "$dir" | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd /Volumes/My\ Shared\ Files/workspace && tar -xzf -" 2>&1; then
+                        echo "✅ $dir copied"
+                    else
+                        echo "❌ Failed to copy $dir"
+                        exit 1
+                    fi
+                fi
+            done
+            
+            echo "Copying key files..."
+            for file in $KEY_FILES; do
+                if [ -f "$file" ]; then
+                    echo "Copying $file..."
+                    if sshpass -p admin scp $SSH_OPTS "$file" admin@$VM_IP:"/Volumes/My Shared Files/workspace/" 2>&1; then
+                        echo "✅ $file copied"
+                    else
+                        echo "❌ Failed to copy $file"
+                        exit 1
+                    fi
+                fi
+            done
+            
+            echo "✅ Alternative copying method succeeded"
+        fi
+    else
+        echo "❌ Even simple file copy failed"
+        
+        # Check if this is a permission issue
+        echo "🔍 Checking VM permissions and disk space..."
+        sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "df -h && whoami && id" 2>&1 || true
+        
+        exit 1
+    fi
 fi
 
 # Copy existing build artifacts to VM for incremental builds

@@ -163,22 +163,6 @@ async function build(args) {
 
   await startGroup("CMake Build", () => spawn("cmake", buildArgs, { env }));
 
-  // Upload zig artifacts if they exist (for zig build step)
-  // Note: Zig artifacts are NOT automatically uploaded by CMake (uses OUTPUTS not ARTIFACTS)
-  const zigArtifacts = ["build/release/bun-zig.o", "build/release/bun-zig.o.gz"];
-  const zigArtifactToUpload = zigArtifacts.find(path => existsSync(path));
-  if (zigArtifactToUpload) {
-    console.log("📤 Uploading Zig build artifacts for linking step...");
-    try {
-      await spawn("buildkite-agent", ["artifact", "upload", zigArtifactToUpload], {
-        stdio: "inherit"
-      });
-      console.log(`✅ Zig artifacts uploaded successfully: ${zigArtifactToUpload}`);
-    } catch (error) {
-      console.warn("⚠️ Failed to upload Zig artifacts:", error.message);
-    }
-  }
-
   // Cache save step (after main build)
   if (process.env.BUILDKITE_CACHE_SAVE === "ON") {
     // Skip CMake cache operations for persistent cache (handled by rsync)
@@ -571,7 +555,7 @@ async function downloadBuildArtifacts() {
       console.log("📥 Downloading bun-zig.o from build-zig step...");
       // Try downloading compressed version first, then uncompressed
       try {
-        await spawn("buildkite-agent", ["artifact", "download", "--step", buildZigJob, "--state", "passed", "build/release/bun-zig.o.gz", "."], {
+        await spawn("buildkite-agent", ["artifact", "download", "--step", buildZigJob, "--state", "passed", "bun-zig.o.gz", "."], {
           stdio: "inherit"
         });
         
@@ -585,7 +569,7 @@ async function downloadBuildArtifacts() {
         }
       } catch (error) {
         console.log("Compressed version not found, trying uncompressed...");
-        await spawn("buildkite-agent", ["artifact", "download", "--step", buildZigJob, "--state", "passed", "build/release/bun-zig.o", "."], {
+        await spawn("buildkite-agent", ["artifact", "download", "--step", buildZigJob, "--state", "passed", "bun-zig.o", "."], {
           stdio: "inherit"
         });
       }

@@ -412,12 +412,14 @@ function getBuildEnv(target, options) {
 
   // Add persistent cache configuration for macOS only
   if (os === "darwin") {
-    env.BUILDKITE_CACHE_RESTORE = "ON";
-    env.BUILDKITE_CACHE_SAVE = "ON";
-    // Use persistent cache - workspace-relative directory
+    // Use persistent cache - workspace-relative directory  
     env.BUILDKITE_CACHE_TYPE = "persistent";
     // Host cache directory (workspace-relative for CI)
     env.BUILDKITE_CACHE_BASE = env.BUILDKITE_CACHE_BASE || "./buildkite-cache";
+    
+    // NOTE: Do NOT set BUILDKITE_CACHE_RESTORE=ON or BUILDKITE_CACHE_SAVE=ON
+    // for persistent cache type - the new copy-based VM cache system handles
+    // caching automatically without the old Buildkite artifact-based system
     
     // Force clean checkout to ensure source code consistency
     // This disables cache reading (as per build.mjs logic) but ensures fresh source
