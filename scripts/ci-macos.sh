@@ -503,8 +503,33 @@ create_and_run_vm() {
     
     log "✅ Workspace cleaned and prepared for fresh build"
     
+    # Debug the workspace mounting setup
+    log "🔍 Debugging workspace mounting setup..."
+    log "   Workspace to mount: $actual_workspace_dir"
+    
+    # Check if the workspace path exists and is accessible
+    if [ -L "$actual_workspace_dir" ]; then
+        log "   Path is a symlink: $(readlink "$actual_workspace_dir")"
+        log "   Symlink target exists: $([ -d "$(readlink "$actual_workspace_dir")" ] && echo "YES" || echo "NO")"
+        log "   Symlink permissions: $(ls -la "$actual_workspace_dir")"
+    elif [ -d "$actual_workspace_dir" ]; then
+        log "   Path is a regular directory"
+        log "   Directory permissions: $(ls -ld "$actual_workspace_dir")"
+    else
+        log "   ❌ Path does not exist or is not accessible"
+    fi
+    
+    # Test if Tart can access the directory before mounting
+    log "   Testing Tart access to workspace..."
+    if ls "$actual_workspace_dir" >/dev/null 2>&1; then
+        log "   ✅ Host can list workspace contents"
+    else
+        log "   ❌ Host cannot list workspace contents"
+    fi
+    
     log "Starting VM with workspace: $actual_workspace_dir"
     # Mount workspace only (cache is inside workspace) - single mount, more reliable
+    log "🚀 Running Tart command: tart run \"$vm_name\" --no-graphics --dir=workspace:\"$actual_workspace_dir\""
     tart run "$vm_name" --no-graphics --dir=workspace:"$actual_workspace_dir" > vm.log 2>&1 &
     local vm_pid=$!
     
@@ -531,11 +556,35 @@ create_and_run_vm() {
                 log "   - Permission issues with the shared directory"
                 log "   - Special characters or symlinks in the path"
                 
-                # Try to start without directory sharing as fallback
-                log "🔄 Attempting to restart VM without directory sharing..."
-                tart run "$vm_name" --no-graphics > vm.log 2>&1 &
-                local vm_pid_retry=$!
+                # Try fallback: use the original path instead of symlink
+                if [ -L "$actual_workspace_dir" ]; then
+                    local original_path=$(readlink "$actual_workspace_dir")
+                    log "🔄 Trying fallback: mounting original path directly"
+                    log "   Original path: $original_path"
+                    
+                    # Stop the failed VM first
+                    tart stop "$vm_name" 2>/dev/null || true
+                    sleep 2
+                    
+                    # Try again with the original path
+                    log "🚀 Fallback Tart command: tart run \"$vm_name\" --no-graphics --dir=workspace:\"$original_path\""
+                    tart run "$vm_name" --no-graphics --dir=workspace:"$original_path" > vm.log 2>&1 &
+                    sleep 3
+                    
+                    if tart list | grep "$vm_name" | grep -q "running"; then
+                        log "✅ VM started successfully with original path"
+                        return 0  # Continue with the build
+                    else
+                        log "❌ VM failed to start even with original path"
+                    fi
+                fi
+                
+                # Final fallback: try to start without directory sharing
+                log "🔄 Final fallback: attempting to restart VM without directory sharing..."
+                tart stop "$vm_name" 2>/dev/null || true
                 sleep 2
+                tart run "$vm_name" --no-graphics > vm.log 2>&1 &
+                sleep 3
                 
                 if tart list | grep "$vm_name" | grep -q "running"; then
                     log "✅ VM started successfully without directory sharing"
@@ -555,6 +604,18 @@ create_and_run_vm() {
         # The cleanup trap will handle VM deletion
         exit 1
     fi
+    
+    # Check VM log for any mounting warnings even if VM started
+    if [ -f vm.log ]; then
+        log "🔍 Checking VM log for mounting issues..."
+        if grep -q -i "sharing\|mount\|volume" vm.log; then
+            log "   Found mount-related messages in VM log:"
+            grep -i "sharing\|mount\|volume" vm.log | while read -r line; do
+                log "     $line"
+            done
+        fi
+    fi
+    
     log "✅ VM is running successfully"
 
     # Make run-vm-command.sh executable
