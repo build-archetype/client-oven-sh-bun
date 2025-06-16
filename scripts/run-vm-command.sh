@@ -192,6 +192,19 @@ rsync -av \
 
 echo "✅ Source code copied to VM"
 
+# Copy existing build artifacts to VM for incremental builds
+echo "📁 Copying existing build artifacts for incremental builds..."
+if [ -d "./build" ]; then
+    echo "Found existing build/ directory - copying to VM for incremental build..."
+    if rsync -av -e "sshpass -p admin ssh $SSH_OPTS" ./build/ admin@$VM_IP:$VM_WORKSPACE/build/; then
+        echo "✅ Build artifacts copied to VM"
+    else
+        echo "⚠️ Failed to copy build artifacts - will do clean build"
+    fi
+else
+    echo "📋 No existing build/ directory found - will do clean build"
+fi
+
 # Copy environment file to VM  
 sshpass -p admin scp $SSH_OPTS "$ENV_FILE" admin@$VM_IP:$VM_WORKSPACE/buildkite_env.sh
 echo "✅ Environment file copied to VM"
