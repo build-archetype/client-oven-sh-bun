@@ -317,6 +317,7 @@ if(UNIX AND CI)
     # Use explicit system include flags to override path resolution issues
     register_compiler_flags(
       DESCRIPTION "Fix header path resolution on mounted filesystems"
+      LANGUAGES C CXX
       -isystem "${CWD}/src/bun.js/bindings"
       -isystem "${CWD}/src/bun.js/modules"
       -isystem "${CWD}/src/bun.js"
