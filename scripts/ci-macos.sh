@@ -639,6 +639,50 @@ create_and_run_vm() {
     log "Executing command in VM: $command"
     profile_build_step "VM-$BUILD_TYPE-Build" ./scripts/run-vm-command.sh "$vm_name" "$command"
 
+    # TEMPORARY DEBUG: Verify cache state after build completion (for C++ and Zig builds)
+    if [ "${BUN_CPP_ONLY:-}" = "ON" ] || [ "${BUN_ZIG_ONLY:-}" = "ON" ] || [[ "$command" == *"--target bun-zig"* ]] || [[ "$command" == *"--target bun"* ]]; then
+        log "🔍 TEMPORARY DEBUG: Verifying cache state AFTER build completion..."
+        local cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}"
+        
+        if [ -d "$cache_dir" ]; then
+            local cache_size=$(du -sh "$cache_dir" 2>/dev/null | cut -f1 || echo "unknown")
+            log "   ✅ Cache directory exists: $cache_dir"
+            log "   📊 Cache size AFTER build: $cache_size"
+            
+            # Check each cache subdirectory
+            for subdir in "zig/global" "zig/local" "ccache" "npm" "build-results"; do
+                if [ -d "$cache_dir/$subdir" ]; then
+                    local subdir_size=$(du -sh "$cache_dir/$subdir" 2>/dev/null | cut -f1 || echo "unknown")
+                    local item_count=$(find "$cache_dir/$subdir" -type f 2>/dev/null | wc -l | tr -d ' ')
+                    log "   📁 $subdir: $subdir_size ($item_count files)"
+                    
+                    # Show a few sample files for populated directories
+                    if [ "$item_count" -gt 0 ]; then
+                        log "      Sample files:"
+                        find "$cache_dir/$subdir" -type f 2>/dev/null | head -2 | while read -r file; do
+                            local rel_file=${file#$cache_dir/}
+                            log "        $rel_file"
+                        done
+                        [ "$item_count" -gt 2 ] && log "        ... and $((item_count - 2)) more files"
+                    fi
+                else
+                    log "   📋 $subdir: not found"
+                fi
+            done
+            
+            # Post-build assessment
+            if [ "$cache_size" = "0B" ] || [ "$cache_size" = "unknown" ]; then
+                log "   ⚠️  WARNING: Cache is still empty after build - cache save may have failed"
+            else
+                log "   🎉 SUCCESS: Cache populated after build - ready for next incremental build!"
+            fi
+        else
+            log "   ❌ Cache directory not found after build: $cache_dir"
+            log "   This indicates the cache copy-back from VM may have failed"
+        fi
+        log "🔍 END TEMPORARY DEBUG: Post-build cache state verification complete"
+    fi
+
     # Upload logs and timing data
     buildkite-agent artifact upload vm.log || true
     buildkite-agent artifact upload build_timings.csv || true
