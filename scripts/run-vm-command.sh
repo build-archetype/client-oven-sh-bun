@@ -172,6 +172,39 @@ echo "🔗 ===== COPYING SOURCE TO VM ====="
 # ===== COPY SOURCE TO VM =====
 echo "📁 Copying source code to VM (eliminates mounted filesystem issues)..."
 
+# Debug: Show current host filesystem state BEFORE copying
+echo "🔍 Debug: HOST filesystem state before copying:"
+echo "   Current working directory: $(pwd)"
+echo "   Host directory contents:"
+ls -la . | head -20
+echo ""
+
+echo "🔍 Debug: Checking for cache directories on HOST:"
+echo "   build/ directory: $([ -d "./build" ] && echo "EXISTS ($(ls -1 ./build 2>/dev/null | wc -l) items)" || echo "NOT FOUND")"
+echo "   zig-cache/ directory: $([ -d "./zig-cache" ] && echo "EXISTS ($(find ./zig-cache -type f 2>/dev/null | wc -l) files)" || echo "NOT FOUND")"
+echo "   buildkite-cache/ directory: $([ -d "./buildkite-cache" ] && echo "EXISTS ($(ls -1 ./buildkite-cache 2>/dev/null | wc -l) items)" || echo "NOT FOUND")"
+
+# Show build directory contents if it exists
+if [ -d "./build" ]; then
+    echo "🔍 Debug: HOST build/ directory contents:"
+    find ./build -name "*.a" -o -name "*.o" -o -name "bun*" 2>/dev/null | head -10 || echo "   No build artifacts found"
+fi
+
+# Show zig-cache directory info if it exists  
+if [ -d "./zig-cache" ]; then
+    echo "🔍 Debug: HOST zig-cache/ directory info:"
+    echo "   Total size: $(du -sh ./zig-cache 2>/dev/null | cut -f1)"
+    echo "   File count: $(find ./zig-cache -type f 2>/dev/null | wc -l)"
+fi
+
+# Show buildkite-cache directory contents if it exists
+if [ -d "./buildkite-cache" ]; then
+    echo "🔍 Debug: HOST buildkite-cache/ directory contents:"
+    ls -la ./buildkite-cache/ | head -10
+fi
+
+echo ""
+
 # Create VM workspace directory
 VM_WORKSPACE="/Users/admin/workspace"
 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "mkdir -p $VM_WORKSPACE"
@@ -199,8 +232,12 @@ fi
 echo "📁 Copying existing build artifacts for incremental builds..."
 if [ -d "./build" ]; then
     echo "Found existing build/ directory - copying to VM for incremental build..."
+    echo "🔍 Debug: About to copy $(du -sh ./build 2>/dev/null | cut -f1) of build artifacts..."
     if tar -cf - ./build | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd $VM_WORKSPACE && tar -xf -"; then
         echo "✅ Build artifacts copied to VM via tar+ssh"
+        # Verify the copy worked by checking what's in VM
+        echo "🔍 Debug: Verifying build/ copy in VM..."
+        sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "ls -la $VM_WORKSPACE/build/ 2>/dev/null | head -5" || echo "   Failed to list VM build directory"
     else
         echo "⚠️ Failed to copy build artifacts - will do clean build"
     fi
@@ -212,13 +249,42 @@ fi
 echo "⚡ Copying existing zig-cache for fast Zig builds..."
 if [ -d "./zig-cache" ]; then
     echo "Found existing zig-cache/ directory - copying to VM for fast Zig incremental builds..."
+    echo "🔍 Debug: About to copy $(du -sh ./zig-cache 2>/dev/null | cut -f1) of Zig cache..."
     if tar -cf - ./zig-cache | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd $VM_WORKSPACE && tar -xf -"; then
         echo "✅ Zig cache copied to VM via tar+ssh"
+        # Verify the copy worked
+        echo "🔍 Debug: Verifying zig-cache/ copy in VM..."
+        sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "ls -la $VM_WORKSPACE/zig-cache/ 2>/dev/null | head -3" || echo "   Failed to list VM zig-cache directory"
     else
         echo "⚠️ Failed to copy zig-cache - will do clean Zig build"
     fi
 else
     echo "📋 No existing zig-cache/ directory found - will do clean Zig build"
+fi
+
+# Copy buildkite-cache directory (for CMake cache system) if it exists
+echo "🏗️  Copying buildkite-cache for CMake incremental builds..."
+if [ -d "./buildkite-cache" ]; then
+    echo "Found existing buildkite-cache/ directory - copying to VM for CMake incremental builds..."
+    echo "🔍 Debug: About to copy $(du -sh ./buildkite-cache 2>/dev/null | cut -f1) of buildkite cache..."
+    if tar -cf - ./buildkite-cache | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd $VM_WORKSPACE && tar -xf -"; then
+        echo "✅ Buildkite cache copied to VM via tar+ssh"
+        # Verify the copy worked
+        echo "🔍 Debug: Verifying buildkite-cache/ copy in VM..."
+        sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "ls -la $VM_WORKSPACE/buildkite-cache/ 2>/dev/null | head -5" || echo "   Failed to list VM buildkite-cache directory"
+        
+        # Check for CMake cache directories specifically
+        if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d $VM_WORKSPACE/buildkite-cache/build-results ]"; then
+            echo "🔍 Debug: CMake cache build-results found in VM:"
+            sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "ls -la $VM_WORKSPACE/buildkite-cache/build-results/ 2>/dev/null" || echo "   Failed to list build-results"
+        else
+            echo "🔍 Debug: No CMake cache build-results directory found in VM"
+        fi
+    else
+        echo "⚠️ Failed to copy buildkite-cache - will do clean CMake build"
+    fi
+else
+    echo "📋 No existing buildkite-cache/ directory found - will do clean CMake build"
 fi
 
 # Copy environment file to VM  
@@ -287,21 +353,33 @@ echo "📤 ===== COPYING FINAL ARTIFACTS BACK ====="
 # ===== COPY BUILD ARTIFACTS AND CACHES BACK =====
 
 artifact_dirs=("build" "artifacts" "dist")
-cache_dirs=("zig-cache")
+cache_dirs=("zig-cache" "buildkite-cache")
 
 echo "📦 Copying build artifacts and caches back from VM..."
+
+# Debug: Show what exists in VM before copying back
+echo "🔍 Debug: VM filesystem state before copying back:"
+sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "ls -la $VM_WORKSPACE/ | head -15" || echo "   Failed to list VM workspace"
 
 # Copy build artifacts back from VM workspace
 for dir in "${artifact_dirs[@]}"; do
     if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d \"$VM_WORKSPACE/$dir\" ]"; then
         echo "Copying $dir/ back from VM..."
+        echo "🔍 Debug: VM $dir/ directory info:"
+        sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "du -sh \"$VM_WORKSPACE/$dir\" 2>/dev/null || echo 'Size unknown'"
+        sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "find \"$VM_WORKSPACE/$dir\" -name '*.a' -o -name '*.o' -o -name 'bun*' 2>/dev/null | head -5" || echo "   No build artifacts found"
         
         # Use tar over SSH (more reliable than rsync with sshpass)
         if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\"" | tar -xf -; then
             echo "✅ $dir copied back via tar+ssh"
+            # Verify copy back worked
+            echo "🔍 Debug: Verifying $dir/ copied back to HOST:"
+            echo "   HOST $dir/ size: $(du -sh ./$dir 2>/dev/null | cut -f1 || echo 'unknown')"
         else
             echo "❌ Failed to copy $dir back from VM"
         fi
+    else
+        echo "📋 No $dir/ directory found in VM to copy back"
     fi
 done
 
@@ -309,13 +387,32 @@ done
 for dir in "${cache_dirs[@]}"; do
     if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d \"$VM_WORKSPACE/$dir\" ]"; then
         echo "⚡ Copying $dir/ back for fast incremental builds..."
+        echo "🔍 Debug: VM $dir/ directory info:"
+        sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "du -sh \"$VM_WORKSPACE/$dir\" 2>/dev/null || echo 'Size unknown'"
+        
+        # For buildkite-cache, show what's in build-results specifically
+        if [ "$dir" = "buildkite-cache" ]; then
+            echo "🔍 Debug: VM buildkite-cache/build-results contents:"
+            sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "ls -la \"$VM_WORKSPACE/$dir/build-results/\" 2>/dev/null || echo 'No build-results directory'"
+        fi
         
         # Use tar over SSH for cache directories
         if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\"" | tar -xf -; then
             echo "✅ $dir copied back via tar+ssh"
+            # Verify copy back worked
+            echo "🔍 Debug: Verifying $dir/ copied back to HOST:"
+            echo "   HOST $dir/ size: $(du -sh ./$dir 2>/dev/null | cut -f1 || echo 'unknown')"
+            
+            # For buildkite-cache, verify CMake cache structure
+            if [ "$dir" = "buildkite-cache" ] && [ -d "./$dir/build-results" ]; then
+                echo "🔍 Debug: HOST buildkite-cache/build-results contents:"
+                ls -la ./$dir/build-results/ 2>/dev/null | head -5 || echo "   Empty or inaccessible"
+            fi
         else
             echo "⚠️ Failed to copy $dir back - next build may be slower"
         fi
+    else
+        echo "📋 No $dir/ directory found in VM to copy back"
     fi
 done
 
