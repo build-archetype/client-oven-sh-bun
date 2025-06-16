@@ -1,6 +1,27 @@
 #!/bin/bash
 set -euo pipefail
 
+# Fix HOME environment variable if not set (common in CI environments running as root)
+if [ -z "${HOME:-}" ]; then
+    # Determine appropriate HOME directory based on current user
+    if [ "$(id -u)" = "0" ]; then
+        # Running as root
+        export HOME="/root"
+    else
+        # Try to get HOME from current user
+        HOME=$(getent passwd "$(whoami)" | cut -d: -f6 2>/dev/null || echo "/tmp")
+        export HOME
+    fi
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] HOME was not set, using: $HOME"
+fi
+
+# Fix USER environment variable if not set (common in CI environments)
+if [ -z "${USER:-}" ]; then
+    USER=$(whoami)
+    export USER
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] USER was not set, using: $USER"
+fi
+
 # SSH options for VM connectivity
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
 
@@ -71,6 +92,12 @@ log "======================="
 # This is a workaround for a bug in Tart where the .tart directory is not owned by the user running the script.
 # This can be removed once we are confident that tart permissions are working correctly.
 fix_tart_permissions() {
+    # Safety check - HOME should be set by now, but fallback if not
+    if [ -z "${HOME:-}" ]; then
+        log "Warning: HOME still not set in fix_tart_permissions, using /root fallback"
+        export HOME="/root"
+    fi
+    
     local tart_dir="$HOME/.tart"
     local real_user="${SUDO_USER:-$USER}"
     
