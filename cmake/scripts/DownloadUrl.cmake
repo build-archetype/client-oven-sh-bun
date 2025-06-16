@@ -156,20 +156,17 @@ else()
       message(WARNING "cmake -E copy_directory failed (result: ${COPY_RESULT})")
       message(WARNING "Output: ${COPY_OUTPUT}")
       message(WARNING "Error: ${COPY_ERROR}")
-      message(STATUS "Attempting fallback copy method...")
       
-      # Fallback: Try simpler tar-based copy
+      # Fallback: try tar-based copy with proper path escaping
+      message(STATUS "Attempting fallback copy method...")
       execute_process(
-        COMMAND sh -c "cd ${DOWNLOAD_TMP_FILE} && tar cf - . | (cd ${DOWNLOAD_PATH} && tar xf -)"
+        COMMAND /bin/sh -c "cd '${DOWNLOAD_TMP_FILE}' && tar -cf - . | (cd '${DOWNLOAD_PATH}' && tar -xf -)"
         RESULT_VARIABLE TAR_RESULT
-        OUTPUT_VARIABLE TAR_OUTPUT
+        OUTPUT_VARIABLE TAR_OUTPUT  
         ERROR_VARIABLE TAR_ERROR
       )
       
-      if(TAR_RESULT EQUAL 0)
-        message(STATUS "Tar-based copy successful as fallback")
-        set(COPY_RESULT 0)
-      else()
+      if(NOT TAR_RESULT EQUAL 0)
         message(WARNING "Tar-based copy also failed (result: ${TAR_RESULT})")
         message(WARNING "Tar output: ${TAR_OUTPUT}")
         message(WARNING "Tar error: ${TAR_ERROR}")
