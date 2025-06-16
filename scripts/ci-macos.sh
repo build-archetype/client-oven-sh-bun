@@ -399,7 +399,7 @@ create_and_run_vm() {
         log "   Complex path: $workspace_dir"
         
         # Create a very simple symlink that Tart can handle reliably
-        local simple_path="/tmp/bun-workspace"
+        simple_path="/tmp/bun-workspace"
         
         # Remove any existing symlink first
         rm -f "$simple_path" 2>/dev/null || true
