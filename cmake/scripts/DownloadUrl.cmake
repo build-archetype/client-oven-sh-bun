@@ -116,7 +116,14 @@ endif()
 
 if(DOWNLOAD_FILTERS)
   foreach(file ${DOWNLOAD_TMP_FILE})
-    file(INSTALL ${file} DESTINATION ${DOWNLOAD_PATH} NO_SOURCE_PERMISSIONS)
+    # Check if we're copying to a Tart mounted directory (which has permission restrictions)
+    if(DOWNLOAD_PATH MATCHES "My Shared Files")
+      # Use NO_SOURCE_PERMISSIONS for Tart mounted directories to avoid permission errors
+      file(INSTALL ${file} DESTINATION ${DOWNLOAD_PATH} NO_SOURCE_PERMISSIONS)
+    else()
+      # Use normal COPY for other destinations to preserve permissions
+      file(COPY ${file} DESTINATION ${DOWNLOAD_PATH})
+    endif()
     file(REMOVE_RECURSE ${file})
   endforeach()
 else()
@@ -124,7 +131,14 @@ else()
   get_filename_component(DOWNLOAD_PARENT_PATH ${DOWNLOAD_PATH} DIRECTORY)
   file(MAKE_DIRECTORY ${DOWNLOAD_PARENT_PATH})
   
-  file(INSTALL ${DOWNLOAD_TMP_FILE} DESTINATION ${DOWNLOAD_PARENT_PATH} NO_SOURCE_PERMISSIONS)
+  # Check if we're copying to a Tart mounted directory (which has permission restrictions)
+  if(DOWNLOAD_PATH MATCHES "My Shared Files")
+    # Use NO_SOURCE_PERMISSIONS for Tart mounted directories to avoid permission errors
+    file(INSTALL ${DOWNLOAD_TMP_FILE} DESTINATION ${DOWNLOAD_PARENT_PATH} NO_SOURCE_PERMISSIONS)
+  else()
+    # Use normal COPY for other destinations to preserve permissions
+    file(COPY ${DOWNLOAD_TMP_FILE} DESTINATION ${DOWNLOAD_PARENT_PATH})
+  endif()
   get_filename_component(DOWNLOAD_TMP_NAME ${DOWNLOAD_TMP_FILE} NAME)
   set(COPIED_PATH ${DOWNLOAD_PARENT_PATH}/${DOWNLOAD_TMP_NAME})
   if(NOT ${COPIED_PATH} STREQUAL ${DOWNLOAD_PATH})
