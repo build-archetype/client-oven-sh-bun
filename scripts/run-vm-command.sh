@@ -189,8 +189,36 @@ echo "🎬 ===== EXECUTING COMMAND ====="
 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -s <<REMOTE_EXEC
 set -eo pipefail
 
-# Change to mounted workspace directory 
-cd /Volumes/workspace
+echo "🔍 Debugging workspace mount issue..."
+echo "Current directory: \$(pwd)"
+echo "Available volumes:"
+ls -la /Volumes/ || echo "No /Volumes directory found"
+
+# Check if workspace mount exists
+if [ -d "/Volumes/workspace" ]; then
+    echo "✅ /Volumes/workspace exists"
+    echo "Contents:"
+    ls -la /Volumes/workspace/ | head -5 || echo "Cannot list workspace contents"
+    
+    # Change to mounted workspace directory 
+    cd /Volumes/workspace
+    echo "✅ Successfully changed to /Volumes/workspace"
+else
+    echo "❌ /Volumes/workspace does not exist - mount failed"
+    echo "Trying alternative workspace locations..."
+    
+    # Try alternative locations
+    if [ -d "/Users/admin/workspace" ]; then
+        echo "Found workspace at /Users/admin/workspace"
+        cd /Users/admin/workspace
+    elif [ -d "/home/admin/workspace" ]; then
+        echo "Found workspace at /home/admin/workspace"  
+        cd /home/admin/workspace
+    else
+        echo "❌ No workspace found anywhere"
+        exit 1
+    fi
+fi
 
 # Source environment variables (from mounted workspace)
 source ./buildkite_env.sh
@@ -227,9 +255,18 @@ else
     exit 1
 fi
 
-# Ensure required tools are available
-echo "🔧 Verifying tools..."
+# Verify hermetic dependencies inside VM (where tools actually exist)
+echo "🔒 Verifying hermetic tool versions inside VM..."
+
+# Check key tools that should be available in the VM
+echo "🔍 Checking build tools:"
 command -v bun >/dev/null 2>&1 && echo "✅ Bun: \$(bun --version)" || echo "❌ Bun not found"
+command -v cmake >/dev/null 2>&1 && echo "✅ CMake: \$(cmake --version | head -1)" || echo "❌ CMake not found"
+command -v ninja >/dev/null 2>&1 && echo "✅ Ninja: \$(ninja --version)" || echo "❌ Ninja not found"
+command -v clang >/dev/null 2>&1 && echo "✅ Clang: \$(clang --version | head -1)" || echo "❌ Clang not found"
+command -v rustc >/dev/null 2>&1 && echo "✅ Rustc: \$(rustc --version)" || echo "❌ Rustc not found"
+command -v cargo >/dev/null 2>&1 && echo "✅ Cargo: \$(cargo --version)" || echo "❌ Cargo not found"
+command -v ccache >/dev/null 2>&1 && echo "✅ Ccache: \$(ccache --version | head -1)" || echo "❌ Ccache not found"
 command -v buildkite-agent >/dev/null 2>&1 && echo "✅ buildkite-agent available" || echo "❌ buildkite-agent not found"
 
 echo "🚀 Executing: $COMMAND"
