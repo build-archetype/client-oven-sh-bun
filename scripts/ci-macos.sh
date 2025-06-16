@@ -419,11 +419,9 @@ create_and_run_vm() {
             
             # Add cleanup for symlink
             cleanup_symlink() {
-                # Hardcode the path since it's always /tmp/bun-workspace (avoids variable scoping issues)
-                local symlink_path="/tmp/bun-workspace"
-                if [ -L "$symlink_path" ]; then
-                    rm -f "$symlink_path"
-                    log "🧹 Cleaned up workspace symlink: $symlink_path"
+                if [ -L "$simple_path" ]; then
+                    rm -f "$simple_path"
+                    log "🧹 Cleaned up workspace symlink: $simple_path"
                 fi
             }
             trap cleanup_symlink EXIT
@@ -456,32 +454,66 @@ create_and_run_vm() {
     # First, ensure source code is in clean state (handle incremental Buildkite checkouts)
     log "🔄 Ensuring clean git state..."
     
-    # Clean any untracked files and reset working directory
+    # Clean any untracked files and directories BUT preserve build caches
     if [ -d ".git" ]; then
-        # Remove all untracked files and directories (including ignored ones)
-        git clean -fxd || true
+        # Preserve important cache directories during git clean
+        local temp_cache_backup="/tmp/bun-cache-backup-$$"
+        mkdir -p "$temp_cache_backup"
+        
+        # Backup incremental build caches if they exist
+        [ -d "./build" ] && cp -r "./build" "$temp_cache_backup/" 2>/dev/null || true
+        [ -d "./zig-cache" ] && cp -r "./zig-cache" "$temp_cache_backup/" 2>/dev/null || true
+        [ -d "./buildkite-cache" ] && cp -r "./buildkite-cache" "$temp_cache_backup/" 2>/dev/null || true
+        
+        # Clean untracked files (but exclude cache directories we want to keep)
+        git clean -fxd \
+            -e "build/" \
+            -e "zig-cache/" \
+            -e "buildkite-cache/" \
+            || true
         
         # Reset any modified files to HEAD state
         git reset --hard HEAD || true
         
+        # Restore cache directories
+        [ -d "$temp_cache_backup/build" ] && cp -r "$temp_cache_backup/build" "./" 2>/dev/null || true
+        [ -d "$temp_cache_backup/zig-cache" ] && cp -r "$temp_cache_backup/zig-cache" "./" 2>/dev/null || true
+        [ -d "$temp_cache_backup/buildkite-cache" ] && cp -r "$temp_cache_backup/buildkite-cache" "./" 2>/dev/null || true
+        
+        # Clean up temp backup
+        rm -rf "$temp_cache_backup" 2>/dev/null || true
+        
         # Clean any git cruft
         git gc --prune=now || true
         
-        log "✅ Git workspace cleaned - fresh source code state"
+        log "✅ Git workspace cleaned - preserved incremental build caches"
     else
         log "⚠️  No .git directory found - assuming fresh checkout"
     fi
     
-    # Then clean build artifacts and temporary files to ensure fresh builds
-    log "🗑️  Removing build artifacts and temporary files..."
-    rm -rf ./build ./artifacts ./dist ./tmp ./.temp || true
+    # Clean generated outputs but preserve incremental caches
+    log "🗑️  Removing generated outputs (preserving incremental caches)..."
+    rm -rf ./artifacts ./dist ./tmp ./.temp || true
     rm -rf ./node_modules/.cache || true  # Clear npm cache but keep node_modules
     
-    # Clean any CMake cache files (but preserve our buildkite-cache)
-    find . -name "CMakeCache.txt" -delete 2>/dev/null || true
-    find . -name "CMakeFiles" -type d -exec rm -rf {} + 2>/dev/null || true
+    # Clean specific build outputs but preserve cache structure
+    if [ -d "./build" ]; then
+        log "📁 Found existing build/ directory - preserving for incremental builds"
+        # Only clean specific output files, keep cache structure
+        find ./build -name "*.zip" -delete 2>/dev/null || true
+        find ./build -name "features.json" -delete 2>/dev/null || true
+        # Keep CMakeCache and incremental state
+    else
+        log "📋 No existing build/ directory found"
+    fi
     
-    # Clean any other common build/temp directories (but preserve source and cache)
+    if [ -d "./zig-cache" ]; then
+        log "⚡ Found existing zig-cache/ directory - preserving for fast Zig builds"
+    else
+        log "📋 No existing zig-cache/ directory found"
+    fi
+    
+    # Clean any other temporary files but preserve source and caches
     rm -rf ./.cache ./coverage ./logs || true
     
     # For linking steps, ensure completely fresh environment (no cache pollution)
