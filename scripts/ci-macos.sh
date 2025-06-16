@@ -450,12 +450,23 @@ create_and_run_vm() {
         # Create cache directory inside workspace for compilation steps only
         if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ]; then
             local cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}"
-            log "🔧 Creating persistent cache directory inside workspace: $cache_dir"
+            log "🔧 Setting up persistent cache directory inside workspace: $cache_dir"
             
-            # Create cache structure inside workspace - will be mounted with workspace
-            mkdir -p "$cache_dir"/{zig/global,zig/local,ccache,npm}
+            # Only create cache structure if it doesn't already exist (preserve restored cache)
+            if [ ! -d "$cache_dir" ]; then
+                log "   Creating fresh cache directory structure"
+                mkdir -p "$cache_dir"/{zig/global,zig/local,ccache,npm}
+                log "   Fresh cache structure created"
+            else
+                log "   Cache directory already exists - preserving existing cache"
+                # Ensure subdirectories exist but don't overwrite them
+                [ ! -d "$cache_dir/zig" ] && mkdir -p "$cache_dir/zig"/{global,local}
+                [ ! -d "$cache_dir/ccache" ] && mkdir -p "$cache_dir/ccache"
+                [ ! -d "$cache_dir/npm" ] && mkdir -p "$cache_dir/npm"
+                log "   Verified cache subdirectories exist (preserved existing content)"
+            fi
             
-            log "✅ Cache directory created inside workspace (mounted with workspace)"
+            log "✅ Cache directory ready inside workspace (mounted with workspace)"
             log "   Cache path in VM: /Volumes/My Shared Files/workspace/buildkite-cache"
         fi
     fi
