@@ -144,36 +144,75 @@ else()
     # Use cmake -E copy for Tart mounted directories (more reliable than file() commands)
     message(STATUS "Using cmake -E copy for Tart mounted directory...")
     
-    # First attempt with cmake -E copy_directory
-    execute_process(
-      COMMAND ${CMAKE_COMMAND} -E copy_directory ${DOWNLOAD_TMP_FILE} ${DOWNLOAD_PATH}
-      RESULT_VARIABLE COPY_RESULT
-      OUTPUT_VARIABLE COPY_OUTPUT
-      ERROR_VARIABLE COPY_ERROR
-    )
-    
-    if(NOT COPY_RESULT EQUAL 0)
-      message(WARNING "cmake -E copy_directory failed (result: ${COPY_RESULT})")
-      message(WARNING "Output: ${COPY_OUTPUT}")
-      message(WARNING "Error: ${COPY_ERROR}")
+    # For Zig archives, use a more robust extraction method
+    if(DOWNLOAD_FILENAME MATCHES "zig.*\\.zip$" OR DOWNLOAD_PATH MATCHES "/zig$")
+      message(STATUS "Detected Zig archive - using robust extraction for mounted filesystem...")
       
-      # Fallback: try tar-based copy with proper path escaping
-      message(STATUS "Attempting fallback copy method...")
+      # Create target directory first
+      file(MAKE_DIRECTORY ${DOWNLOAD_PATH})
+      
+      # Use rsync for more reliable deep copy (handles nested directories better)
       execute_process(
-        COMMAND /bin/sh -c "cd '${DOWNLOAD_TMP_FILE}' && tar -cf - . | (cd '${DOWNLOAD_PATH}' && tar -xf -)"
-        RESULT_VARIABLE TAR_RESULT
-        OUTPUT_VARIABLE TAR_OUTPUT  
-        ERROR_VARIABLE TAR_ERROR
+        COMMAND rsync -av "${DOWNLOAD_TMP_FILE}/" "${DOWNLOAD_PATH}/"
+        RESULT_VARIABLE RSYNC_RESULT
+        OUTPUT_VARIABLE RSYNC_OUTPUT
+        ERROR_VARIABLE RSYNC_ERROR
       )
       
-      if(NOT TAR_RESULT EQUAL 0)
-        message(WARNING "Tar-based copy also failed (result: ${TAR_RESULT})")
-        message(WARNING "Tar output: ${TAR_OUTPUT}")
-        message(WARNING "Tar error: ${TAR_ERROR}")
-        message(FATAL_ERROR "Failed to copy ${DOWNLOAD_TMP_FILE} to Tart mounted directory ${DOWNLOAD_PATH} - all copy methods failed")
+      if(NOT RSYNC_RESULT EQUAL 0)
+        message(WARNING "rsync failed (result: ${RSYNC_RESULT})")
+        message(WARNING "rsync error: ${RSYNC_ERROR}")
+        
+        # Fallback: use tar for complete archive extraction
+        message(STATUS "Attempting tar-based extraction...")
+        execute_process(
+          COMMAND /bin/sh -c "cd '${DOWNLOAD_TMP_FILE}' && tar -cf - . | (cd '${DOWNLOAD_PATH}' && tar -xf -)"
+          RESULT_VARIABLE TAR_RESULT
+          OUTPUT_VARIABLE TAR_OUTPUT  
+          ERROR_VARIABLE TAR_ERROR
+        )
+        
+        if(NOT TAR_RESULT EQUAL 0)
+          message(FATAL_ERROR "All extraction methods failed for Zig archive to Tart mounted directory")
+        else()
+          message(STATUS "tar-based extraction successful")
+        endif()
+      else()
+        message(STATUS "rsync extraction successful")
       endif()
     else()
-      message(STATUS "cmake -E copy_directory successful")
+      # For non-Zig archives, use existing method
+      # First attempt with cmake -E copy_directory
+      execute_process(
+        COMMAND ${CMAKE_COMMAND} -E copy_directory ${DOWNLOAD_TMP_FILE} ${DOWNLOAD_PATH}
+        RESULT_VARIABLE COPY_RESULT
+        OUTPUT_VARIABLE COPY_OUTPUT
+        ERROR_VARIABLE COPY_ERROR
+      )
+      
+      if(NOT COPY_RESULT EQUAL 0)
+        message(WARNING "cmake -E copy_directory failed (result: ${COPY_RESULT})")
+        message(WARNING "Output: ${COPY_OUTPUT}")
+        message(WARNING "Error: ${COPY_ERROR}")
+        
+        # Fallback: try tar-based copy with proper path escaping
+        message(STATUS "Attempting fallback copy method...")
+        execute_process(
+          COMMAND /bin/sh -c "cd '${DOWNLOAD_TMP_FILE}' && tar -cf - . | (cd '${DOWNLOAD_PATH}' && tar -xf -)"
+          RESULT_VARIABLE TAR_RESULT
+          OUTPUT_VARIABLE TAR_OUTPUT  
+          ERROR_VARIABLE TAR_ERROR
+        )
+        
+        if(NOT TAR_RESULT EQUAL 0)
+          message(WARNING "Tar-based copy also failed (result: ${TAR_RESULT})")
+          message(WARNING "Tar output: ${TAR_OUTPUT}")
+          message(WARNING "Tar error: ${TAR_ERROR}")
+          message(FATAL_ERROR "Failed to copy ${DOWNLOAD_TMP_FILE} to Tart mounted directory ${DOWNLOAD_PATH} - all copy methods failed")
+        endif()
+      else()
+        message(STATUS "cmake -E copy_directory successful")
+      endif()
     endif()
   else()
     # Use normal COPY for other destinations to preserve permissions
