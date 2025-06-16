@@ -1418,22 +1418,7 @@ endif()
 if(APPLE AND BUILDKITE AND BUILDKITE_CACHE_SAVE STREQUAL "ON")
   message(STATUS "🔧 Setting up incremental cache save for macOS Darwin CI...")
   
-  # Save C++ artifacts after successful build
-  if(BUN_CPP_ONLY OR NOT DEFINED BUN_CPP_ONLY)
-    register_command(
-      TARGET
-        ${bun}
-      TARGET_PHASE
-        POST_BUILD
-      COMMENT
-        "Saving C++ artifacts to cache"
-      COMMAND
-        ${CMAKE_COMMAND} -E make_directory "${CACHE_BASE_DIR}/${CPP_CACHE_KEY}"
-        && ${CMAKE_COMMAND} -E copy_if_different 
-           "${BUILD_PATH}/libbun-profile.a" 
-           "${CACHE_BASE_DIR}/${CPP_CACHE_KEY}/"
-    )
-  endif()
+  # C++ cache save is now handled in Globals.cmake before compression
   
   # Save Zig artifacts after successful build  
   if(NOT BUN_CPP_ONLY)

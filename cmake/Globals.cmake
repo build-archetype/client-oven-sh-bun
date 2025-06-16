@@ -423,6 +423,15 @@ function(register_command)
         # libbun-profile.a is now over 5gb in size, compress it first
         list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E chdir ${BUILD_PATH} rm -r ${BUILD_PATH}/codegen)
         list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E chdir ${BUILD_PATH} rm -r ${CACHE_PATH})
+        
+        # Save to cache BEFORE compressing (so original file still exists)
+        if(APPLE AND BUILDKITE AND BUILDKITE_CACHE_SAVE STREQUAL "ON")
+          set(CACHE_BASE_DIR "${CMAKE_SOURCE_DIR}/buildkite-cache/build-results")
+          set(CPP_CACHE_KEY "${BUILDKITE_COMMIT}")
+          list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E make_directory "${CACHE_BASE_DIR}/${CPP_CACHE_KEY}")
+          list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E copy_if_different "${BUILD_PATH}/libbun-profile.a" "${CACHE_BASE_DIR}/${CPP_CACHE_KEY}/")
+        endif()
+        
         list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E chdir ${BUILD_PATH} gzip -1 libbun-profile.a)
         list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E chdir ${BUILD_PATH} buildkite-agent artifact upload libbun-profile.a.gz)
       elseif(filename STREQUAL "libbun-asan.a")
