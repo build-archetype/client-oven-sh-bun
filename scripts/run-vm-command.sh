@@ -178,31 +178,47 @@ sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "mkdir -p $VM_WORKSPACE"
 
 # Copy source files to VM (excluding build artifacts and cache)
 echo "Copying source files to VM..."
-rsync -av \
-    --exclude 'build/' \
-    --exclude 'buildkite-cache/' \
-    --exclude '.git/' \
-    --exclude 'node_modules/' \
-    --exclude '*.o' \
-    --exclude '*.a' \
-    --exclude 'zig-cache/' \
-    --exclude 'zig-out/' \
-    -e "sshpass -p admin ssh $SSH_OPTS" \
-    ./ admin@$VM_IP:$VM_WORKSPACE/
 
-echo "✅ Source code copied to VM"
+# Create a tar archive excluding build artifacts and copy via SSH
+# This is more reliable than rsync with sshpass authentication
+if tar --exclude='build/' \
+       --exclude='buildkite-cache/' \
+       --exclude='.git/' \
+       --exclude='node_modules/' \
+       --exclude='*.o' \
+       --exclude='*.a' \
+       --exclude='zig-out/' \
+       -cf - . | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd $VM_WORKSPACE && tar -xf -"; then
+    echo "✅ Source code copied to VM via tar+ssh"
+else
+    echo "❌ Failed to copy source code to VM"
+    exit 1
+fi
 
 # Copy existing build artifacts to VM for incremental builds
 echo "📁 Copying existing build artifacts for incremental builds..."
 if [ -d "./build" ]; then
     echo "Found existing build/ directory - copying to VM for incremental build..."
-    if rsync -av -e "sshpass -p admin ssh $SSH_OPTS" ./build/ admin@$VM_IP:$VM_WORKSPACE/build/; then
-        echo "✅ Build artifacts copied to VM"
+    if tar -cf - ./build | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd $VM_WORKSPACE && tar -xf -"; then
+        echo "✅ Build artifacts copied to VM via tar+ssh"
     else
         echo "⚠️ Failed to copy build artifacts - will do clean build"
     fi
 else
     echo "📋 No existing build/ directory found - will do clean build"
+fi
+
+# Copy existing zig-cache to VM for fast incremental Zig builds
+echo "⚡ Copying existing zig-cache for fast Zig builds..."
+if [ -d "./zig-cache" ]; then
+    echo "Found existing zig-cache/ directory - copying to VM for fast Zig incremental builds..."
+    if tar -cf - ./zig-cache | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd $VM_WORKSPACE && tar -xf -"; then
+        echo "✅ Zig cache copied to VM via tar+ssh"
+    else
+        echo "⚠️ Failed to copy zig-cache - will do clean Zig build"
+    fi
+else
+    echo "📋 No existing zig-cache/ directory found - will do clean Zig build"
 fi
 
 # Copy environment file to VM  
@@ -268,50 +284,42 @@ EXIT_CODE=$?
 
 echo "📤 ===== COPYING FINAL ARTIFACTS BACK ====="
 
-# ===== COPY BUILD ARTIFACTS BACK =====
+# ===== COPY BUILD ARTIFACTS AND CACHES BACK =====
 
 artifact_dirs=("build" "artifacts" "dist")
+cache_dirs=("zig-cache")
 
-echo "📦 Copying build artifacts back from VM..."
+echo "📦 Copying build artifacts and caches back from VM..."
 
-# Check if any artifact directories exist in the VM workspace
-should_copy=false
+# Copy build artifacts back from VM workspace
 for dir in "${artifact_dirs[@]}"; do
     if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d \"$VM_WORKSPACE/$dir\" ]"; then
-        should_copy=true
-        break
+        echo "Copying $dir/ back from VM..."
+        
+        # Use tar over SSH (more reliable than rsync with sshpass)
+        if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\"" | tar -xf -; then
+            echo "✅ $dir copied back via tar+ssh"
+        else
+            echo "❌ Failed to copy $dir back from VM"
+        fi
     fi
 done
 
-if [ "$should_copy" = true ]; then
-    echo "Copying final artifacts back from VM..."
-    
-    # Copy artifacts back from VM workspace
-    for dir in "${artifact_dirs[@]}"; do
-        if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d \"$VM_WORKSPACE/$dir\" ]"; then
-            echo "Copying $dir/ back..."
-            
-            # Use rsync to copy artifacts back efficiently
-            if rsync -av -e "sshpass -p admin ssh $SSH_OPTS" "admin@$VM_IP:$VM_WORKSPACE/$dir/" ./$dir/ 2>/dev/null; then
-                echo "✅ rsync succeeded for $dir"
-            else
-                echo "⚠️ rsync failed, trying tar+ssh fallback for $dir..."
-                
-                # Fallback: use tar over SSH
-                mkdir -p "./$dir"
-                if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\"" | tar -xf - 2>/dev/null; then
-                    echo "✅ tar+ssh fallback succeeded for $dir"
-                else
-                    echo "❌ Both rsync and tar+ssh failed for $dir"
-                fi
-            fi
+# Copy incremental caches back for next build
+for dir in "${cache_dirs[@]}"; do
+    if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d \"$VM_WORKSPACE/$dir\" ]"; then
+        echo "⚡ Copying $dir/ back for fast incremental builds..."
+        
+        # Use tar over SSH for cache directories
+        if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\"" | tar -xf -; then
+            echo "✅ $dir copied back via tar+ssh"
+        else
+            echo "⚠️ Failed to copy $dir back - next build may be slower"
         fi
-    done
-    
-    echo "✅ Final artifacts copied back"
-else
-    echo "No final artifact directories found, skipping artifact copy"
-fi
+    fi
+done
+
+echo "✅ Build artifacts and caches copied back from VM"
 
 echo "🧹 ===== CLEANUP ====="
 
