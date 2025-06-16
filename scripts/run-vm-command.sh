@@ -230,7 +230,7 @@ if tar -czf - \
     --exclude='.DS_Store' \
     --exclude='*.tmp' \
     --exclude='*.log' \
-    . | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd /Volumes/My\ Shared\ Files/workspace && tar -xzf -" 2>&1; then
+    . | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd '$VM_WORKSPACE' && tar -xzf -" 2>&1; then
     echo "✅ Source code copied successfully"
 else
     echo "❌ Failed to copy source code to VM"
@@ -249,17 +249,17 @@ else
     
     # Test if we can access the target directory
     echo "Testing VM workspace directory access..."
-    if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "ls -la '/Volumes/My Shared Files/workspace'" 2>&1; then
+    if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "ls -la '$VM_WORKSPACE'" 2>&1; then
         echo "✅ Can access VM workspace directory"
     else
         echo "❌ Cannot access VM workspace directory"
         echo "Trying to create it..."
-        sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "mkdir -p '/Volumes/My Shared Files/workspace'" 2>&1 || true
+        sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "mkdir -p '$VM_WORKSPACE'" 2>&1 || true
     fi
     
     # Test a simpler copy operation
     echo "Testing simple file copy..."
-    echo "test content" | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cat > '/Volumes/My Shared Files/workspace/test.txt'" 2>&1
+    echo "test content" | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cat > '$VM_WORKSPACE/test.txt'" 2>&1
     if [ $? -eq 0 ]; then
         echo "✅ Simple file copy works"
         # Try the full copy again with more verbose error reporting
@@ -273,7 +273,7 @@ else
             --exclude='.DS_Store' \
             --exclude='*.tmp' \
             --exclude='*.log' \
-            . | sshpass -p admin ssh -v $SSH_OPTS admin@$VM_IP "cd /Volumes/My\ Shared\ Files/workspace && tar -xzf -" 2>&1
+            . | sshpass -p admin ssh -v $SSH_OPTS admin@$VM_IP "cd '$VM_WORKSPACE' && tar -xzf -" 2>&1
         if [ $? -eq 0 ]; then
             echo "✅ Retry succeeded"
         else
@@ -291,7 +291,7 @@ else
             echo "🔄 Trying alternative copying method (smaller chunks)..."
             
             # Create the workspace directory first
-            sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "mkdir -p '/Volumes/My Shared Files/workspace'"
+            sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "mkdir -p '$VM_WORKSPACE'"
             
             # Copy everything except problematic items using find to get complete file list
             echo "Copying complete source tree (excluding build artifacts and caches)..."
@@ -309,7 +309,7 @@ else
                 --exclude='tart.log' \
                 --exclude='.tart' \
                 --exclude='vm.log' \
-                . | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd '/Volumes/My Shared Files/workspace' && tar -xf -" 2>&1; then
+                . | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd '$VM_WORKSPACE' && tar -xf -" 2>&1; then
                 echo "✅ Complete source tree copied successfully"
             else
                 echo "❌ Alternative tar method also failed, trying individual directory approach..."
@@ -322,7 +322,7 @@ else
                 for item in $ALL_ITEMS; do
                     if [ -d "$item" ]; then
                         echo "Copying $item..."
-                        if tar -cf - "$item" | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd '/Volumes/My Shared Files/workspace' && tar -xf -" 2>&1; then
+                        if tar -cf - "$item" | sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd '$VM_WORKSPACE' && tar -xf -" 2>&1; then
                             echo "✅ $item copied"
                         else
                             echo "⚠️ Failed to copy $item, continuing..."
@@ -334,7 +334,7 @@ else
                 for item in $ALL_FILES; do
                     if [ -f "$item" ]; then
                         echo "Copying $item..."
-                        if sshpass -p admin scp $SSH_OPTS "$item" admin@$VM_IP:"/Volumes/My Shared Files/workspace/" 2>&1; then
+                        if sshpass -p admin scp $SSH_OPTS "$item" admin@$VM_IP:"$VM_WORKSPACE/" 2>&1; then
                             echo "✅ $item copied"
                         else
                             echo "⚠️ Failed to copy $item, continuing..."
