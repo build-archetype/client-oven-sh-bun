@@ -158,66 +158,33 @@ else()
       message(WARNING "Error: ${COPY_ERROR}")
       message(STATUS "Attempting fallback copy method...")
       
-      # Fallback 1: Try tar-based copy (handles complex directory structures better)
+      # Fallback: Try simpler tar-based copy
       execute_process(
-        COMMAND sh -c "cd '${DOWNLOAD_TMP_FILE}' && tar -cf - . | (cd '${DOWNLOAD_PATH}' && tar -xf -)"
+        COMMAND sh -c "cd ${DOWNLOAD_TMP_FILE} && tar cf - . | (cd ${DOWNLOAD_PATH} && tar xf -)"
         RESULT_VARIABLE TAR_RESULT
         OUTPUT_VARIABLE TAR_OUTPUT
         ERROR_VARIABLE TAR_ERROR
       )
       
       if(TAR_RESULT EQUAL 0)
-        message(STATUS "✅ Tar-based copy successful as fallback")
+        message(STATUS "Tar-based copy successful as fallback")
         set(COPY_RESULT 0)
-      else
+      else()
         message(WARNING "Tar-based copy also failed (result: ${TAR_RESULT})")
         message(WARNING "Tar output: ${TAR_OUTPUT}")
         message(WARNING "Tar error: ${TAR_ERROR}")
-        
-        # Fallback 2: Try manual recursive copy with find/cpio
-        execute_process(
-          COMMAND sh -c "cd '${DOWNLOAD_TMP_FILE}' && find . -type f -exec cp '{}' '${DOWNLOAD_PATH}/{}' \\;"
-          RESULT_VARIABLE MANUAL_RESULT
-          OUTPUT_VARIABLE MANUAL_OUTPUT
-          ERROR_VARIABLE MANUAL_ERROR
-        )
-        
-        if(MANUAL_RESULT EQUAL 0)
-          message(STATUS "✅ Manual recursive copy successful as fallback")
-          set(COPY_RESULT 0)
-        else
-          message(WARNING "Manual copy also failed (result: ${MANUAL_RESULT})")
-          message(WARNING "Manual output: ${MANUAL_OUTPUT}")
-          message(WARNING "Manual error: ${MANUAL_ERROR}")
-          
-          # Final fallback: try to create directory structure and copy files individually
-          message(STATUS "Attempting directory-by-directory copy as final fallback...")
-          execute_process(
-            COMMAND sh -c "mkdir -p '${DOWNLOAD_PATH}' && cd '${DOWNLOAD_TMP_FILE}' && find . -type d -exec mkdir -p '${DOWNLOAD_PATH}/{}' \\; && find . -type f -exec cp '{}' '${DOWNLOAD_PATH}/{}' \\;"
-            RESULT_VARIABLE FINAL_RESULT
-            OUTPUT_VARIABLE FINAL_OUTPUT
-            ERROR_VARIABLE FINAL_ERROR
-          )
-          
-          if(FINAL_RESULT EQUAL 0)
-            message(STATUS "✅ Directory-by-directory copy successful as final fallback")
-            set(COPY_RESULT 0)
-          else
-            message(WARNING "All copy methods failed!")
-            message(WARNING "Final output: ${FINAL_OUTPUT}")
-            message(WARNING "Final error: ${FINAL_ERROR}")
-            message(FATAL_ERROR "Failed to copy ${DOWNLOAD_TMP_FILE} to Tart mounted directory ${DOWNLOAD_PATH} - all fallback methods exhausted")
-          endif()
-        endif()
+        message(FATAL_ERROR "Failed to copy ${DOWNLOAD_TMP_FILE} to Tart mounted directory ${DOWNLOAD_PATH} - all copy methods failed")
       endif()
     else()
-      # Use normal COPY for other destinations to preserve permissions
-      file(COPY ${DOWNLOAD_TMP_FILE} DESTINATION ${DOWNLOAD_PARENT_PATH})
-      get_filename_component(DOWNLOAD_TMP_NAME ${DOWNLOAD_TMP_FILE} NAME)
-      set(COPIED_PATH ${DOWNLOAD_PARENT_PATH}/${DOWNLOAD_TMP_NAME})
-      if(NOT ${COPIED_PATH} STREQUAL ${DOWNLOAD_PATH})
-        file(RENAME ${COPIED_PATH} ${DOWNLOAD_PATH})
-      endif()
+      message(STATUS "cmake -E copy_directory successful")
+    endif()
+  else()
+    # Use normal COPY for other destinations to preserve permissions
+    file(COPY ${DOWNLOAD_TMP_FILE} DESTINATION ${DOWNLOAD_PARENT_PATH})
+    get_filename_component(DOWNLOAD_TMP_NAME ${DOWNLOAD_TMP_FILE} NAME)
+    set(COPIED_PATH ${DOWNLOAD_PARENT_PATH}/${DOWNLOAD_TMP_NAME})
+    if(NOT ${COPIED_PATH} STREQUAL ${DOWNLOAD_PATH})
+      file(RENAME ${COPIED_PATH} ${DOWNLOAD_PATH})
     endif()
   endif()
 endif()
