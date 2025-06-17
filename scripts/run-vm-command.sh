@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# Ignore SIGPIPE globally to prevent early termination during pipe operations
+# This is especially important for the tar+ssh copy operations during cleanup
+trap '' PIPE
+
 echo "🎯 VM: $1"
 echo "⚡ Command: $2"
 
@@ -47,10 +51,11 @@ else
 fi
 
 # SSH options for reliability - comprehensive host key bypass
-SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
+# Extended timeouts: ConnectTimeout=30s for VM connections, data transfer timeout=1200s (20min) for large builds
+SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -o ConnectTimeout=30"
 
 # SSH options with debugging for troubleshooting authentication issues
-SSH_DEBUG_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=DEBUG -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -o PreferredAuthentications=password -o PubkeyAuthentication=no"
+SSH_DEBUG_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=DEBUG -o ServerAliveInterval=5 -o ServerAliveCountMax=3 -o PreferredAuthentications=password -o PubkeyAuthentication=no -o ConnectTimeout=30"
 
 echo "🔍 ===== WAITING FOR VM ====="
 
@@ -104,7 +109,7 @@ wait_for_vm() {
     # Now try SSH connection with more reliable retry logic
     for i in {1..30}; do
         echo "SSH attempt $i/30..."
-        if sshpass -p admin ssh $SSH_OPTS -o ConnectTimeout=10 "admin@$VM_IP" "echo 'SSH connection successful'" &>/dev/null; then
+        if sshpass -p admin ssh $SSH_OPTS "admin@$VM_IP" "echo 'SSH connection successful'" &>/dev/null; then
             echo "✅ SSH connection established"
             return 0
         fi
@@ -206,9 +211,9 @@ else
     fi
     
     echo "Trying SSH with password-only authentication..."
-    if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no admin@$VM_IP "echo 'Password-only SSH test successful'" 2>&1; then
+    if sshpass -p admin ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no -o ConnectTimeout=30 admin@$VM_IP "echo 'Password-only SSH test successful'" 2>&1; then
         echo "✅ Password-only SSH works"
-        SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no -o LogLevel=ERROR"
+        SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PreferredAuthentications=password -o PubkeyAuthentication=no -o LogLevel=ERROR -o ConnectTimeout=30"
     else
         echo "❌ Even password-only SSH failed"
         exit 1
@@ -498,26 +503,32 @@ for dir in "${artifact_dirs[@]}"; do
         
         # Use tar over SSH with better error handling to avoid SIGPIPE issues
         echo "🔄 Attempting to copy $dir/ via tar+ssh..."
+        
+        # Protect against SIGPIPE by ignoring it during copy operations
+        set +e  # Temporarily disable exit on error
+        trap '' PIPE  # Ignore SIGPIPE during copy operations
+        
         if command -v timeout >/dev/null 2>&1; then
-          # Use timeout if available (host systems)
-          if timeout 300 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null; then
-            echo "✅ $dir copied back via tar+ssh"
-            # Verify copy back worked
-            echo "🔍 Debug: Verifying $dir/ copied back to HOST:"
-            echo "   HOST $dir/ size: $(du -sh ./$dir 2>/dev/null | cut -f1 || echo 'unknown')"
-          else
-            echo "⚠️ Failed to copy $dir back from VM (non-fatal - build result preserved)"
-          fi
+          # Use timeout if available (host systems) - extended timeout for large builds
+          timeout 1200 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null
+          copy_result=$?
         else
           # Fallback without timeout for VMs that don't have it
-          if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null; then
+          sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null
+          copy_result=$?
+        fi
+        
+        # Restore error handling
+        trap - PIPE  # Restore default SIGPIPE handling
+        set -e  # Re-enable exit on error
+        
+        if [ $copy_result -eq 0 ]; then
             echo "✅ $dir copied back via tar+ssh"
             # Verify copy back worked
             echo "🔍 Debug: Verifying $dir/ copied back to HOST:"
             echo "   HOST $dir/ size: $(du -sh ./$dir 2>/dev/null | cut -f1 || echo 'unknown')"
-          else
+        else
             echo "⚠️ Failed to copy $dir back from VM (non-fatal - build result preserved)"
-          fi
         fi
     else
         echo "📋 No $dir/ directory found in VM to copy back"
@@ -539,25 +550,26 @@ for dir in "${cache_dirs[@]}"; do
         
         # Use tar over SSH for cache directories with better error handling
         echo "🔄 Attempting to copy $dir/ via tar+ssh..."
+        
+        # Protect against SIGPIPE by ignoring it during copy operations
+        set +e  # Temporarily disable exit on error
+        trap '' PIPE  # Ignore SIGPIPE during copy operations
+        
         if command -v timeout >/dev/null 2>&1; then
-          # Use timeout if available (host systems)
-          if timeout 300 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null; then
-            echo "✅ $dir copied back via tar+ssh"
-            # Verify copy back worked
-            echo "🔍 Debug: Verifying $dir/ copied back to HOST:"
-            echo "   HOST $dir/ size: $(du -sh ./$dir 2>/dev/null | cut -f1 || echo 'unknown')"
-            
-            # For buildkite-cache, verify CMake cache structure
-            if [ "$dir" = "buildkite-cache" ] && [ -d "./$dir/build-results" ]; then
-                echo "🔍 Debug: HOST buildkite-cache/build-results contents:"
-                ls -la ./$dir/build-results/ 2>/dev/null | head -5 || echo "   Empty or inaccessible"
-            fi
-          else
-            echo "⚠️ Failed to copy $dir back - next build may be slower (non-fatal)"
-          fi
+          # Use timeout if available (host systems) - extended timeout for large builds
+          timeout 1200 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null
+          copy_result=$?
         else
           # Fallback without timeout for VMs that don't have it
-          if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null; then
+          sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null
+          copy_result=$?
+        fi
+        
+        # Restore error handling
+        trap - PIPE  # Restore default SIGPIPE handling
+        set -e  # Re-enable exit on error
+        
+        if [ $copy_result -eq 0 ]; then
             echo "✅ $dir copied back via tar+ssh"
             # Verify copy back worked
             echo "🔍 Debug: Verifying $dir/ copied back to HOST:"
@@ -568,9 +580,8 @@ for dir in "${cache_dirs[@]}"; do
                 echo "🔍 Debug: HOST buildkite-cache/build-results contents:"
                 ls -la ./$dir/build-results/ 2>/dev/null | head -5 || echo "   Empty or inaccessible"
             fi
-          else
+        else
             echo "⚠️ Failed to copy $dir back - next build may be slower (non-fatal)"
-          fi
         fi
     else
         echo "📋 No $dir/ directory found in VM to copy back"
@@ -582,11 +593,17 @@ echo "✅ Build artifacts and caches copied back from VM"
 echo "🧹 ===== CLEANUP ====="
 
 # ===== CLEANUP =====
+# Protect cleanup operations from affecting the build exit code
+set +e  # Disable exit on error for cleanup
 rm -f "$ENV_FILE" 2>/dev/null || true
+set -e  # Re-enable exit on error
+
 echo "✅ Cleanup complete"
 
 echo "===== RUN VM COMMAND COMPLETE ====="
 echo "Build completed with exit code: $BUILD_EXIT_CODE"
 
 # IMPORTANT: Always exit with the build result, not cleanup result
+# Protect against any potential SIGPIPE issues affecting the final exit
+set +e  # Ensure no cleanup artifacts can change the exit code
 exit $BUILD_EXIT_CODE
