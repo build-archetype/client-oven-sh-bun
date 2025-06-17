@@ -373,6 +373,13 @@ if [ -d "./build" ]; then
         # Verify the copy worked by checking what's in VM
         echo "🔍 Debug: Verifying build/ copy in VM..."
         sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "ls -la $VM_WORKSPACE/build/ 2>/dev/null | head -5" || echo "   Failed to list VM build directory"
+        
+        # CRITICAL FIX: Clean CMakeCache.txt files which contain absolute host paths
+        echo "🔧 Cleaning CMakeCache.txt files for VM (fixes path mismatch issues)..."
+        sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "find $VM_WORKSPACE/build -name 'CMakeCache.txt' -delete 2>/dev/null || true"
+        sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "find $VM_WORKSPACE/build -name 'cmake_install.cmake' -delete 2>/dev/null || true"
+        sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "find $VM_WORKSPACE/build -name 'CMakeFiles' -type d -exec rm -rf {} + 2>/dev/null || true"
+        echo "   ✅ CMake cache files cleaned - CMake will regenerate with correct VM paths"
     else
         echo "⚠️ Failed to copy build artifacts - will do clean build"
     fi
