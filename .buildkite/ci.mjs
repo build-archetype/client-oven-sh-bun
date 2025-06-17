@@ -1152,12 +1152,6 @@ function getGrafanaMonitoringStep() {
       "echo '--- Running Grafana setup ---'",
       "./scripts/setup-grafana-monitoring.sh"
     ].join(" && "),
-    env: {
-      GRAFANA_CLOUD_USERNAME: "${GRAFANA_CLOUD_USERNAME}",
-      GRAFANA_CLOUD_API_KEY: "${GRAFANA_CLOUD_API_KEY}",
-      GRAFANA_PROMETHEUS_URL: "${GRAFANA_PROMETHEUS_URL}",
-      GRAFANA_LOKI_URL: "${GRAFANA_LOKI_URL}",
-    },
     timeout_in_minutes: 10,
     retry: {
       automatic: [
