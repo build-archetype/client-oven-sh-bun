@@ -12,8 +12,9 @@ MONITORING_ENABLED=true MONITORING_TYPE="grafana-cloud" ./setup-mac-server.sh
 ```
 
 During setup, you'll be prompted for:
+
 - Grafana Cloud organization ID
-- Grafana Cloud API key  
+- Grafana Cloud API key
 - Prometheus endpoint URL
 - Loki endpoint URL
 
@@ -45,6 +46,7 @@ nano grafana-env.sh
 ```
 
 Set these values in `grafana-env.sh`:
+
 ```bash
 export GCLOUD_HOSTED_METRICS_ID="your-organization-id"
 export GCLOUD_RW_API_KEY="your-grafana-cloud-api-key"
@@ -117,7 +119,7 @@ The monitoring setup uses these environment variables:
 export GCLOUD_HOSTED_METRICS_ID="1234567"              # Your organization ID
 export GCLOUD_RW_API_KEY="glc_xxxxx..."                # Your API key
 
-# Required - Grafana Cloud endpoints  
+# Required - Grafana Cloud endpoints
 export GCLOUD_HOSTED_METRICS_URL="https://prometheus-prod-XX-prod-us-east-0.grafana.net/api/prom/push"
 export GCLOUD_HOSTED_LOGS_URL="https://logs-prod-XXX-prod-us-east-0.grafana.net/loki/api/v1/push"
 
@@ -146,8 +148,9 @@ tail -f /opt/homebrew/var/log/alloy.log
 ```
 
 You should see in the logs:
+
 ```
-level=info msg="Samples sent" count=684 
+level=info msg="Samples sent" count=684
 level=info msg="Remote write completed" status=200
 ```
 
@@ -172,8 +175,9 @@ export GCLOUD_HOSTED_LOGS_URL="your-loki-url"
 ```
 
 The script will:
+
 - ✅ Install monitoring tools (Alloy, Node Exporter)
-- ✅ Configure Alloy with your Grafana Cloud credentials  
+- ✅ Configure Alloy with your Grafana Cloud credentials
 - ✅ Start monitoring services automatically
 - ✅ Store credentials securely in macOS keychain
 - ✅ Set up automatic startup on boot
@@ -183,12 +187,14 @@ The script will:
 ### **Common Issues**
 
 #### **Permission Denied Errors**
+
 ```bash
 # Grant Full Disk Access to Terminal (see above)
 # Or manually enable SSH in System Settings
 ```
 
 #### **Services Not Starting**
+
 ```bash
 # Check Homebrew services
 brew services list
@@ -199,6 +205,7 @@ brew services restart prometheus-node-exporter
 ```
 
 #### **No Metrics in Grafana Cloud**
+
 ```bash
 # Check Alloy configuration
 cat ~/.alloy/config.alloy
@@ -211,9 +218,11 @@ tail -f /opt/homebrew/var/log/alloy.log | grep -i "error\|auth"
 ```
 
 #### **Wrong Endpoints**
+
 Make sure your endpoints match your region:
+
 - US East: `prometheus-prod-XX-prod-us-east-0.grafana.net`
-- US Central: `prometheus-prod-XX-prod-us-central-0.grafana.net`  
+- US Central: `prometheus-prod-XX-prod-us-central-0.grafana.net`
 - EU West: `prometheus-prod-XX-prod-eu-west-0.grafana.net`
 
 ## 📚 **Next Steps**
@@ -251,18 +260,18 @@ Import this JSON into Grafana Cloud:
         ],
         "fieldConfig": {
           "defaults": {
-            "color": {"mode": "thresholds"},
+            "color": { "mode": "thresholds" },
             "thresholds": {
               "steps": [
-                {"color": "red", "value": 0},
-                {"color": "green", "value": 1}
+                { "color": "red", "value": 0 },
+                { "color": "green", "value": 1 }
               ]
             }
           }
         }
       },
       {
-        "id": 2, 
+        "id": 2,
         "title": "CPU Usage by Machine",
         "type": "timeseries",
         "targets": [
@@ -274,7 +283,7 @@ Import this JSON into Grafana Cloud:
       },
       {
         "id": 3,
-        "title": "Memory Usage by Machine", 
+        "title": "Memory Usage by Machine",
         "type": "timeseries",
         "targets": [
           {
@@ -286,7 +295,7 @@ Import this JSON into Grafana Cloud:
       {
         "id": 4,
         "title": "Disk Usage by Machine",
-        "type": "timeseries", 
+        "type": "timeseries",
         "targets": [
           {
             "expr": "100 * (1 - (node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay\"}))",
@@ -372,4 +381,4 @@ Useful LogQL queries for troubleshooting:
 2. **Set up alerts** for critical metrics
 3. **Configure notification channels** (Slack, PagerDuty, etc.)
 4. **Create custom dashboards** for your specific needs
-5. **Set up log parsing** for structured log analysis 
+5. **Set up log parsing** for structured log analysis

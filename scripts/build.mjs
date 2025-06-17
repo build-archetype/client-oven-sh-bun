@@ -110,7 +110,7 @@ async function build(args) {
     generateOptions["-DBUILDKITE_CACHE_RESTORE"] = "ON";
     console.log("Buildkite cache restore enabled via environment variable");
   }
-  
+
   if (process.env.BUILDKITE_CACHE_SAVE === "ON") {
     generateOptions["-DBUILDKITE_CACHE_SAVE"] = "ON";
     console.log("Buildkite cache save enabled via environment variable");
@@ -120,9 +120,9 @@ async function build(args) {
   // Skip for linking step which should always be fresh
   if (process.env.BUILDKITE_CACHE_TYPE === "persistent" && process.env.BUN_LINK_ONLY !== "ON") {
     console.log("🔧 Setting up persistent cache environment for macOS compilation...");
-    
+
     const cacheBase = process.env.BUILDKITE_CACHE_BASE || "./buildkite-cache";
-    
+
     // Ensure cache directories exist
     if (!existsSync(cacheBase)) {
       mkdirSync(cacheBase, { recursive: true });
@@ -137,12 +137,12 @@ async function build(args) {
     process.env.ZIG_LOCAL_CACHE_DIR = `${cacheBase}/zig/local`;
     process.env.CCACHE_DIR = `${cacheBase}/ccache`;
     process.env.NPM_CONFIG_CACHE = `${cacheBase}/npm`;
-    
+
     // Override CMake's ccache directory detection with our persistent cache
     generateOptions["-DCCACHE_DIR_OVERRIDE"] = cmakePath(`${cacheBase}/ccache`);
     generateOptions["-DZIG_GLOBAL_CACHE_DIR_OVERRIDE"] = cmakePath(`${cacheBase}/zig/global`);
     generateOptions["-DZIG_LOCAL_CACHE_DIR_OVERRIDE"] = cmakePath(`${cacheBase}/zig/local`);
-    
+
     console.log("✅ Persistent cache environment configured:");
     console.log(`   Cache base: ${cacheBase}`);
     console.log(`   CCACHE_DIR=${process.env.CCACHE_DIR}`);
@@ -180,8 +180,8 @@ async function build(args) {
     } else {
       console.log("Running cache restore step...");
       try {
-        await startGroup("Cache Restore", () => 
-          spawn("cmake", ["--build", buildPath, "--target", "cache-restore"], { env })
+        await startGroup("Cache Restore", () =>
+          spawn("cmake", ["--build", buildPath, "--target", "cache-restore"], { env }),
         );
       } catch (error) {
         console.warn("Cache restore failed (continuing with build):", error.message);
@@ -203,9 +203,7 @@ async function build(args) {
     } else {
       console.log("Running cache save step...");
       try {
-        await startGroup("Cache Save", () => 
-          spawn("cmake", ["--build", buildPath, "--target", "cache-save"], { env })
-        );
+        await startGroup("Cache Save", () => spawn("cmake", ["--build", buildPath, "--target", "cache-save"], { env }));
       } catch (error) {
         console.warn("Cache save failed:", error.message);
       }

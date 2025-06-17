@@ -18,11 +18,13 @@ The caching system follows a simple and effective "remote-first" strategy:
 ### Image Naming and Versioning
 
 Images follow a consistent naming pattern:
+
 - **Local name**: `bun-build-macos-{VERSION}` (e.g., `bun-build-macos-1.2.14`)
 - **Registry URL**: `ghcr.io/{ORGANIZATION}/{REPOSITORY}/bun-build-macos:{VERSION}`
 - **Latest tag**: `ghcr.io/{ORGANIZATION}/{REPOSITORY}/bun-build-macos:latest`
 
 Version detection is automatic:
+
 1. Extracts from `CMakeLists.txt` if available
 2. Falls back to `package.json` version field
 3. Uses git tags/commit as final fallback
@@ -81,11 +83,13 @@ In addition to VM image caching, the CI system implements a sophisticated build 
 The system manages three types of build caches:
 
 1. **ccache** - C/C++ compilation cache
+
    - Caches compiled object files
    - Uploaded by C++ build steps (`build-cpp`)
    - Significantly reduces WebKit and native module compilation times
 
 2. **Zig Local Cache** - Zig compilation artifacts
+
    - Caches Zig compiled objects and incremental state
    - Uploaded by Zig build steps (`build-zig`)
    - Speeds up Bun's core Zig compilation
@@ -100,10 +104,12 @@ The system manages three types of build caches:
 **Step-Specific Uploads**: Each build step only uploads the caches it generates:
 
 - **C++ Build Step** (`BUN_CPP_ONLY=ON`):
+
   - Uploads: `ccache-cache.tar.gz`
   - Reason: C++ compilation generates ccache artifacts
 
 - **Zig Build Step** (default):
+
   - Uploads: `zig-local-cache.tar.gz`, `zig-global-cache.tar.gz`
   - Reason: Zig compilation generates Zig cache artifacts
 
@@ -126,6 +132,7 @@ async function getLastBuildWithCache(orgSlug, pipelineSlug, branch) {
 ```
 
 **Fallback Strategy**:
+
 1. **Current branch cache** - Try to restore from previous successful build on same branch
 2. **Main branch cache** - Fallback to main branch if current branch has no cache
 3. **No cache** - Clean build if no suitable cache found
@@ -133,6 +140,7 @@ async function getLastBuildWithCache(orgSlug, pipelineSlug, branch) {
 ### Cache Implementation Details
 
 **Cache Directory Structure**:
+
 ```
 ${CACHE_PATH}/
 ├── ccache/           # C++ compilation cache
@@ -143,15 +151,17 @@ ${CACHE_PATH}/
 ```
 
 **Upload Process** (CMake targets):
+
 ```cmake
 # Created dynamically based on build step type
 upload-ccache-cache         # C++ step only
-upload-zig-local-cache      # Zig step only  
+upload-zig-local-cache      # Zig step only
 upload-zig-global-cache     # Zig step only
 upload-all-caches          # Meta target for CI
 ```
 
 **Restoration Process** (CMake configure):
+
 ```bash
 # Downloads from detected successful build
 buildkite-agent artifact download ccache-cache.tar.gz . --build ${DETECTED_BUILD_ID}
@@ -161,12 +171,14 @@ cmake -E tar xzf ccache-cache.tar.gz  # Extract to cache directory
 ### Cache Performance Benefits
 
 **Typical Build Time Improvements**:
+
 - **Cold build** (no cache): ~25 minutes
-- **Warm build** (with cache): ~8 minutes  
+- **Warm build** (with cache): ~8 minutes
 - **Cache hit rate**: 85-95% for incremental changes
 - **Storage overhead**: ~2-5GB per cache set
 
 **Cache Effectiveness**:
+
 - **C++ cache**: Most effective for WebKit compilation (largest time savings)
 - **Zig cache**: Effective for Bun core changes
 - **Combined**: Best results when both caches are available
@@ -174,12 +186,14 @@ cmake -E tar xzf ccache-cache.tar.gz  # Extract to cache directory
 ### Configuration
 
 **Cache Strategy** (environment variable):
+
 - `CACHE_STRATEGY=read-write` (default) - Download and upload cache
-- `CACHE_STRATEGY=read-only` - Only download cache  
+- `CACHE_STRATEGY=read-only` - Only download cache
 - `CACHE_STRATEGY=write-only` - Only upload cache
 - `CACHE_STRATEGY=disabled` - Disable caching entirely
 
 **Cache Path** (automatic):
+
 ```bash
 # Unique per branch and build type to avoid conflicts
 CACHE_PATH="/path/to/cache/${REPO}-${BRANCH}/${OS}-${ARCH}-${BUILD_TYPE}"
@@ -188,6 +202,7 @@ CACHE_PATH="/path/to/cache/${REPO}-${BRANCH}/${OS}-${ARCH}-${BUILD_TYPE}"
 ### Debugging Cache Issues
 
 **Cache Restoration Debug Output**:
+
 ```bash
 -- Restoring Buildkite cache artifacts...
 --   Attempting to download ccache-cache.tar.gz from build 01234567-abcd-...
@@ -197,6 +212,7 @@ CACHE_PATH="/path/to/cache/${REPO}-${BRANCH}/${OS}-${ARCH}-${BUILD_TYPE}"
 ```
 
 **Cache Upload Debug Output**:
+
 ```bash
 -- === CACHE UPLOAD DEBUG ===
 -- BUN_CPP_ONLY: ON
@@ -206,6 +222,7 @@ CACHE_PATH="/path/to/cache/${REPO}-${BRANCH}/${OS}-${ARCH}-${BUILD_TYPE}"
 ```
 
 **Common Issues**:
+
 1. **"No cache found"** - No previous successful builds with cache artifacts
 2. **"Cache disabled"** - `BUILDKITE_CACHE=OFF` or `CACHE_STRATEGY=disabled`
 3. **Authentication errors** - Missing buildkite-agent permissions
@@ -213,12 +230,14 @@ CACHE_PATH="/path/to/cache/${REPO}-${BRANCH}/${OS}-${ARCH}-${BUILD_TYPE}"
 
 ### Cache Maintenance
 
-**Automatic Cleanup**: 
+**Automatic Cleanup**:
+
 - Old cache artifacts are automatically cleaned by Buildkite (30-day retention)
 - Local cache directories are cleaned between builds
 - Failed builds don't upload cache (prevents corrupted cache)
 
 **Manual Cache Management**:
+
 ```bash
 # Force clean cache build
 CACHE_STRATEGY=disabled cmake --build build --target bun
@@ -227,7 +246,7 @@ CACHE_STRATEGY=disabled cmake --build build --target bun
 ls -la ${CACHE_PATH}/ccache
 du -sh ${CACHE_PATH}/*
 
-# Test cache upload manually  
+# Test cache upload manually
 cmake --build build --target upload-all-caches
 ```
 
@@ -269,14 +288,17 @@ The script provides comprehensive debugging output:
 Common issues and solutions:
 
 1. **Permission errors with Tart**:
+
    - Script automatically fixes `.tart` directory permissions
    - Ensures proper ownership for the current user
 
 2. **SSH connection failures**:
+
    - Retries up to 30 times with 30-second intervals
    - Installs `sshpass` if not available
 
 3. **VM boot issues**:
+
    - Waits 60 seconds for initial boot
    - Attempts IP detection up to 10 times
 
@@ -287,6 +309,7 @@ Common issues and solutions:
 ## Usage -- Quick Start
 
 1. **Clone and run the setup script:**
+
    ```bash
    curl -O https://raw.githubusercontent.com/build-archetype/client-oven-sh-bun/feat/sam/on-prem-mac-ci/infrastructure/setup/setup-mac-server.sh
    chmod +x setup-mac-server.sh
@@ -294,10 +317,12 @@ Common issues and solutions:
    ```
 
 2. **GitHub Token Setup:**
+
    - You must create a GitHub token (classic or fine-grained) with at least `repo:status` (for public repos) or additional permissions for private repos.
    - Add this token as a secret in your Buildkite pipeline settings (e.g., `GITHUB_TOKEN`).
 
 3. **Manual Bootstrap Script Setup in Buildkite:**
+
    - In Buildkite, go to your pipeline settings.
    - Click "Pipeline Steps" and select "YAML Steps".
    - Paste the following as your initial step:
@@ -311,6 +336,7 @@ Common issues and solutions:
    - This will generate and upload the full dynamic pipeline for your build.
 
 4. **Agent Configuration:**
+
    - The setup script configures your agent with:
      ```
      tags="os=macos,arch=aarch64,queue=darwin"
@@ -428,6 +454,7 @@ brew install tailscale && sudo /opt/homebrew/bin/tailscaled install-system-daemo
 ```
 
 Or step by step:
+
 ```bash
 # Install Tailscale
 brew install tailscale
@@ -460,6 +487,7 @@ ssh mac-ci@100.82.150.86
 ### **Other VPN Options**
 
 The setup script also supports:
+
 - **WireGuard**: Point-to-point VPN with manual key exchange
 - **UniFi VPN**: Integration with UniFi Dream Machine Pro
 - **Cloudflare Tunnel**: Zero-trust access through Cloudflare
@@ -473,6 +501,7 @@ Several operations require special permissions on macOS. The setup script will g
 **Required for**: Enabling SSH, system configuration, monitoring setup
 
 **Steps**:
+
 1. **Open System Settings** → **Privacy & Security** → **Full Disk Access**
 2. **Click the + button** to add applications
 3. **Add your Terminal application**:
@@ -483,6 +512,7 @@ Several operations require special permissions on macOS. The setup script will g
 5. **Re-run the setup script**
 
 **What happens without Full Disk Access**:
+
 - ❌ Cannot enable SSH automatically
 - ❌ Cannot configure system sleep settings
 - ⚠️ Setup continues but shows manual SSH instructions
@@ -492,6 +522,7 @@ Several operations require special permissions on macOS. The setup script will g
 **Required for**: Accessing certain system directories during builds
 
 **Steps**:
+
 1. **System Settings** → **Privacy & Security** → **Full Disk Access**
 2. **Add Buildkite Agent**:
    - Navigate to `/opt/homebrew/bin/buildkite-agent`
@@ -560,6 +591,7 @@ If you simply run:
 The script will prompt you for any required values that are not already set in the environment.
 
 ### Key Variables
+
 - `BUILDKITE_AGENT_TOKEN` (required)
 - `GITHUB_USERNAME` (required for ghcr.io login)
 - `GITHUB_TOKEN` (required for ghcr.io login)
@@ -596,9 +628,11 @@ This makes the script flexible for both manual and automated setups.
 ## Agent Configuration
 
 Agents are tagged as follows:
+
 ```yaml
 tags: "os=macos,arch=aarch64,queue=darwin"
 ```
+
 - Only one queue per agent is supported in Buildkite clusters.
 - If you want to support both arm64 and x64, run separate agents with the appropriate `arch` tag.
 
@@ -642,6 +676,7 @@ tags: "os=macos,arch=aarch64,queue=darwin"
 ## Support
 
 For issues or questions:
+
 - Email: support@your-organization.com
 - Internal Slack: #ci-infrastructure
 - Emergency: See on-call rotation in PagerDuty
@@ -649,11 +684,13 @@ For issues or questions:
 ## Network Configuration
 
 ### VLAN Setup
+
 - Build VLAN: 10.0.1.0/24 (VM traffic)
 - Management: 10.0.2.0/24 (monitoring, admin)
 - Storage: 10.0.3.0/24 (NFS, caches)
 
 ### Required Firewall Rules
+
 ```
 # External Access
 ALLOW tcp/443 github.com          # Git operations
@@ -670,13 +707,16 @@ ALLOW tcp/2049 nfs               # Build cache
 ## VM Management
 
 ### Configuration
+
 Each host runs maximum 2 VMs with:
+
 - 4 CPU cores per VM
 - 8GB RAM per VM
 - 50GB disk per VM
 - Clean snapshot per build
 
 ### Common VM Commands
+
 ```bash
 # List VMs
 tart list
@@ -697,12 +737,14 @@ tart snapshot create my-build-vm base-state
 ## Security Setup
 
 ### Access Control
+
 - SSH key-based authentication only
 - MFA required for all admin access
 - Just-in-Time (JIT) access for maintenance
 - Full audit logging enabled
 
 ### Key Management
+
 ```bash
 # Generate new SSH key
 ssh-keygen -t ed25519 -C "ci-host-$(date +%Y%m)"
@@ -718,6 +760,7 @@ mv ~/.ssh/authorized_keys ~/.ssh/authorized_keys.old
 ## Monitoring Setup
 
 ### Key Metrics
+
 - Build duration and success rate
 - Queue length and wait time
 - VM resource usage (CPU, RAM, disk)
@@ -725,6 +768,7 @@ mv ~/.ssh/authorized_keys ~/.ssh/authorized_keys.old
 - Cache hit rates
 
 ### Alert Thresholds
+
 - CPU usage > 90% for 5 minutes
 - Memory usage > 85% for 5 minutes
 - Disk usage > 90%
@@ -732,6 +776,7 @@ mv ~/.ssh/authorized_keys ~/.ssh/authorized_keys.old
 - Failed builds > 5 per hour
 
 ### Accessing Metrics
+
 - Grafana: http://localhost:3000 (default admin/your-password)
 - Prometheus: http://localhost:9090
 - Node Exporter metrics: http://localhost:9100/metrics
@@ -741,6 +786,7 @@ mv ~/.ssh/authorized_keys ~/.ssh/authorized_keys.old
 ### 1. Accessing Services
 
 #### Grafana Monitoring
+
 - URL: http://localhost:3000 (or http://your-server-ip:3000)
 - Default login: admin / (password you provided during setup)
 - Default dashboards are automatically configured for:
@@ -750,6 +796,7 @@ mv ~/.ssh/authorized_keys ~/.ssh/authorized_keys.old
   - Cache performance
 
 #### Buildkite Integration
+
 1. Your agent should automatically connect to Buildkite
 2. Verify in Buildkite UI: Settings → Agents
 3. Tag your agent in Buildkite for specific architectures:
@@ -763,10 +810,12 @@ mv ~/.ssh/authorized_keys ~/.ssh/authorized_keys.old
 The setup supports three VPN options:
 
 1. **WireGuard (Default)**
+
    - Simple point-to-point VPN
    - Lightweight and fast
    - Built-in to modern operating systems
    - Configuration file provided at `/etc/wireguard/client.conf`
+
    ```bash
    # View WireGuard config
    sudo cat /etc/wireguard/wg0.conf
@@ -775,10 +824,12 @@ The setup supports three VPN options:
    ```
 
 2. **Tailscale**
+
    - Zero-trust mesh networking
    - Easy NAT traversal
    - Automatic key management
    - Optional SSO integration
+
    ```bash
    # Check Tailscale status
    tailscale status
@@ -799,6 +850,7 @@ The setup supports three VPN options:
    ```
 
 To connect:
+
 ```bash
 # For WireGuard
 # 1. Install WireGuard client for your OS
@@ -817,6 +869,7 @@ To connect:
 ```
 
 SSH Access:
+
 ```bash
 # Your SSH key was automatically added during setup
 ssh ci-admin@your-server-ip
@@ -828,6 +881,7 @@ sudo ci-admin add-user username
 ### 2. Verifying Setup
 
 Check all services are running:
+
 ```bash
 # Check service status
 sudo ci-admin status
@@ -842,6 +896,7 @@ sudo ci-admin test-connection
 ### 3. Initial Configuration
 
 1. Set up build environments:
+
 ```bash
 # Create base VM image
 sudo ci-admin create-base-image
@@ -851,6 +906,7 @@ sudo ci-admin test-build
 ```
 
 2. Configure monitoring alerts:
+
 ```bash
 # Access Grafana
 open http://localhost:3000
@@ -863,6 +919,7 @@ open http://localhost:3000
 ```
 
 3. Set up backup schedule:
+
 ```bash
 # Configure backup location
 sudo ci-admin configure-backup s3://your-bucket
@@ -874,10 +931,12 @@ sudo ci-admin enable-backup
 ### 4. Next Steps
 
 1. Set up your first build pipeline:
+
    - Example pipeline in `.buildkite/pipeline.yml`
    - Test with: `buildkite-agent pipeline upload`
 
 2. Configure artifact storage:
+
    ```bash
    # Local storage
    sudo ci-admin configure-storage local
@@ -893,6 +952,7 @@ sudo ci-admin enable-backup
 ## Maintenance and Updates
 
 ### Updating the System
+
 ```bash
 # Update all components
 sudo ci-admin update
@@ -902,6 +962,7 @@ sudo ci-admin update [buildkite|tart|monitoring]
 ```
 
 ### Backup and Restore
+
 ```bash
 # Manual backup
 sudo ci-admin backup
@@ -914,6 +975,7 @@ sudo ci-admin restore backup-name
 ```
 
 ### Adding More Capacity
+
 ```bash
 # Add another build agent
 sudo ci-admin add-agent
@@ -927,6 +989,7 @@ sudo ci-admin extend-storage 500G
 ### Common Issues
 
 1. Build Agent Not Connecting
+
 ```bash
 # Check agent status
 sudo ci-admin check-agent
@@ -936,6 +999,7 @@ sudo ci-admin logs buildkite
 ```
 
 2. Monitoring Not Working
+
 ```bash
 # Reset Grafana password
 sudo ci-admin reset-grafana-password
@@ -945,6 +1009,7 @@ curl localhost:9090/targets
 ```
 
 3. VM Issues
+
 ```bash
 # Clean up stuck VMs
 sudo ci-admin cleanup-vms
@@ -956,28 +1021,32 @@ sudo ci-admin reset-vm vm-name
 ## Cost Analysis
 
 ### Hardware Costs (One-time)
+
 - M2/M3 Mac Mini: $1,200
 - Intel Mac Mini: $800
 - Network Stack: $1,500
 - UPS & PDU: $500
-Total: ~$4,000
+  Total: ~$4,000
 
 ### Monthly Operating Costs
+
 - Power: $50
 - Internet: $100
 - S3 Storage: $20
 - Maintenance: $100
-Total: ~$270/month
+  Total: ~$270/month
 
 Compared to cloud services:
+
 - MacStadium: ~$1,000/month
 - EC2: ~$500/month
-Net savings: ~$1,200/month
-ROI: ~3.5 months
+  Net savings: ~$1,200/month
+  ROI: ~3.5 months
 
 ## Implementation Steps
 
 1. **Hardware Setup**
+
    ```bash
    # Network configuration on UniFi
    - Create VLANs (10.0.1.0/24, 10.0.2.0/24, 10.0.3.0/24)
@@ -992,6 +1061,7 @@ ROI: ~3.5 months
    ```
 
 2. **Run Installation**
+
    ```bash
    # Run the setup script
    curl -fsSL https://raw.githubusercontent.com/oven-sh/bun/main/infrastructure/setup/setup-mac-server.sh | sudo -E bash
@@ -1001,6 +1071,7 @@ ROI: ~3.5 months
    ```
 
 3. **Post-Install Configuration**
+
    ```bash
    # Set up Buildkite pipeline
    buildkite-agent pipeline upload .buildkite/pipeline.yml
@@ -1019,6 +1090,7 @@ ROI: ~3.5 months
    ```
 
 4. **Test Build Pipeline**
+
    ```bash
    # Run test build
    buildkite-agent build create \

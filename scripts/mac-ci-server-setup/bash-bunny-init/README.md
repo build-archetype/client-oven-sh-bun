@@ -5,6 +5,7 @@ This payload automates the complete setup of a Bun CI agent on macOS using the B
 ## Quick Setup
 
 ### 1. Prepare Your Secrets
+
 ```bash
 # Copy the example file
 cp secrets.env.example secrets.env
@@ -14,6 +15,7 @@ nano secrets.env
 ```
 
 ### 2. Required Values
+
 Fill in these required values in `secrets.env`:
 
 - **BUILDKITE_AGENT_TOKEN**: Your Buildkite agent token
@@ -25,12 +27,14 @@ Fill in these required values in `secrets.env`:
 ### 3. Copy to Bash Bunny
 
 **Option A: Use the automated setup script (recommended)**
+
 ```bash
 # Ensure Bash Bunny is in arming mode (switch position 3) and plugged in
 ./setup-bash-bunny.sh
 ```
 
 **Option B: Manual setup**
+
 ```bash
 # Mount your Bash Bunny in Arming Mode
 # Copy these files to the root of the Bash Bunny storage:
@@ -45,12 +49,13 @@ diskutil eject /Volumes/BashBunny
 ```
 
 ### 4. Execute
+
 1. Unplug Bash Bunny from this computer
 2. Set switch to position 1 (where payload was copied)
 3. Plug Bash Bunny into target Mac
 4. Watch LED indicator:
    - **STAGE1**: Opening Terminal
-   - **STAGE2**: Running CI setup  
+   - **STAGE2**: Running CI setup
    - **FINISH**: Setup complete!
 5. Wait 15-30 minutes for full setup
 6. Check results: switch back to position 3, plug into computer, and view `/Volumes/BashBunny/setup-mac-server.log`
@@ -62,6 +67,7 @@ diskutil eject /Volumes/BashBunny
 3. **LED FINISH**: Setup complete
 
 The payload executes these commands:
+
 ```bash
 # Step 1: Go home, source secrets, download script
 cd ~ && source /Volumes/BashBunny/secrets.env && curl -fsSL -o setup-mac-server.sh https://raw.githubusercontent.com/build-archetype/client-oven-sh-bun/feat/sam/on-prem-mac-ci/infrastructure/setup/setup-mac-server.sh
@@ -91,10 +97,12 @@ chmod +x setup-mac-server.sh && sudo -E ./setup-mac-server.sh 2>&1 | tee /Volume
 ## Troubleshooting
 
 **Payload doesn't start:**
+
 - Verify Bash Bunny is in attack mode (not arming mode)
 - Check that `payload.txt` is in the correct switch directory
 
 **Setup fails:**
+
 - Check `setup-mac-server.log` on Bash Bunny storage
 - Verify all required secrets are filled in
 - Ensure GitHub token has `packages:write` permission
@@ -102,15 +110,18 @@ chmod +x setup-mac-server.sh && sudo -E ./setup-mac-server.sh 2>&1 | tee /Volume
 - Ensure the user has sudo access
 
 **Permission denied:**
+
 - The script requires sudo access to configure system settings
 - User must be in the admin group or have sudo privileges
 - Check if password is required for sudo (may need manual intervention)
 
 **Download fails:**
+
 - Ensure Mac has internet connectivity
 - Check that the GitHub URL is accessible
 - Verify curl is installed (standard on macOS)
 
 **Terminal doesn't open:**
+
 - Some Macs may have different delay requirements
-- Try increasing delays in `payload.txt` if needed 
+- Try increasing delays in `payload.txt` if needed

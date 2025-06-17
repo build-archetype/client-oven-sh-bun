@@ -1191,7 +1191,7 @@ export function getBootstrapVersion(os) {
   } else {
     scriptPath = join(import.meta.dirname, "bootstrap.sh");
   }
-  
+
   const scriptContent = readFile(scriptPath, { cache: true });
   const match = /# Version: ([\d.]+)/.exec(scriptContent);
   if (match) {
@@ -2715,7 +2715,7 @@ export function toYaml(obj, indent = 0) {
       if (key === "command") {
         // Special handling for command arrays in pipeline steps
         if (value.length === 1) {
-          const lines = value[0].split('\n');
+          const lines = value[0].split("\n");
           if (lines.length === 1) {
             result += `${spaces}${key}: ${value[0]}\n`;
           } else {
@@ -2727,7 +2727,7 @@ export function toYaml(obj, indent = 0) {
         } else {
           result += `${spaces}${key}:\n`;
           value.forEach(item => {
-            const lines = item.split('\n');
+            const lines = item.split("\n");
             if (lines.length === 1) {
               result += `${spaces}- ${item}\n`;
             } else {

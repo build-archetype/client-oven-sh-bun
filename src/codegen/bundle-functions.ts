@@ -388,7 +388,7 @@ export async function bundleBuiltinFunctions({ requireTransformer }: BundleBuilt
     fs.mkdirSync(TMP_DIR, { recursive: true });
     console.log(`📁 Created temporary directory: ${TMP_DIR}`);
   }
-  
+
   const filesToProcess = readdirSync(SRC_DIR)
     .filter(x => x.endsWith(".ts") && !x.endsWith(".d.ts"))
     .sort();

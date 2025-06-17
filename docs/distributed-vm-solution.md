@@ -3,16 +3,18 @@
 ## **Problem Statement**
 
 When running macOS CI across multiple machines, VM image checks and builds can run on different machines:
-- Machine A: Runs VM check, finds/builds image locally 
+
+- Machine A: Runs VM check, finds/builds image locally
 - Machine B: Runs actual build, but doesn't have the image → **FAILURE**
 
 ## **Root Cause**
 
 All macOS build steps use the same agent configuration:
+
 ```javascript
 {
   queue: "darwin",
-  os: "darwin", 
+  os: "darwin",
   arch: "arm64",
   tart: "true"
 }
@@ -35,7 +37,7 @@ if (platform.os === "darwin") {
     // existing VM command...
   ];
   // ADD THESE LINES:
-  step.concurrency_group = getTargetKey(platform);  // e.g., "darwin-aarch64"
+  step.concurrency_group = getTargetKey(platform); // e.g., "darwin-aarch64"
   step.concurrency = 1;
 }
 ```
@@ -44,16 +46,16 @@ if (platform.os === "darwin") {
 
 In `.buildkite/ci.mjs`, add concurrency configuration to:
 
-1. **getBuildVendorStep()** 
+1. **getBuildVendorStep()**
 2. **getBuildCppStep()**
-3. **getBuildZigStep()** 
+3. **getBuildZigStep()**
 4. **getLinkBunStep()**
 5. **getMacOSVMBuildStep()** (VM preparation step)
 
 ### **How It Works**
 
 1. **Concurrency Group**: Groups related steps (e.g., all `darwin-aarch64` steps)
-2. **Concurrency Limit**: `concurrency = 1` forces sequential execution  
+2. **Concurrency Limit**: `concurrency = 1` forces sequential execution
 3. **Machine Affinity**: Buildkite assigns the entire group to one machine
 4. **Result**: VM preparation + all builds run on the same machine
 
@@ -62,11 +64,12 @@ In `.buildkite/ci.mjs`, add concurrency configuration to:
 ✅ **Solves distributed VM issue**: All related steps run on same machine  
 ✅ **Zero impact on other platforms**: Only affects `platform.os === "darwin"`  
 ✅ **Uses existing infrastructure**: Leverages `getTargetKey(platform)` already in use  
-✅ **Scalable**: Multiple platforms can still run in parallel on different machines  
+✅ **Scalable**: Multiple platforms can still run in parallel on different machines
 
 ### **Example Before/After**
 
 **Before (Random Distribution):**
+
 ```
 Machine A: darwin-aarch64-build-vendor (builds VM)
 Machine B: darwin-aarch64-build-cpp (VM missing! ❌)
@@ -74,6 +77,7 @@ Machine C: darwin-aarch64-build-zig (VM missing! ❌)
 ```
 
 **After (Machine Affinity):**
+
 ```
 Machine A: darwin-aarch64-build-vendor (builds VM)
 Machine A: darwin-aarch64-build-cpp (VM available ✅)
@@ -83,6 +87,7 @@ Machine A: darwin-aarch64-build-zig (VM available ✅)
 ### **Testing**
 
 To verify the fix:
+
 1. Trigger a macOS build on multiple-machine setup
 2. Check Buildkite logs - all steps for same platform should show same agent
 3. Confirm no "VM image missing" errors
@@ -91,4 +96,4 @@ To verify the fix:
 
 **Status**: Ready to implement  
 **Risk**: Low (only affects macOS steps, uses existing Buildkite features)  
-**Impact**: Fixes critical distributed VM issue 
+**Impact**: Fixes critical distributed VM issue
