@@ -183,4 +183,5 @@ codegen-for-zig-team.tar.gz
 *.sock
 scratch*.{js,ts,tsx,cjs,mjs}
 
-*.bun-buildbuildkite-cache/
+*.bun-build
+buildkite-cache/
