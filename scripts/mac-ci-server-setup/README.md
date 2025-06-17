@@ -323,6 +323,210 @@ Common issues and solutions:
    - Subsequent builds use cached images and start much faster
    - Images are automatically shared via GitHub Container Registry
 
+## 📊 **Monitoring Setup with Grafana Cloud**
+
+The setup script includes optional monitoring with Grafana Cloud for comprehensive observability of your CI infrastructure.
+
+### **Integrated Setup (Recommended)**
+
+Enable monitoring during the main setup process:
+
+```bash
+# Option 1: Set environment variables
+export MONITORING_ENABLED=true
+export MONITORING_TYPE="grafana-cloud"
+export GCLOUD_HOSTED_METRICS_ID="your-organization-id"
+export GCLOUD_RW_API_KEY="your-grafana-cloud-api-key"
+export GCLOUD_HOSTED_METRICS_URL="https://prometheus-prod-XX-prod-us-east-0.grafana.net/api/prom/push"
+export GCLOUD_HOSTED_LOGS_URL="https://logs-prod-XXX-prod-us-east-0.grafana.net/loki/api/v1/push"
+./setup-mac-server.sh
+
+# Option 2: Interactive setup
+./setup-mac-server.sh
+# Choose option 1 when prompted for monitoring
+# Enter your Grafana Cloud credentials when prompted
+```
+
+### **Getting Grafana Cloud Credentials**
+
+1. **Sign up** at [grafana.com](https://grafana.com/auth/sign-up/create-user)
+2. **Create a stack** or use existing
+3. **Go to Connections** → **Add new connection** → **Hosted Prometheus metrics**
+4. **Follow the setup wizard** to get:
+   - Organization ID (your user ID number)
+   - API Key (starts with `glc_`)
+   - Prometheus endpoint URL
+   - Loki endpoint URL
+
+### **Standalone Monitoring Setup**
+
+If you want to add monitoring to an existing CI setup:
+
+```bash
+# Copy template and configure
+cp grafana-env.template grafana-env.sh
+nano grafana-env.sh  # Edit with your credentials
+source grafana-env.sh
+
+# Install monitoring tools
+brew tap grafana/grafana
+brew install grafana/grafana/alloy
+brew install prometheus-node-exporter
+
+# Start services
+brew services start prometheus-node-exporter
+brew services start alloy
+```
+
+### **What Monitoring Includes**
+
+- **System Metrics**: CPU, memory, disk, network usage
+- **Build Metrics**: Job duration, success rates, queue length
+- **Application Logs**: Buildkite agent, system, and build logs
+- **Dashboards**: Pre-configured Grafana dashboards
+- **Alerts**: Critical system and build failure notifications
+
+For detailed monitoring setup, see: [grafana-cloud-setup.md](./grafana-cloud-setup.md)
+
+## 🔗 **VPN Setup with Tailscale**
+
+The setup script includes VPN configuration for secure remote access to your CI infrastructure.
+
+### **Integrated Tailscale Setup (Recommended)**
+
+Enable Tailscale during the main setup process:
+
+```bash
+# Option 1: Set environment variables
+export VPN_ENABLED=true
+export VPN_TYPE="tailscale"
+export TAILSCALE_AUTH_KEY="your-tailscale-auth-key"
+./setup-mac-server.sh
+
+# Option 2: Interactive setup
+./setup-mac-server.sh
+# Choose option 1 when prompted for VPN
+# Select Tailscale and enter your auth key
+```
+
+### **Getting Tailscale Auth Key**
+
+1. **Sign up** at [tailscale.com](https://tailscale.com/)
+2. **Go to Settings** → **Keys**
+3. **Generate auth key** with appropriate settings:
+   - **Reusable**: Yes (for multiple machines)
+   - **Ephemeral**: No (for persistent connections)
+   - **Pre-authorized**: Yes (for automation)
+
+### **Standalone Tailscale Setup**
+
+Quick one-command setup for existing machines:
+
+```bash
+# Install and connect with auth key
+brew install tailscale && sudo /opt/homebrew/bin/tailscaled install-system-daemon && sleep 3 && tailscale up --authkey='your-auth-key' --hostname="$(hostname -s)" --accept-routes --accept-dns=false && sleep 3 && echo "✅ Connected! IP: $(tailscale ip --4)" && sudo systemsetup -setremotelogin on && echo "✅ SSH enabled"
+```
+
+Or step by step:
+```bash
+# Install Tailscale
+brew install tailscale
+
+# Install as system daemon
+sudo /opt/homebrew/bin/tailscaled install-system-daemon
+
+# Connect to your network
+tailscale up --authkey="your-auth-key" --hostname="$(hostname -s)"
+
+# Enable SSH access
+sudo systemsetup -setremotelogin on
+```
+
+### **Connecting to CI Machines**
+
+Once Tailscale is set up, connect to your CI machines:
+
+```bash
+# Check available machines
+tailscale status
+
+# Connect via SSH (use 'mac-ci' user, not your local username)
+ssh mac-ci@100.x.x.x
+
+# Example with actual IP
+ssh mac-ci@100.82.150.86
+```
+
+### **Other VPN Options**
+
+The setup script also supports:
+- **WireGuard**: Point-to-point VPN with manual key exchange
+- **UniFi VPN**: Integration with UniFi Dream Machine Pro
+- **Cloudflare Tunnel**: Zero-trust access through Cloudflare
+
+## 🛡️ **macOS Permissions Requirements**
+
+Several operations require special permissions on macOS. The setup script will guide you through these:
+
+### **Full Disk Access for Terminal**
+
+**Required for**: Enabling SSH, system configuration, monitoring setup
+
+**Steps**:
+1. **Open System Settings** → **Privacy & Security** → **Full Disk Access**
+2. **Click the + button** to add applications
+3. **Add your Terminal application**:
+   - **Terminal.app** (built-in terminal)
+   - **iTerm2** (if you use iTerm)
+   - **VS Code Terminal** (if running from VS Code)
+4. **Quit and reopen** your terminal application
+5. **Re-run the setup script**
+
+**What happens without Full Disk Access**:
+- ❌ Cannot enable SSH automatically
+- ❌ Cannot configure system sleep settings
+- ⚠️ Setup continues but shows manual SSH instructions
+
+### **Full Disk Access for Buildkite Agent (Optional)**
+
+**Required for**: Accessing certain system directories during builds
+
+**Steps**:
+1. **System Settings** → **Privacy & Security** → **Full Disk Access**
+2. **Add Buildkite Agent**:
+   - Navigate to `/opt/homebrew/bin/buildkite-agent`
+   - Or `/usr/local/bin/buildkite-agent` (Intel Macs)
+3. **Restart the agent service**:
+   ```bash
+   brew services restart buildkite-agent
+   ```
+
+### **Manual SSH Setup (Alternative)**
+
+If you can't grant Full Disk Access, enable SSH manually:
+
+1. **System Settings** → **General** → **Sharing**
+2. **Turn on "Remote Login"**
+3. **Select users**: Add your CI user (`mac-ci`)
+4. **Configure SSH access** for Tailscale IPs (if using VPN)
+
+### **Troubleshooting Permissions**
+
+```bash
+# Check if SSH is enabled
+sudo systemsetup -getremotelogin
+
+# Enable SSH manually
+sudo systemsetup -setremotelogin on
+
+# Check Buildkite agent permissions
+ls -la /opt/homebrew/bin/buildkite-agent
+
+# Test SSH connectivity
+ssh mac-ci@localhost  # Local test
+ssh mac-ci@$(tailscale ip --4)  # Tailscale test
+```
+
 ## Non-Interactive and Interactive Setup
 
 The `setup-mac-server.sh` script can be run in two ways:
@@ -438,7 +642,7 @@ tags: "os=macos,arch=aarch64,queue=darwin"
 ## Support
 
 For issues or questions:
-- Email: sam@buildarchetype.dev
+- Email: support@your-organization.com
 - Internal Slack: #ci-infrastructure
 - Emergency: See on-call rotation in PagerDuty
 

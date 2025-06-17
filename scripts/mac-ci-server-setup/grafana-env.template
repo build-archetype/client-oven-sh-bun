@@ -1,0 +1,48 @@
+# Grafana Cloud Environment Variables Template
+# Copy this file to grafana-env.sh and fill in your actual values
+# Then source it before running the setup: source grafana-env.sh
+
+# ===== REQUIRED GRAFANA CLOUD CREDENTIALS =====
+# Get these from: https://grafana.com/orgs/your-organization/stack/integrations
+
+# Your Grafana Cloud organization ID (not username)
+export GCLOUD_HOSTED_METRICS_ID="your-organization-id"
+
+# Your Grafana Cloud API key (must have metrics:write and logs:write permissions)
+export GCLOUD_RW_API_KEY="your-grafana-cloud-api-key"
+
+# Grafana Cloud Prometheus endpoint URL
+export GCLOUD_HOSTED_METRICS_URL="https://prometheus-prod-XX-prod-us-east-0.grafana.net/api/prom/push"
+
+# Grafana Cloud Loki endpoint URL  
+export GCLOUD_HOSTED_LOGS_URL="https://logs-prod-XXX-prod-us-east-0.grafana.net/loki/api/v1/push"
+
+# Instance name for labels
+export GCLOUD_SCRAPE_INTERVAL="60s"
+
+# ===== OPTIONAL GRAFANA CLOUD SETTINGS =====
+# Grafana Cloud region (usually auto-detected from API key)
+export GCLOUD_REGION="prod-us-east-0"
+
+# Instance labels for your CI machines
+export GCLOUD_INSTANCE_LABELS="environment=ci,service=buildkite"
+
+# ===== USAGE =====
+# 1. Copy this template: cp grafana-env.template grafana-env.sh
+# 2. Edit grafana-env.sh with your actual values:
+#    - Get your organization ID from: https://grafana.com/orgs/your-org/stack
+#    - Get your API key from: https://grafana.com/orgs/your-org/api-keys
+#    - Get your endpoints from: https://grafana.com/orgs/your-org/stack/integrations
+# 3. Source the file: source grafana-env.sh
+# 4. Run the setup: ./setup-grafana-monitoring.sh
+
+echo "✅ Grafana Cloud environment variables loaded"
+echo "   Organization ID: $GCLOUD_HOSTED_METRICS_ID"
+echo "   Prometheus URL: $GCLOUD_HOSTED_METRICS_URL"
+echo "   Loki URL: $GCLOUD_HOSTED_LOGS_URL"
+echo "   Region: $GCLOUD_REGION"
+if [[ "$GCLOUD_RW_API_KEY" =~ ^glc_.*$ ]]; then
+    echo "   API Key: glc_***$(echo "$GCLOUD_RW_API_KEY" | tail -c 8)"
+else
+    echo "⚠️  Please set GCLOUD_RW_API_KEY to your actual Grafana Cloud API key"
+fi
