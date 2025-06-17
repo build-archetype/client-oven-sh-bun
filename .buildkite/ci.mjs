@@ -1146,7 +1146,12 @@ function getGrafanaMonitoringStep() {
     agents: {
       queue: "darwin",
     },
-    command: "./scripts/setup-grafana-monitoring.sh",
+    command: [
+      "chmod +x .buildkite/debug-env.sh",
+      "./.buildkite/debug-env.sh",
+      "echo '--- Running Grafana setup ---'",
+      "./scripts/setup-grafana-monitoring.sh"
+    ].join(" && "),
     env: {
       GRAFANA_CLOUD_USERNAME: "${GRAFANA_CLOUD_USERNAME}",
       GRAFANA_CLOUD_API_KEY: "${GRAFANA_CLOUD_API_KEY}",
