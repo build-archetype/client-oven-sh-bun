@@ -1136,31 +1136,6 @@ function getMacOSVMBuildStep(platform, options) {
   };
 }
 
-/**
- * @returns {Step}
- */
-function getGrafanaMonitoringStep() {
-  return {
-    key: "setup-grafana-monitoring",
-    label: "📊 Setup Grafana Monitoring",
-    agents: {
-      queue: "darwin",
-    },
-    command: [
-      "chmod +x .buildkite/debug-env.sh",
-      "./.buildkite/debug-env.sh",
-      "echo '--- Running Grafana setup ---'",
-      "./scripts/setup-grafana-monitoring.sh"
-    ].join(" && "),
-    timeout_in_minutes: 10,
-    retry: {
-      automatic: [
-        { exit_status: 1, limit: 2 }
-      ]
-    }
-  };
-}
-
 // === MAC_OS_VM_RESOURCE_CONFIGURATION ===
 // Centralized configuration for Tart macOS VM resources
 // IMPORTANT: These values are intentionally conservative to ensure reliable VM boot
@@ -1273,14 +1248,9 @@ async function getPipeline(options = {}) {
     ...testPlatforms.filter(p => p.os === "darwin").map(p => p.release)
   ])];
   if (macOSReleases.length > 0) {
-    // Add Grafana monitoring setup first
-    steps.push(getGrafanaMonitoringStep());
-    
-    // Then add macOS VM builds with dependency on monitoring
     steps.push({
       key: "build-macos-base-images", 
       group: "🍎 macOS Base Images",
-      depends_on: ["setup-grafana-monitoring"],
       steps: macOSReleases.map(release => getMacOSVMBuildStep({ os: "darwin", release }, options))
     });
   }
