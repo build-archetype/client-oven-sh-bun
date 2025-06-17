@@ -1242,6 +1242,23 @@ async function getPipeline(options = {}) {
   /** @type {Step[]} */
   const steps = [];
 
+  // TODO: Re-enable macOS VM base image building with separate tag system
+  // These steps build the base VM images (macOS 13, 14) that are used by build agents
+  // Currently commented out to avoid conflicts with regular build agents
+  // 
+  // PLAN: Implement separate tag system for base image builds:
+  // 1. Use different agent tags: `macos_vm_builder: "true"` instead of `queue: "darwin"`
+  // 2. Only run on specific conditions (e.g., when base images need updates)
+  // 3. Possibly triggered by schedule or manual pipeline
+  // 4. Agents with `macos_vm_builder` tag should have persistent filesystem access
+  //    for efficient base image storage/caching
+  //
+  // For now, base images are built manually via: 
+  // ./scripts/build-macos-vm.sh --release=13
+  // ./scripts/build-macos-vm.sh --release=14
+  //
+  // UNCOMMENT WHEN SEPARATE TAG SYSTEM IS IMPLEMENTED:
+  /*
   // Add macOS VM base image build steps - one for each unique macOS release
   const macOSReleases = [...new Set([
     ...buildPlatforms.filter(p => p.os === "darwin").map(p => p.release),
@@ -1254,6 +1271,7 @@ async function getPipeline(options = {}) {
       steps: macOSReleases.map(release => getMacOSVMBuildStep({ os: "darwin", release }, options))
     });
   }
+  */
 
   if (imagePlatforms.size) {
     steps.push({
@@ -1293,10 +1311,11 @@ async function getPipeline(options = {}) {
         if (imagePlatforms.has(imageKey)) {
           dependsOn.push(`${imageKey}-build-image`);
         }
+        // TODO: Re-enable when macOS VM base image building is re-enabled
         // Add dependency on specific macOS VM build if this is a macOS platform
-        if (target.os === "darwin") {
-          dependsOn.push(`build-macos-vm-${target.release}`);
-        }
+        // if (target.os === "darwin") {
+        //   dependsOn.push(`build-macos-vm-${target.release}`);
+        // }
 
         return getStepWithDependsOn(
           {
