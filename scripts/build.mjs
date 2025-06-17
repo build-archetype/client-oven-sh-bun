@@ -174,14 +174,18 @@ async function build(args) {
 
   // Cache restore step (before main build)
   if (process.env.BUILDKITE_CACHE_RESTORE === "ON") {
-    // Always run cache restore for ccache - persistent cache still needs explicit restore from disk
-    console.log("Running cache restore step...");
-    try {
-      await startGroup("Cache Restore", () => 
-        spawn("cmake", ["--build", buildPath, "--target", "cache-restore"], { env })
-      );
-    } catch (error) {
-      console.warn("Cache restore failed (continuing with build):", error.message);
+    // Skip CMake cache operations for persistent cache (handled by rsync)
+    if (process.env.BUILDKITE_CACHE_TYPE === "persistent") {
+      console.log("Skipping CMake cache restore (using persistent workspace cache)");
+    } else {
+      console.log("Running cache restore step...");
+      try {
+        await startGroup("Cache Restore", () => 
+          spawn("cmake", ["--build", buildPath, "--target", "cache-restore"], { env })
+        );
+      } catch (error) {
+        console.warn("Cache restore failed (continuing with build):", error.message);
+      }
     }
   }
 
@@ -193,14 +197,18 @@ async function build(args) {
 
   // Cache save step (after main build)
   if (process.env.BUILDKITE_CACHE_SAVE === "ON") {
-    // Always run cache save for ccache - persistent cache still needs explicit save to disk
-    console.log("Running cache save step...");
-    try {
-      await startGroup("Cache Save", () => 
-        spawn("cmake", ["--build", buildPath, "--target", "cache-save"], { env })
-      );
-    } catch (error) {
-      console.warn("Cache save failed:", error.message);
+    // Skip CMake cache operations for persistent cache (handled by rsync)
+    if (process.env.BUILDKITE_CACHE_TYPE === "persistent") {
+      console.log("Skipping CMake cache save (using persistent workspace cache)");
+    } else {
+      console.log("Running cache save step...");
+      try {
+        await startGroup("Cache Save", () => 
+          spawn("cmake", ["--build", buildPath, "--target", "cache-save"], { env })
+        );
+      } catch (error) {
+        console.warn("Cache save failed:", error.message);
+      }
     }
   }
 

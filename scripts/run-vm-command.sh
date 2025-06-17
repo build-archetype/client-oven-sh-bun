@@ -498,13 +498,26 @@ for dir in "${artifact_dirs[@]}"; do
         
         # Use tar over SSH with better error handling to avoid SIGPIPE issues
         echo "🔄 Attempting to copy $dir/ via tar+ssh..."
-        if timeout 300 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null; then
+        if command -v timeout >/dev/null 2>&1; then
+          # Use timeout if available (host systems)
+          if timeout 300 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null; then
             echo "✅ $dir copied back via tar+ssh"
             # Verify copy back worked
             echo "🔍 Debug: Verifying $dir/ copied back to HOST:"
             echo "   HOST $dir/ size: $(du -sh ./$dir 2>/dev/null | cut -f1 || echo 'unknown')"
-        else
+          else
             echo "⚠️ Failed to copy $dir back from VM (non-fatal - build result preserved)"
+          fi
+        else
+          # Fallback without timeout for VMs that don't have it
+          if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null; then
+            echo "✅ $dir copied back via tar+ssh"
+            # Verify copy back worked
+            echo "🔍 Debug: Verifying $dir/ copied back to HOST:"
+            echo "   HOST $dir/ size: $(du -sh ./$dir 2>/dev/null | cut -f1 || echo 'unknown')"
+          else
+            echo "⚠️ Failed to copy $dir back from VM (non-fatal - build result preserved)"
+          fi
         fi
     else
         echo "📋 No $dir/ directory found in VM to copy back"
@@ -526,7 +539,9 @@ for dir in "${cache_dirs[@]}"; do
         
         # Use tar over SSH for cache directories with better error handling
         echo "🔄 Attempting to copy $dir/ via tar+ssh..."
-        if timeout 300 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null; then
+        if command -v timeout >/dev/null 2>&1; then
+          # Use timeout if available (host systems)
+          if timeout 300 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null; then
             echo "✅ $dir copied back via tar+ssh"
             # Verify copy back worked
             echo "🔍 Debug: Verifying $dir/ copied back to HOST:"
@@ -537,8 +552,25 @@ for dir in "${cache_dirs[@]}"; do
                 echo "🔍 Debug: HOST buildkite-cache/build-results contents:"
                 ls -la ./$dir/build-results/ 2>/dev/null | head -5 || echo "   Empty or inaccessible"
             fi
-        else
+          else
             echo "⚠️ Failed to copy $dir back - next build may be slower (non-fatal)"
+          fi
+        else
+          # Fallback without timeout for VMs that don't have it
+          if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null; then
+            echo "✅ $dir copied back via tar+ssh"
+            # Verify copy back worked
+            echo "🔍 Debug: Verifying $dir/ copied back to HOST:"
+            echo "   HOST $dir/ size: $(du -sh ./$dir 2>/dev/null | cut -f1 || echo 'unknown')"
+            
+            # For buildkite-cache, verify CMake cache structure
+            if [ "$dir" = "buildkite-cache" ] && [ -d "./$dir/build-results" ]; then
+                echo "🔍 Debug: HOST buildkite-cache/build-results contents:"
+                ls -la ./$dir/build-results/ 2>/dev/null | head -5 || echo "   Empty or inaccessible"
+            fi
+          else
+            echo "⚠️ Failed to copy $dir back - next build may be slower (non-fatal)"
+          fi
         fi
     else
         echo "📋 No $dir/ directory found in VM to copy back"
