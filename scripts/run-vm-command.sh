@@ -488,129 +488,100 @@ BUILD_EXIT_CODE=$?
 echo "📤 ===== COPYING FINAL ARTIFACTS BACK ====="
 echo "🔍 Build command completed with exit code: $BUILD_EXIT_CODE"
 
-# ===== COPY BUILD ARTIFACTS AND CACHES BACK =====
-# NOTE: These operations should not override the build result
+# Check if cache copying is disabled for debugging
+if [ "${SKIP_CACHE_COPY:-false}" = "true" ]; then
+    echo "⚠️ Cache copying disabled via SKIP_CACHE_COPY=true"
+    echo "✅ Build artifacts and caches copy skipped"
+else
+    # ===== COPY BUILD ARTIFACTS AND CACHES BACK =====
+    # NOTE: These operations should not override the build result
 
-artifact_dirs=("build" "artifacts" "dist")
-cache_dirs=("zig-cache" "buildkite-cache")
+    artifact_dirs=("build" "artifacts" "dist")
+    cache_dirs=("zig-cache" "buildkite-cache")
 
-echo "📦 Copying build artifacts and caches back from VM..."
+    echo "📦 Copying build artifacts and caches back from VM..."
 
-# Debug: Show what exists in VM before copying back
-echo "🔍 Debug: VM filesystem state before copying back:"
-sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "ls -la $VM_WORKSPACE/ | head -15" 2>/dev/null || echo "   Failed to list VM workspace"
+    # Debug: Show what exists in VM before copying back
+    echo "🔍 Debug: VM filesystem state before copying back:"
+    sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "ls -la $VM_WORKSPACE/ | head -15" 2>/dev/null || echo "   Failed to list VM workspace"
 
-# Copy build artifacts back from VM workspace
-for dir in "${artifact_dirs[@]}"; do
-    if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d \"$VM_WORKSPACE/$dir\" ]" 2>/dev/null; then
-        echo "Copying $dir/ back from VM..."
-        echo "🔍 Debug: VM $dir/ directory info:"
-        sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "du -sh \"$VM_WORKSPACE/$dir\" 2>/dev/null || echo 'Size unknown'"
-        sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "find \"$VM_WORKSPACE/$dir\" -name '*.a' -o -name '*.o' -o -name 'bun*' 2>/dev/null | head -5" || echo "   No build artifacts found"
-        
-        # Use tar over SSH with better error handling to avoid SIGPIPE issues
-        echo "🔄 Attempting to copy $dir/ via tar+ssh..."
-        
-        # Protect against SIGPIPE by ignoring it during copy operations
-        set +e  # Temporarily disable exit on error
-        trap '' PIPE  # Ignore SIGPIPE during copy operations
-        
-        if command -v timeout >/dev/null 2>&1; then
-          # Use timeout if available (host systems) - extended timeout for large builds
-          timeout 1200 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null
-          copy_result=$?
-        else
-          # Fallback without timeout for VMs that don't have it
-          sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null
-          copy_result=$?
-        fi
-        
-        # Restore error handling
-        trap - PIPE  # Restore default SIGPIPE handling
-        set -e  # Re-enable exit on error
-        
-        if [ $copy_result -eq 0 ]; then
-            echo "✅ $dir copied back via tar+ssh"
-            # Verify copy back worked
-            echo "🔍 Debug: Verifying $dir/ copied back to HOST:"
-            echo "   HOST $dir/ size: $(du -sh ./$dir 2>/dev/null | cut -f1 || echo 'unknown')"
-        else
-            echo "⚠️ Failed to copy $dir back from VM (non-fatal - build result preserved)"
-        fi
-    else
-        echo "📋 No $dir/ directory found in VM to copy back"
-    fi
-done
-
-# Copy incremental caches back for next build
-for dir in "${cache_dirs[@]}"; do
-    if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d \"$VM_WORKSPACE/$dir\" ]" 2>/dev/null; then
-        echo "⚡ Copying $dir/ back for fast incremental builds..."
-        echo "🔍 Debug: VM $dir/ directory info:"
-        sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "du -sh \"$VM_WORKSPACE/$dir\" 2>/dev/null || echo 'Size unknown'"
-        
-        # For buildkite-cache, show what's in build-results specifically
-        if [ "$dir" = "buildkite-cache" ]; then
-            echo "🔍 Debug: VM buildkite-cache/build-results contents:"
-            sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "ls -la \"$VM_WORKSPACE/$dir/build-results/\" 2>/dev/null" || echo "No build-results directory"
-        fi
-        
-        # Use tar over SSH for cache directories with better error handling
-        echo "🔄 Attempting to copy $dir/ via tar+ssh..."
-        
-        # Protect against SIGPIPE by ignoring it during copy operations
-        set +e  # Temporarily disable exit on error
-        trap '' PIPE  # Ignore SIGPIPE during copy operations
-        
-        if command -v timeout >/dev/null 2>&1; then
-          # Use timeout if available (host systems) - extended timeout for large builds
-          timeout 1200 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null
-          copy_result=$?
-        else
-          # Fallback without timeout for VMs that don't have it
-          sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "cd \"$VM_WORKSPACE\" && tar -cf - \"$dir\" 2>/dev/null" | tar -xf - 2>/dev/null
-          copy_result=$?
-        fi
-        
-        # Restore error handling
-        trap - PIPE  # Restore default SIGPIPE handling
-        set -e  # Re-enable exit on error
-        
-        if [ $copy_result -eq 0 ]; then
-            echo "✅ $dir copied back via tar+ssh"
-            # Verify copy back worked
-            echo "🔍 Debug: Verifying $dir/ copied back to HOST:"
-            echo "   HOST $dir/ size: $(du -sh ./$dir 2>/dev/null | cut -f1 || echo 'unknown')"
+    # Copy build artifacts back from VM workspace
+    for dir in "${artifact_dirs[@]}"; do
+        if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d \"$VM_WORKSPACE/$dir\" ]" 2>/dev/null; then
+            echo "Copying $dir/ back from VM..."
+            echo "🔍 Debug: VM $dir/ directory info:"
+            sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "du -sh \"$VM_WORKSPACE/$dir\" 2>/dev/null || echo 'Size unknown'"
+            sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "find \"$VM_WORKSPACE/$dir\" -name '*.a' -o -name '*.o' -o -name 'bun*' 2>/dev/null | head -5" || echo "   No build artifacts found"
             
-            # For buildkite-cache, verify CMake cache structure
-            if [ "$dir" = "buildkite-cache" ] && [ -d "./$dir/build-results" ]; then
-                echo "🔍 Debug: HOST buildkite-cache/build-results contents:"
-                ls -la ./$dir/build-results/ 2>/dev/null | head -5 || echo "   Empty or inaccessible"
+            # Use scp for simple, reliable copying (no pipes = no SIGPIPE)
+            echo "🔄 Attempting to copy $dir/ via scp..."
+            
+            # Simple scp copy - no pipes, no timeout complexity
+            if sshpass -p admin scp -r $SSH_OPTS admin@$VM_IP:"$VM_WORKSPACE/$dir" . 2>/dev/null; then
+                echo "✅ $dir copied back via scp"
+                # Verify copy back worked
+                echo "🔍 Debug: Verifying $dir/ copied back to HOST:"
+                echo "   HOST $dir/ size: $(du -sh ./$dir 2>/dev/null | cut -f1 || echo 'unknown')"
+            else
+                echo "⚠️ Failed to copy $dir back from VM (non-fatal - build result preserved)"
             fi
         else
-            echo "⚠️ Failed to copy $dir back - next build may be slower (non-fatal)"
+            echo "📋 No $dir/ directory found in VM to copy back"
         fi
-    else
-        echo "📋 No $dir/ directory found in VM to copy back"
-    fi
-done
+    done
 
-echo "✅ Build artifacts and caches copied back from VM"
+    # Copy incremental caches back for next build
+    for dir in "${cache_dirs[@]}"; do
+        if sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "[ -d \"$VM_WORKSPACE/$dir\" ]" 2>/dev/null; then
+            echo "⚡ Copying $dir/ back for fast incremental builds..."
+            echo "🔍 Debug: VM $dir/ directory info:"
+            sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "du -sh \"$VM_WORKSPACE/$dir\" 2>/dev/null || echo 'Size unknown'"
+            
+            # For buildkite-cache, show what's in build-results specifically
+            if [ "$dir" = "buildkite-cache" ]; then
+                echo "🔍 Debug: VM buildkite-cache/build-results contents:"
+                sshpass -p admin ssh $SSH_OPTS admin@$VM_IP "ls -la \"$VM_WORKSPACE/$dir/build-results/\" 2>/dev/null" || echo "No build-results directory"
+            fi
+            
+            # Use scp for simple, reliable copying (no pipes = no SIGPIPE)
+            echo "🔄 Attempting to copy $dir/ via scp..."
+            
+            # Simple scp copy - no pipes, no timeout complexity
+            if sshpass -p admin scp -r $SSH_OPTS admin@$VM_IP:"$VM_WORKSPACE/$dir" . 2>/dev/null; then
+                echo "✅ $dir copied back via scp"
+                # Verify copy back worked
+                echo "🔍 Debug: Verifying $dir/ copied back to HOST:"
+                echo "   HOST $dir/ size: $(du -sh ./$dir 2>/dev/null | cut -f1 || echo 'unknown')"
+                
+                # For buildkite-cache, verify CMake cache structure
+                if [ "$dir" = "buildkite-cache" ] && [ -d "./$dir/build-results" ]; then
+                    echo "🔍 Debug: HOST buildkite-cache/build-results contents:"
+                    ls -la ./$dir/build-results/ 2>/dev/null | head -5 || echo "   Empty or inaccessible"
+                fi
+            else
+                echo "⚠️ Failed to copy $dir back from VM (non-fatal)"
+            fi
+        else
+            echo "📋 No $dir/ directory found in VM to copy back"
+        fi
+    done
+
+    echo "✅ Build artifacts and caches copied back from VM"
+fi
 
 echo "🧹 ===== CLEANUP ====="
 
 # ===== CLEANUP =====
-# Protect cleanup operations from affecting the build exit code
-set +e  # Disable exit on error for cleanup
-rm -f "$ENV_FILE" 2>/dev/null || true
-set -e  # Re-enable exit on error
+# Simple, safe cleanup that cannot affect build exit code
+(
+    # Run cleanup in subshell to completely isolate it
+    rm -f "$ENV_FILE" 2>/dev/null || true
+) || true  # Ensure cleanup failure can never affect exit code
 
 echo "✅ Cleanup complete"
 
 echo "===== RUN VM COMMAND COMPLETE ====="
 echo "Build completed with exit code: $BUILD_EXIT_CODE"
 
-# IMPORTANT: Always exit with the build result, not cleanup result
-# Protect against any potential SIGPIPE issues affecting the final exit
-set +e  # Ensure no cleanup artifacts can change the exit code
+# Always exit with the build result, guaranteed
 exit $BUILD_EXIT_CODE
