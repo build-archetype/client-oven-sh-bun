@@ -2220,7 +2220,7 @@ export async function main() {
       waitForUser = true;
     }
 
-    await new Promise(resolve => setTimeout(resolve, 60_000));
+    await new Promise(resolve => setTimeout(resolve, 2_000));
   }
 
   process.exit(getExitCode(ok ? "pass" : "fail"));

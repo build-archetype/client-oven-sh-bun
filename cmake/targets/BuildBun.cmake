@@ -489,8 +489,6 @@ WEBKIT_ADD_SOURCE_DEPENDENCIES(
   ${CODEGEN_PATH}/ZigGlobalObject.lut.h
 )
 
-
-
 WEBKIT_ADD_SOURCE_DEPENDENCIES(
   ${CWD}/src/bun.js/bindings/InternalModuleRegistry.cpp
   ${CODEGEN_PATH}/InternalModuleRegistryConstants.h
@@ -552,6 +550,7 @@ if(NOT "${REVISION}" STREQUAL "")
   set(ZIG_FLAGS_BUN ${ZIG_FLAGS_BUN} -Dsha=${REVISION})
 endif()
 
+# Check if we're in a Tart mounted directory and set up Zig build commands accordingly
 register_command(
   TARGET
     bun-zig
@@ -1323,5 +1322,118 @@ if(NOT BUN_CPP_ONLY)
           ${BUILD_PATH}/${bunStripPath}.zip
       )
     endif()
+  endif()
+endif()
+
+# Cache setup for macOS Darwin CI
+if(APPLE AND BUILDKITE AND (BUILDKITE_CACHE_RESTORE STREQUAL "ON" OR BUILDKITE_CACHE_SAVE STREQUAL "ON"))
+  # Define cache paths and keys (shared between restore and save)
+  set(CACHE_BASE_DIR "${CMAKE_SOURCE_DIR}/buildkite-cache/build-results")
+  set(CPP_CACHE_KEY "${BUILDKITE_COMMIT}")
+  set(ZIG_CACHE_KEY "${BUILDKITE_COMMIT}")
+endif()
+
+# Early cache restoration (before build targets are processed)
+if(APPLE AND BUILDKITE AND BUILDKITE_CACHE_RESTORE STREQUAL "ON")
+  message(STATUS "🔧 Setting up incremental cache restore for macOS Darwin CI...")
+  
+  # Debug: Show what we're working with
+  message(STATUS "🔍 Debug: CMAKE_SOURCE_DIR = ${CMAKE_SOURCE_DIR}")
+  message(STATUS "🔍 Debug: BUILDKITE_COMMIT = ${BUILDKITE_COMMIT}")
+  message(STATUS "🔍 Debug: BUILD_PATH = ${BUILD_PATH}")
+  
+  # Debug: Check if cache base directory exists
+  message(STATUS "🔍 Debug: Checking cache base directory...")
+  if(EXISTS "${CACHE_BASE_DIR}")
+    message(STATUS "✅ Cache base directory exists: ${CACHE_BASE_DIR}")
+    # List contents of cache base directory
+    file(GLOB CACHE_BASE_CONTENTS "${CACHE_BASE_DIR}/*")
+    message(STATUS "🔍 Debug: Cache base contents:")
+    foreach(ITEM ${CACHE_BASE_CONTENTS})
+      get_filename_component(ITEM_NAME ${ITEM} NAME)
+      message(STATUS "   ${ITEM_NAME}")
+    endforeach()
+  else()
+    message(STATUS "❌ Cache base directory does not exist: ${CACHE_BASE_DIR}")
+  endif()
+  
+  # Pre-populate C++ artifacts if cache exists
+  set(CPP_CACHE_PATH "${CACHE_BASE_DIR}/${CPP_CACHE_KEY}")
+  message(STATUS "🔍 Debug: Looking for C++ cache at: ${CPP_CACHE_PATH}")
+  if(EXISTS "${CPP_CACHE_PATH}/libbun-profile.a")
+    message(STATUS "✅ Found C++ cache - pre-populating build directory")
+    # Debug: Show file details
+    file(SIZE "${CPP_CACHE_PATH}/libbun-profile.a" CPP_CACHE_SIZE)
+    message(STATUS "   Source: ${CPP_CACHE_PATH}/libbun-profile.a (${CPP_CACHE_SIZE} bytes)")
+    message(STATUS "   Destination: ${BUILD_PATH}/libbun-profile.a")
+    file(COPY "${CPP_CACHE_PATH}/libbun-profile.a" 
+         DESTINATION "${BUILD_PATH}")
+    message(STATUS "✅ C++ cache copied successfully")
+  else()
+    message(STATUS "❌ No C++ cache found - will build from scratch")
+    # Debug: Check if directory exists but file doesn't
+    if(EXISTS "${CPP_CACHE_PATH}")
+      message(STATUS "🔍 Debug: C++ cache directory exists but libbun-profile.a not found")
+      file(GLOB CPP_CACHE_CONTENTS "${CPP_CACHE_PATH}/*")
+      message(STATUS "🔍 Debug: C++ cache directory contents:")
+      foreach(ITEM ${CPP_CACHE_CONTENTS})
+        get_filename_component(ITEM_NAME ${ITEM} NAME)
+        message(STATUS "   ${ITEM_NAME}")
+      endforeach()
+    else()
+      message(STATUS "🔍 Debug: C++ cache directory does not exist: ${CPP_CACHE_PATH}")
+    endif()
+  endif()
+  
+  # Pre-populate Zig artifacts if cache exists  
+  set(ZIG_CACHE_PATH "${CACHE_BASE_DIR}/${ZIG_CACHE_KEY}")
+  message(STATUS "🔍 Debug: Looking for Zig cache at: ${ZIG_CACHE_PATH}")
+  if(EXISTS "${ZIG_CACHE_PATH}/bun-zig.o")
+    message(STATUS "✅ Found Zig cache - pre-populating build directory")
+    # Debug: Show file details
+    file(SIZE "${ZIG_CACHE_PATH}/bun-zig.o" ZIG_CACHE_SIZE)
+    message(STATUS "   Source: ${ZIG_CACHE_PATH}/bun-zig.o (${ZIG_CACHE_SIZE} bytes)")
+    message(STATUS "   Destination: ${BUILD_PATH}/bun-zig.o")
+    file(COPY "${ZIG_CACHE_PATH}/bun-zig.o"
+         DESTINATION "${BUILD_PATH}")
+    message(STATUS "✅ Zig cache copied successfully")
+  else()
+    message(STATUS "❌ No Zig cache found - will build from scratch")
+    # Debug: Check if directory exists but file doesn't
+    if(EXISTS "${ZIG_CACHE_PATH}")
+      message(STATUS "🔍 Debug: Zig cache directory exists but bun-zig.o not found")
+      file(GLOB ZIG_CACHE_CONTENTS "${ZIG_CACHE_PATH}/*")
+      message(STATUS "🔍 Debug: Zig cache directory contents:")
+      foreach(ITEM ${ZIG_CACHE_CONTENTS})
+        get_filename_component(ITEM_NAME ${ITEM} NAME)
+        message(STATUS "   ${ITEM_NAME}")
+      endforeach()
+    else()
+      message(STATUS "🔍 Debug: Zig cache directory does not exist: ${ZIG_CACHE_PATH}")
+    endif()
+  endif()
+endif()
+
+# Cache save logic (after successful builds)
+if(APPLE AND BUILDKITE AND BUILDKITE_CACHE_SAVE STREQUAL "ON")
+  message(STATUS "🔧 Setting up incremental cache save for macOS Darwin CI...")
+  
+  # C++ cache save is now handled in Globals.cmake before compression
+  
+  # Save Zig artifacts after successful build  
+  if(NOT BUN_CPP_ONLY)
+    register_command(
+      TARGET
+        bun-zig
+      TARGET_PHASE
+        POST_BUILD
+      COMMENT
+        "Saving Zig artifacts to cache"
+      COMMAND
+        ${CMAKE_COMMAND} -E make_directory "${CACHE_BASE_DIR}/${ZIG_CACHE_KEY}"
+        && ${CMAKE_COMMAND} -E copy_if_different
+           "${BUILD_PATH}/bun-zig.o"
+           "${CACHE_BASE_DIR}/${ZIG_CACHE_KEY}/"
+    )
   endif()
 endif()

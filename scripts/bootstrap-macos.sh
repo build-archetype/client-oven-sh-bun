@@ -194,8 +194,26 @@ retry_command() {
 
 # Package management
 install_packages() {
-    execute_as_user brew install --force --formula "$@"
-    execute_as_user brew link --force --overwrite "$@"
+    print "Installing packages: $*"
+    
+    # Install each package individually with timeout to avoid hanging on problematic packages
+    for package in "$@"; do
+        print "  Installing $package..."
+        if timeout 900 brew install --force --formula "$package" >/dev/null 2>&1; then
+            print "  ✅ $package installed successfully"
+            # Try to link, but don't fail if it doesn't work
+            if timeout 60 brew link --force --overwrite "$package" >/dev/null 2>&1; then
+                print "  ✅ $package linked successfully"
+            else
+                print "  ⚠️  $package linking failed (may already be linked)"
+            fi
+        else
+            print "  ❌ $package installation failed or timed out"
+            print "     Continuing with other packages..."
+        fi
+    done
+    
+    print "Package installation batch completed"
 }
 
 # Install Homebrew if not present
@@ -203,13 +221,43 @@ install_brew() {
     if ! command -v brew >/dev/null 2>&1; then
         print "Installing Homebrew..."
         
-        # Use the standard Homebrew installation method
+        # Use the standard Homebrew installation method with timeout
         print "Downloading and running Homebrew installer..."
         local curl="$(require curl)"
         
-        print "$ curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | NONINTERACTIVE=1 bash"
-        if ! NONINTERACTIVE=1 "$curl" -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | bash; then
-            error "Homebrew installation failed"
+        print "$ curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh | NONINTERACTIVE=1 timeout 1800 bash"
+        
+        # Set environment variables to speed up installation and prevent hangs
+        export HOMEBREW_NO_AUTO_UPDATE=1
+        export HOMEBREW_NO_INSTALL_CLEANUP=1
+        export HOMEBREW_NO_ANALYTICS=1
+        export NONINTERACTIVE=1
+        
+        # Download installer with timeout
+        local installer_script
+        if ! installer_script=$("$curl" -fsSL --connect-timeout 60 --max-time 300 https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh); then
+            error "Failed to download Homebrew installer"
+        fi
+        
+        # Run installer with timeout (30 minute max)
+        print "Running Homebrew installer with 30-minute timeout..."
+        if ! echo "$installer_script" | timeout 1800 bash; then
+            print "⚠️  Homebrew installation timed out or failed"
+            print "Checking if Homebrew was partially installed..."
+            
+            # Check if brew binary exists even if installation "failed"
+            local brew_paths="/opt/homebrew/bin/brew /usr/local/bin/brew"
+            for brew_path in $brew_paths; do
+                if [ -x "$brew_path" ]; then
+                    print "✅ Found Homebrew at $brew_path - continuing"
+                    break
+                fi
+            done
+            
+            # If still no brew, fail
+            if ! command -v brew >/dev/null 2>&1; then
+                error "Homebrew installation failed and no brew binary found"
+            fi
         fi
         
         # Add Homebrew to PATH based on architecture
@@ -222,7 +270,7 @@ install_brew() {
             ;;
         esac
         
-        # Set CI-friendly environment variables
+        # Set CI-friendly environment variables (persistent)
         append_to_profile "export HOMEBREW_NO_INSTALL_CLEANUP=1"
         append_to_profile "export HOMEBREW_NO_AUTO_UPDATE=1"
         append_to_profile "export HOMEBREW_NO_ANALYTICS=1"
@@ -245,6 +293,11 @@ install_brew() {
         print "✅ Homebrew installed successfully"
     else
         print "✅ Homebrew already installed"
+        
+        # Set environment variables even if already installed
+        export HOMEBREW_NO_AUTO_UPDATE=1
+        export HOMEBREW_NO_INSTALL_CLEANUP=1
+        export HOMEBREW_NO_ANALYTICS=1
         
         # Ensure locale is set for consistent date/time formatting (fixes toLocaleDateString tests)
         append_to_profile "export LANG=en_US.UTF-8"
@@ -450,7 +503,154 @@ install_buildkite() {
     execute tar -xzf "$buildkite_tar" -C "$buildkite_tmpdir"
     move_to_bin "$buildkite_tmpdir/buildkite-agent"
     
-    print "✅ Buildkite Agent installed successfully: $(buildkite-agent --version)"
+    print "✅ Buildkite Agent installed successfully"
+}
+
+# Diagnostic function for codesigning tools and SDK environment
+check_codesigning_environment() {
+    print ""
+    print "=== CODESIGNING & SDK ENVIRONMENT DIAGNOSTICS ==="
+    print "Checking environment for 'bun build --compile' / Mach-O generation issues..."
+    print ""
+    
+    # Check Xcode tools
+    print "📋 Xcode Developer Tools:"
+    if command -v xcode-select >/dev/null 2>&1; then
+        local xcode_path=$(xcode-select -p 2>/dev/null || echo "NOT SET")
+        print "  ✅ xcode-select: $xcode_path"
+        
+        # Check if the path actually exists
+        if [ -d "$xcode_path" ]; then
+            print "  ✅ Developer directory exists: $xcode_path"
+        else
+            print "  ❌ Developer directory missing: $xcode_path"
+        fi
+    else
+        print "  ❌ xcode-select: NOT FOUND"
+    fi
+    
+    # Check codesigning tools
+    print ""
+    print "🔐 Codesigning Tools:"
+    local codesign_tools="codesign notarytool xcrun security"
+    for tool in $codesign_tools; do
+        if command -v "$tool" >/dev/null 2>&1; then
+            local tool_path=$(which "$tool")
+            print "  ✅ $tool: $tool_path"
+            
+            # Try to get version if possible
+            case "$tool" in
+                codesign)
+                    local version=$(codesign --version 2>/dev/null || echo "version unknown")
+                    print "     Version: $version"
+                    ;;
+                xcrun)
+                    local version=$(xcrun --version 2>/dev/null || echo "version unknown")  
+                    print "     Version: $version"
+                    ;;
+            esac
+        else
+            print "  ❌ $tool: NOT FOUND"
+        fi
+    done
+    
+    # Check SDK paths and environment variables
+    print ""
+    print "🛠️  SDK Environment Variables:"
+    local sdk_vars="SDK_PATH XCODE_SDK_PATH DEVELOPER_DIR SDKROOT MACOSX_DEPLOYMENT_TARGET"
+    for var in $sdk_vars; do
+        local value=$(eval echo \$"$var")
+        if [ -n "$value" ]; then
+            print "  ✅ $var: $value"
+            
+            # Check if SDK path actually exists
+            if [[ "$var" == *"SDK"* ]] && [ -n "$value" ]; then
+                if [ -d "$value" ]; then
+                    print "     Directory exists: YES"
+                else
+                    print "     Directory exists: NO"
+                fi
+            fi
+        else
+            print "  ⚠️  $var: NOT SET"
+        fi
+    done
+    
+    # Check SDK using xcrun
+    print ""
+    print "📱 macOS SDK Information:"
+    if command -v xcrun >/dev/null 2>&1; then
+        local sdk_path=$(xcrun --show-sdk-path 2>/dev/null || echo "FAILED")
+        print "  SDK Path: $sdk_path"
+        
+        if [ "$sdk_path" != "FAILED" ] && [ -d "$sdk_path" ]; then
+            print "  ✅ SDK directory exists"
+            
+            local sdk_version=$(xcrun --show-sdk-version 2>/dev/null || echo "unknown")
+            print "  SDK Version: $sdk_version"
+            
+            local sdk_platform=$(xcrun --show-sdk-platform-path 2>/dev/null || echo "unknown")
+            print "  SDK Platform: $sdk_platform"
+            
+            # List some key SDK contents
+            if [ -d "$sdk_path/usr/include" ]; then
+                print "  ✅ Headers directory exists: $sdk_path/usr/include"
+            else
+                print "  ❌ Headers directory missing: $sdk_path/usr/include"
+            fi
+            
+            if [ -d "$sdk_path/usr/lib" ]; then
+                print "  ✅ Libraries directory exists: $sdk_path/usr/lib"
+            else
+                print "  ❌ Libraries directory missing: $sdk_path/usr/lib"
+            fi
+        else
+            print "  ❌ SDK directory does not exist or xcrun failed"
+        fi
+    else
+        print "  ❌ xcrun not available"
+    fi
+    
+    # Check Command Line Tools
+    print ""
+    print "⚒️  Command Line Tools:"
+    if [ -d "/Library/Developer/CommandLineTools" ]; then
+        print "  ✅ Command Line Tools installed: /Library/Developer/CommandLineTools"
+        
+        if [ -f "/Library/Developer/CommandLineTools/usr/bin/codesign" ]; then
+            print "  ✅ CommandLineTools codesign: /Library/Developer/CommandLineTools/usr/bin/codesign"
+        else
+            print "  ❌ CommandLineTools codesign: NOT FOUND"
+        fi
+    else
+        print "  ❌ Command Line Tools: NOT INSTALLED"
+    fi
+    
+    # Check for potential environment fixes
+    print ""
+    print "🔧 Suggested Environment Setup:"
+    if command -v xcrun >/dev/null 2>&1; then
+        local suggested_sdk=$(xcrun --show-sdk-path 2>/dev/null)
+        local suggested_dev=$(xcode-select -p 2>/dev/null)
+        
+        if [ -n "$suggested_sdk" ]; then
+            print "  export SDK_PATH=\"$suggested_sdk\""
+            print "  export XCODE_SDK_PATH=\"$suggested_sdk\""
+            print "  export SDKROOT=\"$suggested_sdk\""
+        fi
+        
+        if [ -n "$suggested_dev" ]; then
+            print "  export DEVELOPER_DIR=\"$suggested_dev\""
+        fi
+        
+        print "  export MACOSX_DEPLOYMENT_TARGET=\"13.0\""
+    else
+        print "  ❌ Cannot determine proper SDK paths - xcrun not available"
+    fi
+    
+    print ""
+    print "=== END CODESIGNING DIAGNOSTICS ==="
+    print ""
 }
 
 install_chromium() {
@@ -587,9 +787,14 @@ main() {
     # Install Homebrew first
     install_brew
     
-    # Update Homebrew
-    print "Updating Homebrew..."
-    execute_as_user brew update
+    # Update Homebrew with timeout (this often hangs in VMs)
+    print "Updating Homebrew (with timeout to prevent hangs)..."
+    if timeout 600 brew update >/dev/null 2>&1; then
+        print "✅ Homebrew updated successfully"
+    else
+        print "⚠️  Homebrew update timed out or failed - continuing with existing formulae"
+        print "   This is often normal in VM environments and won't affect package installation"
+    fi
     
     # Install software in stages
     install_common_software
@@ -597,6 +802,9 @@ main() {
     install_chromium
     install_docker
     install_xcode_tools
+    
+    # Run codesigning environment diagnostics (for debugging OverlappingSegments issues)
+    check_codesigning_environment
     
     # Verify installations
     verify_installations

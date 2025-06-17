@@ -6,6 +6,7 @@
  */
 
 import { join } from "node:path";
+import os from "node:os";
 import {
   getBootstrapVersion,
   getBuildkiteEmoji,
@@ -296,11 +297,12 @@ function getCppAgent(platform, options) {
   const { os, arch } = platform;
 
   if (os === "darwin") {
+    // Use consistent Tart VM configuration with getZigAgent
     return {
       queue: "darwin",
-      os,
+      os: "darwin",
       arch: arch === "aarch64" ? "arm64" : arch,
-      tart: "true"
+      tart: true,
     };
   }
 
@@ -348,11 +350,12 @@ function getTestAgent(platform, options) {
   const { os, arch } = platform;
 
   if (os === "darwin") {
+    // Use consistent Tart VM configuration
     return {
       queue: "darwin",
-      os,
+      os: "darwin",
       arch: arch === "aarch64" ? "arm64" : arch,
-      tart: "true"
+      tart: true,
     };
   }
 
@@ -390,18 +393,42 @@ function getTestAgent(platform, options) {
  * @returns {Record<string, string | undefined>}
  */
 function getBuildEnv(target, options) {
-  const { baseline, abi } = target;
+  const { baseline, abi, os } = target;
   const { canary } = options;
   const revision = typeof canary === "number" ? canary : 1;
 
-  return {
+  const env = {
     ENABLE_BASELINE: baseline ? "ON" : "OFF",
     ENABLE_CANARY: revision > 0 ? "ON" : "OFF",
     CANARY_REVISION: revision,
     ABI: abi === "musl" ? "musl" : undefined,
     CMAKE_VERBOSE_MAKEFILE: "ON",
     CMAKE_TLS_VERIFY: "0",
+    // macOS VM Resource Configuration (centralized)
+    MACOS_VM_MEMORY: macOSVmResources.memory.toString(),
+    MACOS_VM_CPU: macOSVmResources.cpu.toString(),
+    MACOS_VM_CONFIG_DESCRIPTION: macOSVmResources.description,
   };
+
+  // Add persistent cache configuration for macOS only
+  if (os === "darwin") {
+    // Use persistent cache - workspace-relative directory  
+    env.BUILDKITE_CACHE_TYPE = "persistent";
+    // Host cache directory (workspace-relative for CI)
+    env.BUILDKITE_CACHE_BASE = env.BUILDKITE_CACHE_BASE || "./buildkite-cache";
+    
+    // Enable cache save for persistent cache (needed by CMake cache save logic)
+    env.BUILDKITE_CACHE_SAVE = "ON";
+    
+    // Keep BUILDKITE_CACHE_RESTORE disabled to prevent old artifact-based cache system
+    // The new copy-based VM cache system handles cache restoration automatically
+    
+    // Force clean checkout to ensure source code consistency
+    // This disables cache reading (as per build.mjs logic) but ensures fresh source
+    env.BUILDKITE_CLEAN_CHECKOUT = "true";
+  }
+
+  return env;
 }
 
 /**
@@ -411,9 +438,11 @@ function getBuildEnv(target, options) {
  */
 function getBuildCommand(target, options) {
   const { profile } = target;
-
+  
   const label = profile || "release";
-  return `bun run build:${label}`;
+  const baseCommand = `bun run build:${label}`;
+  
+  return baseCommand;
 }
 
 /**
@@ -429,8 +458,6 @@ function getBuildVendorStep(platform, options) {
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
     env: {
-      BUILDKITE_CACHE: "ON",
-      BUILDKITE_GROUP_KEY: getTargetKey(platform),
       ...getBuildEnv(platform, options),
     },
     command: `${getBuildCommand(platform, options)} --target dependencies`,
@@ -438,7 +465,8 @@ function getBuildVendorStep(platform, options) {
   // If macOS, run in VM
   if (platform.os === "darwin") {
     step.command = [
-      `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target dependencies" "${process.cwd()}"`
+      `./scripts/build-macos-vm.sh --release=${platform.release}`,
+      `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target dependencies"`
     ];
   }
   return step;
@@ -451,6 +479,8 @@ function getBuildVendorStep(platform, options) {
  */
 function getBuildCppStep(platform, options) {
   const command = getBuildCommand(platform, options);
+  const { os } = platform;
+  
   const step = {
     key: `${getTargetKey(platform)}-build-cpp`,
     label: `${getTargetLabel(platform)} - build-cpp`,
@@ -459,18 +489,14 @@ function getBuildCppStep(platform, options) {
     cancel_on_build_failing: isMergeQueue(),
     env: {
       BUN_CPP_ONLY: "ON",
-      BUILDKITE_CACHE: "ON",
-      BUILDKITE_GROUP_KEY: getTargetKey(platform),
       ...getBuildEnv(platform, options),
     },
-    // Build C++ components and dependencies separately for better caching
-    command: [`${command} --target bun`, `${command} --target dependencies`],
+    command: `${command} --target bun && ${command} --target dependencies`,
   };
-  // If macOS, run in VM
   if (platform.os === "darwin") {
     step.command = [
-      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target bun" "${process.cwd()}"`,
-      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target dependencies" "${process.cwd()}"`
+      `./scripts/build-macos-vm.sh --release=${platform.release}`,
+      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target bun && ${command} --target dependencies"`
     ];
   }
   return step;
@@ -499,6 +525,9 @@ function getBuildToolchain(target) {
  */
 function getBuildZigStep(platform, options) {
   const toolchain = getBuildToolchain(platform);
+  const { os } = platform;
+  const command = getBuildCommand(platform, options);
+  
   const step = {
     key: `${getTargetKey(platform)}-build-zig`,
     label: `${getTargetLabel(platform)} - build-zig`,
@@ -506,17 +535,15 @@ function getBuildZigStep(platform, options) {
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
     env: {
-      BUILDKITE_CACHE: "ON",
-      BUILDKITE_GROUP_KEY: getTargetKey(platform),
       ...getBuildEnv(platform, options),
     },
-    command: `${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}`,
+    command: `${command} --target bun-zig`,
     timeout_in_minutes: 35,
   };
-  // If macOS, run in VM
   if (platform.os === "darwin") {
     step.command = [
-      `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target bun-zig --toolchain ${toolchain}\" "${process.cwd()}"`
+      `./scripts/build-macos-vm.sh --release=${platform.release}`,
+      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target bun-zig --toolchain ${toolchain}"`
     ];
   }
   return step;
@@ -528,6 +555,9 @@ function getBuildZigStep(platform, options) {
  * @returns {Step}
  */
 function getLinkBunStep(platform, options) {
+  const { os } = platform;
+  const command = getBuildCommand(platform, options);
+  
   const step = {
     key: `${getTargetKey(platform)}-build-bun`,
     label: `${getTargetLabel(platform)} - build-bun (link)`,
@@ -537,16 +567,15 @@ function getLinkBunStep(platform, options) {
     cancel_on_build_failing: isMergeQueue(),
     env: {
       BUN_LINK_ONLY: "ON",
-      BUILDKITE_CACHE: "ON",
-      BUILDKITE_GROUP_KEY: getTargetKey(platform),
       ...getBuildEnv(platform, options),
     },
-    command: `${getBuildCommand(platform, options)} --target bun`,
+    command: `${command} --target bun`,
   };
-  // If macOS, run in VM
+  // If macOS, run in VM - no cache operations, just link the artifacts from current build
   if (platform.os === "darwin") {
     step.command = [
-      `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target bun" "${process.cwd()}"`
+      `./scripts/build-macos-vm.sh --release=${platform.release}`,
+      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target bun"`
     ];
   }
   return step;
@@ -565,8 +594,6 @@ function getBuildBunStep(platform, options) {
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
     env: {
-      BUILDKITE_CACHE: "ON",
-      BUILDKITE_GROUP_KEY: getTargetKey(platform),
       ...getBuildEnv(platform, options),
     },
     command: getBuildCommand(platform, options),
@@ -616,6 +643,11 @@ function getTestBunStep(platform, options, testOptions = {}) {
     command:
       os === "windows"
         ? `node .\\scripts\\runner.node.mjs ${args.join(" ")}`
+        : os === "darwin"
+        ? [
+            `./scripts/build-macos-vm.sh --release=${platform.release}`,
+            `./scripts/runner.node.mjs ${args.join(" ")}`
+          ]
         : `./scripts/runner.node.mjs ${args.join(" ")}`,
   };
 }
@@ -1078,6 +1110,7 @@ async function getPipelineOptions() {
     buildImages: parseOption(/\[(build images?)\]/i),
     dryRun: parseOption(/\[(dry run)\]/i),
     publishImages: parseOption(/\[(publish images?)\]/i),
+    unifiedBuilds: false,
     buildPlatforms: Array.from(buildPlatformsMap.values()),
     testPlatforms: Array.from(testPlatformsMap.values()),
   };
@@ -1102,6 +1135,81 @@ function getMacOSVMBuildStep(platform, options) {
     timeout_in_minutes: 720,
   };
 }
+
+// === MAC_OS_VM_RESOURCE_CONFIGURATION ===
+// Centralized configuration for Tart macOS VM resources
+// IMPORTANT: These values are intentionally conservative to ensure reliable VM boot
+// Over-allocation causes VMs to fail to boot properly with SSH connectivity issues
+const MAC_OS_VM_RESOURCES = {
+  // For Mac Mini M4 (24GB RAM, ~10 cores) - CONSERVATIVE for stability
+  macMiniM4: {
+    memory: 8192,   // 8GB - much more conservative for reliable boot
+    cpu: 4,         // 4 cores - leaves more for host and hypervisor
+    description: "Mac Mini M4 (conservative for stability)"
+  },
+  
+  // For Mac Studio M2 Max (64GB RAM, ~12 cores) - CONSERVATIVE for stability
+  macStudioM2Max: {
+    memory: 12288,  // 12GB - conservative even on high-end hardware
+    cpu: 6,         // 6 cores - leaves more for host and hypervisor
+    description: "Mac Studio M2 Max (conservative for stability)"
+  },
+  
+  // Conservative default for unknown hardware
+  default: {
+    memory: 6144,   // 6GB - very conservative for unknown hardware
+    cpu: 4,         // 4 cores - safe for most systems
+    description: "Conservative default for reliable boot"
+  }
+};
+
+// Auto-detect optimal configuration based on system resources
+function getOptimalMacOSVMResources() {
+  const totalMemoryGB = Math.round(os.totalmem() / (1024 ** 3));
+  const totalCores = os.cpus().length;
+  
+  console.log(`🔍 Detected system: ${totalMemoryGB}GB RAM, ${totalCores} cores`);
+  
+  // Auto-select configuration based on detected specs (conservative values)
+  if (totalMemoryGB >= 32 && totalCores >= 10) {
+    console.log(`📊 Using Mac Studio M2 Max configuration (conservative)`);
+    return MAC_OS_VM_RESOURCES.macStudioM2Max;
+  } else if (totalMemoryGB >= 16 && totalCores >= 8) {
+    console.log(`📊 Using Mac Mini M4 configuration (conservative)`);
+    return MAC_OS_VM_RESOURCES.macMiniM4;
+  } else {
+    console.log(`📊 Using conservative default configuration`);
+    return MAC_OS_VM_RESOURCES.default;
+  }
+}
+
+// Get macOS VM resources (can be overridden via environment variables)
+function getMacOSVMResources() {
+  // Allow environment variable override
+  if (process.env.MACOS_VM_MEMORY && process.env.MACOS_VM_CPU) {
+    return {
+      memory: parseInt(process.env.MACOS_VM_MEMORY),
+      cpu: parseInt(process.env.MACOS_VM_CPU),
+      description: "Environment override"
+    };
+  }
+  
+  // Allow profile override
+  const profile = process.env.MACOS_VM_PROFILE;
+  if (profile && MAC_OS_VM_RESOURCES[profile]) {
+    console.log(`📊 Using macOS VM profile: ${profile}`);
+    return MAC_OS_VM_RESOURCES[profile];
+  }
+  
+  // Auto-detect optimal configuration
+  return getOptimalMacOSVMResources();
+}
+
+// Export macOS VM resource configuration for shell scripts
+const macOSVmResources = getMacOSVMResources();
+console.log(`🖥️  macOS VM Configuration: ${macOSVmResources.memory}MB RAM, ${macOSVmResources.cpu} CPUs (${macOSVmResources.description})`);
+
+// === END MAC_OS_VM_RESOURCE_CONFIGURATION ===
 
 /**
  * @param {PipelineOptions} [options]

@@ -820,6 +820,22 @@ export async function curl(url, options = {}) {
       if (githubToken) {
         headers["Authorization"] = `Bearer ${githubToken}`;
       }
+    } else if (hostname === "api.buildkite.com") {
+      // Add Buildkite API authentication
+      // Prefer environment variable (set by host) over secret retrieval (in VM)
+      let buildkiteToken = getEnv("BUN_CACHE_API_TOKEN", false) || getEnv("BUILDKITE_API_TOKEN", false);
+      if (!buildkiteToken && isBuildkite) {
+        // Fallback: Try to get token as a secret in Buildkite CI
+        // (This may not work in VM environments without proper agent config)
+        try {
+          buildkiteToken = getSecret("BUN_CACHE_API_TOKEN", { required: false });
+        } catch (error) {
+          console.warn("Failed to get BUN_CACHE_API_TOKEN secret:", error.message);
+        }
+      }
+      if (buildkiteToken) {
+        headers["Authorization"] = `Bearer ${buildkiteToken}`;
+      }
     }
   }
 
@@ -1175,7 +1191,7 @@ export function getBootstrapVersion(os) {
   } else {
     scriptPath = join(import.meta.dirname, "bootstrap.sh");
   }
-  
+
   const scriptContent = readFile(scriptPath, { cache: true });
   const match = /# Version: ([\d.]+)/.exec(scriptContent);
   if (match) {
@@ -2699,7 +2715,7 @@ export function toYaml(obj, indent = 0) {
       if (key === "command") {
         // Special handling for command arrays in pipeline steps
         if (value.length === 1) {
-          const lines = value[0].split('\n');
+          const lines = value[0].split("\n");
           if (lines.length === 1) {
             result += `${spaces}${key}: ${value[0]}\n`;
           } else {
@@ -2711,7 +2727,7 @@ export function toYaml(obj, indent = 0) {
         } else {
           result += `${spaces}${key}:\n`;
           value.forEach(item => {
-            const lines = item.split('\n');
+            const lines = item.split("\n");
             if (lines.length === 1) {
               result += `${spaces}- ${item}\n`;
             } else {

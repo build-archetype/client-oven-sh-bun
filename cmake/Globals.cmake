@@ -422,12 +422,29 @@ function(register_command)
       if(filename STREQUAL "libbun-profile.a")
         # libbun-profile.a is now over 5gb in size, compress it first
         list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E chdir ${BUILD_PATH} rm -r ${BUILD_PATH}/codegen)
-        list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E chdir ${BUILD_PATH} rm -r ${CACHE_PATH})
+        # Preserve ccache for dependencies step - only delete specific cache subdirectories
+        list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E rm -rf ${CACHE_PATH}/webkit)
+        list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E rm -rf ${CACHE_PATH}/bun)
+        list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E rm -rf ${CACHE_PATH}/node_modules)
+        # DON'T DELETE: ${CACHE_PATH}/ccache - preserve for dependencies build step
+        
+        # Save to cache BEFORE compressing (so original file still exists)
+        if(APPLE AND BUILDKITE AND BUILDKITE_CACHE_SAVE STREQUAL "ON")
+          set(CACHE_BASE_DIR "${CMAKE_SOURCE_DIR}/buildkite-cache/build-results")
+          set(CPP_CACHE_KEY "${BUILDKITE_COMMIT}")
+          list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E make_directory "${CACHE_BASE_DIR}/${CPP_CACHE_KEY}")
+          list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E copy_if_different "${BUILD_PATH}/libbun-profile.a" "${CACHE_BASE_DIR}/${CPP_CACHE_KEY}/")
+        endif()
+        
         list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E chdir ${BUILD_PATH} gzip -1 libbun-profile.a)
         list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E chdir ${BUILD_PATH} buildkite-agent artifact upload libbun-profile.a.gz)
       elseif(filename STREQUAL "libbun-asan.a")
         list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E chdir ${BUILD_PATH} rm -r ${BUILD_PATH}/codegen)
-        list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E chdir ${BUILD_PATH} rm -r ${CACHE_PATH})
+        # Preserve ccache for dependencies step - only delete specific cache subdirectories
+        list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E rm -rf ${CACHE_PATH}/webkit)
+        list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E rm -rf ${CACHE_PATH}/bun)
+        list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E rm -rf ${CACHE_PATH}/node_modules)
+        # DON'T DELETE: ${CACHE_PATH}/ccache - preserve for dependencies build step
         list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E chdir ${BUILD_PATH} gzip -1 libbun-asan.a)
         list(APPEND CMD_COMMANDS COMMAND ${CMAKE_COMMAND} -E chdir ${BUILD_PATH} buildkite-agent artifact upload libbun-asan.a.gz)
       else()
@@ -954,3 +971,5 @@ function(print_compiler_flags)
     endif()
   endforeach()
 endfunction()
+
+print_compiler_flags()

@@ -39,7 +39,20 @@ if (!CMAKE_BUILD_ROOT) {
 
 const SRC_DIR = path.join(import.meta.dir, "../js/builtins");
 const CODEGEN_DIR = path.join(CMAKE_BUILD_ROOT, "./codegen");
-const TMP_DIR = path.join(CMAKE_BUILD_ROOT, "./tmp_functions");
+
+// Auto-detect Tart mounted directories and use VM-local tmp for file operations
+// This avoids file access issues on mounted filesystems similar to ccache and Zig cache fixes
+let TMP_DIR: string;
+if (CMAKE_BUILD_ROOT.includes("My Shared Files")) {
+  // Use VM-local temporary directory for Tart mounted workspace
+  TMP_DIR = "/tmp/bun-bundle-functions-tmp";
+  console.log("🔧 Detected Tart mounted directory - using VM-local tmp directory:");
+  console.log(`  Directory: ${TMP_DIR}`);
+  console.log("  (This avoids file access issues during JavaScript bundling)");
+} else {
+  // Use normal build directory for other environments
+  TMP_DIR = path.join(CMAKE_BUILD_ROOT, "./tmp_functions");
+}
 
 interface ParsedBuiltin {
   name: string;
@@ -369,6 +382,13 @@ interface BundleBuiltinFunctionsArgs {
 }
 
 export async function bundleBuiltinFunctions({ requireTransformer }: BundleBuiltinFunctionsArgs) {
+  // Ensure TMP_DIR exists before processing files (important for VM-local directories)
+  const fs = require("fs");
+  if (!fs.existsSync(TMP_DIR)) {
+    fs.mkdirSync(TMP_DIR, { recursive: true });
+    console.log(`📁 Created temporary directory: ${TMP_DIR}`);
+  }
+
   const filesToProcess = readdirSync(SRC_DIR)
     .filter(x => x.endsWith(".ts") && !x.endsWith(".d.ts"))
     .sort();

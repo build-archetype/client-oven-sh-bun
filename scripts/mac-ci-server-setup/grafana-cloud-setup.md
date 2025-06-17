@@ -1,40 +1,240 @@
 # Grafana Cloud Setup for Bun Mac CI Monitoring
 
-This guide helps you set up comprehensive monitoring for your Bun Mac CI servers using Grafana Cloud.
+This guide helps you set up comprehensive monitoring for your Bun Mac CI servers using Grafana Cloud. You can set this up either as part of the main setup script or separately.
 
-## 🚀 **Quick Start**
+## 🚀 **Quick Start - Integrated Setup**
+
+The easiest way is to enable monitoring during the main setup process:
+
+```bash
+# Run the main setup script with monitoring enabled
+MONITORING_ENABLED=true MONITORING_TYPE="grafana-cloud" ./setup-mac-server.sh
+```
+
+During setup, you'll be prompted for:
+
+- Grafana Cloud organization ID
+- Grafana Cloud API key
+- Prometheus endpoint URL
+- Loki endpoint URL
+
+## 🔧 **Separate Setup**
+
+If you want to add monitoring to an existing CI setup, follow these steps:
 
 ### 1. **Get Grafana Cloud Credentials**
 
 1. Sign up at [grafana.com](https://grafana.com/auth/sign-up/create-user)
 2. Create a new stack or use existing
-3. Go to **My Account** → **Access Policies** → **Create Access Policy**
-4. Create policy with scopes:
-   - `metrics:write` (for Prometheus)
-   - `logs:write` (for Loki)
-   - `stacks:read` (optional, for stack info)
+3. Go to **Connections** → **Add new connection** → **Hosted Prometheus metrics**
+4. Follow the setup wizard to get:
+   - **Organization ID** (your user ID number)
+   - **API Key** (starts with `glc_`)
+   - **Prometheus URL** (e.g., `https://prometheus-prod-13-prod-us-east-0.grafana.net/api/prom/push`)
+   - **Loki URL** (e.g., `https://logs-prod-008-prod-us-east-0.grafana.net/loki/api/v1/push`)
 
-5. Generate an **Access Policy Token**
-6. Note your endpoints:
-   - **Prometheus**: `https://prometheus-prod-XX-XXX.grafana.net/api/prom/push`
-   - **Loki**: `https://logs-prod-XXX.grafana.net/loki/api/v1/push`
+### 2. **Configure Environment Variables**
 
-### 2. **Run Setup Script**
-
-When running the `setup-mac-server.sh` script:
+Create a configuration file:
 
 ```bash
-# Enable monitoring
-Choose monitoring option: 1 (Grafana Cloud)
+# Copy the template
+cp grafana-env.template grafana-env.sh
 
-# Enter your credentials:
-Grafana Cloud username: your-stack-id
-Grafana Cloud API key: glc_xxxxx...
-Prometheus URL: https://prometheus-prod-XX-XXX.grafana.net/api/prom/push  
-Loki URL: https://logs-prod-XXX.grafana.net/loki/api/v1/push
+# Edit with your actual values
+nano grafana-env.sh
 ```
 
-## 📊 **Dashboards Configuration**
+Set these values in `grafana-env.sh`:
+
+```bash
+export GCLOUD_HOSTED_METRICS_ID="your-organization-id"
+export GCLOUD_RW_API_KEY="your-grafana-cloud-api-key"
+export GCLOUD_HOSTED_METRICS_URL="https://prometheus-prod-XX-prod-us-east-0.grafana.net/api/prom/push"
+export GCLOUD_HOSTED_LOGS_URL="https://logs-prod-XXX-prod-us-east-0.grafana.net/loki/api/v1/push"
+```
+
+### 3. **Install Monitoring Tools**
+
+```bash
+# Source your configuration
+source grafana-env.sh
+
+# Install required tools
+brew tap grafana/grafana
+brew install grafana/grafana/alloy
+brew install prometheus-node-exporter
+
+# Start services
+brew services start prometheus-node-exporter
+brew services start alloy
+```
+
+### 4. **Configure Alloy**
+
+The setup script automatically creates an Alloy configuration. For manual setup, create `~/.alloy/config.alloy` with the appropriate configuration (see the setup script for the full template).
+
+## 🛡️ **macOS Permissions Requirements**
+
+### **Full Disk Access for Terminal**
+
+The setup script needs to enable SSH and configure system settings. macOS requires Full Disk Access for these operations:
+
+1. **Open System Settings** → **Privacy & Security** → **Full Disk Access**
+2. **Click the + button** to add applications
+3. **Add your Terminal application**:
+   - **Terminal.app** (built-in terminal)
+   - **iTerm2** (if you use iTerm)
+   - **VS Code Terminal** (if running from VS Code)
+4. **Quit and reopen** your terminal application
+5. **Re-run the setup script**
+
+### **Full Disk Access for Buildkite Agent (if needed)**
+
+If you encounter permission issues with the Buildkite agent accessing certain directories:
+
+1. **System Settings** → **Privacy & Security** → **Full Disk Access**
+2. **Add Buildkite Agent**:
+   - Navigate to `/opt/homebrew/bin/buildkite-agent`
+   - Or `/usr/local/bin/buildkite-agent` (Intel Macs)
+3. **Restart the Buildkite agent service**:
+   ```bash
+   brew services restart buildkite-agent
+   ```
+
+### **Alternative SSH Setup (if Full Disk Access not available)**
+
+If you can't grant Full Disk Access, you can enable SSH manually:
+
+1. **System Settings** → **General** → **Sharing**
+2. **Turn on "Remote Login"**
+3. **Add users who can connect**: Select your CI user (`mac-ci`)
+
+## 📊 **Environment Variables Reference**
+
+The monitoring setup uses these environment variables:
+
+```bash
+# Required - Grafana Cloud credentials
+export GCLOUD_HOSTED_METRICS_ID="1234567"              # Your organization ID
+export GCLOUD_RW_API_KEY="glc_xxxxx..."                # Your API key
+
+# Required - Grafana Cloud endpoints
+export GCLOUD_HOSTED_METRICS_URL="https://prometheus-prod-XX-prod-us-east-0.grafana.net/api/prom/push"
+export GCLOUD_HOSTED_LOGS_URL="https://logs-prod-XXX-prod-us-east-0.grafana.net/loki/api/v1/push"
+
+# Optional - Additional settings
+export GCLOUD_REGION="prod-us-east-0"                  # Auto-detected from API key
+export GCLOUD_SCRAPE_INTERVAL="60s"                    # Metrics collection frequency
+export GCLOUD_INSTANCE_LABELS="environment=ci,service=buildkite"  # Additional labels
+```
+
+## 🔍 **Verification**
+
+After setup, verify monitoring is working:
+
+```bash
+# Check services are running
+brew services list | grep -E "(alloy|node-exporter)"
+
+# Check metrics endpoint
+curl http://localhost:9100/metrics
+
+# Check Alloy status
+curl http://localhost:12345
+
+# View Alloy logs
+tail -f /opt/homebrew/var/log/alloy.log
+```
+
+You should see in the logs:
+
+```
+level=info msg="Samples sent" count=684
+level=info msg="Remote write completed" status=200
+```
+
+## 📈 **Using with setup-mac-server.sh**
+
+The main setup script supports monitoring through environment variables:
+
+```bash
+# Option 1: Set all variables upfront
+export MONITORING_ENABLED=true
+export MONITORING_TYPE="grafana-cloud"
+export GCLOUD_HOSTED_METRICS_ID="your-org-id"
+export GCLOUD_RW_API_KEY="your-api-key"
+export GCLOUD_HOSTED_METRICS_URL="your-prometheus-url"
+export GCLOUD_HOSTED_LOGS_URL="your-loki-url"
+./setup-mac-server.sh
+
+# Option 2: Enable during interactive setup
+./setup-mac-server.sh
+# Choose option 1 when prompted for monitoring
+# Enter credentials when prompted
+```
+
+The script will:
+
+- ✅ Install monitoring tools (Alloy, Node Exporter)
+- ✅ Configure Alloy with your Grafana Cloud credentials
+- ✅ Start monitoring services automatically
+- ✅ Store credentials securely in macOS keychain
+- ✅ Set up automatic startup on boot
+
+## 🆘 **Troubleshooting**
+
+### **Common Issues**
+
+#### **Permission Denied Errors**
+
+```bash
+# Grant Full Disk Access to Terminal (see above)
+# Or manually enable SSH in System Settings
+```
+
+#### **Services Not Starting**
+
+```bash
+# Check Homebrew services
+brew services list
+
+# Restart if needed
+brew services restart alloy
+brew services restart prometheus-node-exporter
+```
+
+#### **No Metrics in Grafana Cloud**
+
+```bash
+# Check Alloy configuration
+cat ~/.alloy/config.alloy
+
+# Test credentials
+curl -u "$GCLOUD_HOSTED_METRICS_ID:$GCLOUD_RW_API_KEY" "$GCLOUD_HOSTED_METRICS_URL"
+
+# Check for authentication errors in logs
+tail -f /opt/homebrew/var/log/alloy.log | grep -i "error\|auth"
+```
+
+#### **Wrong Endpoints**
+
+Make sure your endpoints match your region:
+
+- US East: `prometheus-prod-XX-prod-us-east-0.grafana.net`
+- US Central: `prometheus-prod-XX-prod-us-central-0.grafana.net`
+- EU West: `prometheus-prod-XX-prod-eu-west-0.grafana.net`
+
+## 📚 **Next Steps**
+
+Once monitoring is set up:
+
+1. **Import dashboards** - Use the dashboard JSON in this document
+2. **Set up alerts** - Configure notifications for critical metrics
+3. **Create custom views** - Build dashboards for your specific needs
+4. **Monitor build performance** - Track build times and success rates
+
+## 📊 **Dashboard Templates**
 
 ### **Dashboard 1: Bun CI Infrastructure Overview**
 
@@ -60,18 +260,18 @@ Import this JSON into Grafana Cloud:
         ],
         "fieldConfig": {
           "defaults": {
-            "color": {"mode": "thresholds"},
+            "color": { "mode": "thresholds" },
             "thresholds": {
               "steps": [
-                {"color": "red", "value": 0},
-                {"color": "green", "value": 1}
+                { "color": "red", "value": 0 },
+                { "color": "green", "value": 1 }
               ]
             }
           }
         }
       },
       {
-        "id": 2, 
+        "id": 2,
         "title": "CPU Usage by Machine",
         "type": "timeseries",
         "targets": [
@@ -83,7 +283,7 @@ Import this JSON into Grafana Cloud:
       },
       {
         "id": 3,
-        "title": "Memory Usage by Machine", 
+        "title": "Memory Usage by Machine",
         "type": "timeseries",
         "targets": [
           {
@@ -95,7 +295,7 @@ Import this JSON into Grafana Cloud:
       {
         "id": 4,
         "title": "Disk Usage by Machine",
-        "type": "timeseries", 
+        "type": "timeseries",
         "targets": [
           {
             "expr": "100 * (1 - (node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay\"} / node_filesystem_size_bytes{fstype!~\"tmpfs|overlay\"}))",
@@ -139,72 +339,9 @@ Import this JSON into Grafana Cloud:
 }
 ```
 
-### **Dashboard 2: Bun Build Performance**
+### **Log Queries**
 
-```json
-{
-  "dashboard": {
-    "id": null,
-    "title": "Bun Build Performance",
-    "tags": ["bun", "ci", "builds"],
-    "panels": [
-      {
-        "id": 1,
-        "title": "Build Duration Trends",
-        "type": "timeseries",
-        "targets": [
-          {
-            "expr": "rate(node_processes_total[5m])",
-            "legendFormat": "Process Rate - {{machine_name}}"
-          }
-        ]
-      },
-      {
-        "id": 2,
-        "title": "Compile Cache Hit Rate",
-        "type": "stat",
-        "description": "Monitor ccache effectiveness",
-        "targets": [
-          {
-            "expr": "100 * rate(node_disk_reads_completed_total[5m]) / rate(node_disk_io_now[5m])",
-            "legendFormat": "Cache Efficiency - {{machine_name}}"
-          }
-        ]
-      },
-      {
-        "id": 3,
-        "title": "Memory Usage During Builds",
-        "type": "timeseries",
-        "targets": [
-          {
-            "expr": "node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes",
-            "legendFormat": "Memory Used - {{machine_name}}"
-          }
-        ]
-      },
-      {
-        "id": 4,
-        "title": "Disk I/O During Builds",
-        "type": "timeseries",
-        "targets": [
-          {
-            "expr": "irate(node_disk_read_bytes_total[5m])",
-            "legendFormat": "Disk Read - {{machine_name}}"
-          },
-          {
-            "expr": "irate(node_disk_written_bytes_total[5m])",
-            "legendFormat": "Disk Write - {{machine_name}}"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-## 🔍 **Log Queries**
-
-### **Useful LogQL Queries**
+Useful LogQL queries for troubleshooting:
 
 ```logql
 # All logs from a specific machine
@@ -216,184 +353,20 @@ Import this JSON into Grafana Cloud:
 # Build failure logs
 {log_type="build"} |= "error" or "failed" or "ERROR"
 
-# Tart VM logs
-{log_type="tart"}
-
 # System errors
 {log_type="system"} |= "error" or "ERROR"
 
-# Logs from specific build
-{log_type="build", build_id="your-build-id"}
-
 # Memory pressure warnings
 {log_type="system"} |= "memory pressure" or "low memory"
-
-# Network connectivity issues
-{log_type="system"} |= "network" and ("unreachable" or "timeout")
-```
-
-## 🚨 **Alerting Rules**
-
-### **Create These Alerts in Grafana Cloud**
-
-#### **1. Machine Down Alert**
-```yaml
-- alert: MacCIServerDown
-  expr: up{service_type="buildkite-agent"} == 0
-  for: 2m
-  labels:
-    severity: critical
-  annotations:
-    summary: "Mac CI server {{$labels.machine_name}} is down"
-    description: "Machine {{$labels.machine_name}} in {{$labels.machine_location}} has been down for more than 2 minutes"
-```
-
-#### **2. High CPU Usage**
-```yaml
-- alert: HighCPUUsage
-  expr: 100 - (avg by(machine_name) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
-  for: 5m
-  labels:
-    severity: warning
-  annotations:
-    summary: "High CPU usage on {{$labels.machine_name}}"
-    description: "CPU usage has been above 80% for more than 5 minutes"
-```
-
-#### **3. Low Disk Space**
-```yaml
-- alert: LowDiskSpace  
-  expr: 100 * (1 - (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"})) > 85
-  for: 2m
-  labels:
-    severity: warning
-  annotations:
-    summary: "Low disk space on {{$labels.machine_name}}"
-    description: "Disk usage is above 85% on {{$labels.mountpoint}}"
-```
-
-#### **4. Build Failures**
-```yaml
-- alert: BuildFailures
-  expr: increase(rate({log_type="build"} |= "error" or "failed")[5m]) > 0.5
-  for: 1m
-  labels:
-    severity: warning
-  annotations:
-    summary: "High build failure rate on {{$labels.machine_name}}"
-    description: "Build failure rate has increased significantly"
-```
-
-## 🔧 **Advanced Configuration**
-
-### **Custom Metrics Collection**
-
-Add this to your Alloy config for additional Bun-specific metrics:
-
-```alloy
-// Custom Bun build metrics
-prometheus.exporter.process "bun_processes" {
-  matcher {
-    name = "bun"
-  }
-  matcher {
-    name = "node"
-  }
-  matcher {
-    name = "tart"
-  }
-}
-
-// File descriptor usage
-prometheus.exporter.unix "extended_node" {
-  include_exporter_metrics = true
-  enable_collectors = ["processes", "systemd", "textfile"]
-}
-```
-
-### **Log Retention Policies**
-
-Configure different retention for different log types:
-
-```yaml
-# In Grafana Cloud UI
-Log Retention:
-  - build logs: 30 days (high volume)
-  - system logs: 90 days (important for debugging)
-  - buildkite logs: 60 days (audit trail)
-  - tart logs: 14 days (usually not needed long-term)
-```
-
-## 📈 **Performance Tuning**
-
-### **Optimize Data Collection**
-
-```alloy
-// Reduce scrape frequency for less critical metrics
-prometheus.scrape "low_priority_metrics" {
-  scrape_interval = "60s"  // instead of 15s
-  scrape_timeout  = "30s"
-}
-
-// Use relabeling to drop unnecessary metrics
-prometheus.relabel "drop_unused" {
-  rule {
-    source_labels = ["__name__"]
-    regex = "node_scrape_collector_.*|node_textfile_scrape_error"
-    action = "drop"
-  }
-}
 ```
 
 ## 🔐 **Security Best Practices**
 
-1. **Rotate API Keys Regularly**: Set calendar reminders
-2. **Use Least Privilege**: Only grant necessary scopes
-3. **Monitor Access Logs**: Check for unauthorized access
-4. **Secure Storage**: Credentials are stored in macOS keychain
-5. **Network Security**: Use VPN for external access
-
-## 🆘 **Troubleshooting**
-
-### **Common Issues**
-
-#### **Alloy Not Starting**
-```bash
-# Check logs
-tail -f /opt/homebrew/var/log/alloy.log
-
-# Verify config syntax
-alloy fmt --write ~/.alloy/config.alloy
-
-# Test connectivity
-curl -v https://prometheus-prod-XX-XXX.grafana.net/api/prom/push
-```
-
-#### **Missing Metrics**
-```bash
-# Check if Node Exporter is running
-brew services list | grep node-exporter
-
-# Test metrics endpoint
-curl http://localhost:9100/metrics
-```
-
-#### **No Logs Appearing**
-```bash
-# Check file permissions
-ls -la /opt/homebrew/var/log/buildkite-agent.log
-
-# Verify log paths in config
-grep -A 10 "loki.source.file" ~/.alloy/config.alloy
-```
-
-#### **Authentication Errors**
-```bash
-# Test credentials
-curl -u "user:api_key" https://prometheus-prod-XX-XXX.grafana.net/api/prom/push
-
-# Regenerate API key if needed
-```
+1. **Rotate API Keys**: Set up calendar reminders for quarterly rotation
+2. **Use Least Privilege**: Only grant necessary scopes (`metrics:write`, `logs:write`)
+3. **Monitor Access**: Check Grafana audit logs regularly
+4. **Secure Storage**: Credentials stored in macOS keychain, not plain text
+5. **Network Security**: Use VPN for remote monitoring access
 
 ## 📚 **Additional Resources**
 
@@ -408,4 +381,4 @@ curl -u "user:api_key" https://prometheus-prod-XX-XXX.grafana.net/api/prom/push
 2. **Set up alerts** for critical metrics
 3. **Configure notification channels** (Slack, PagerDuty, etc.)
 4. **Create custom dashboards** for your specific needs
-5. **Set up log parsing** for structured log analysis 
+5. **Set up log parsing** for structured log analysis

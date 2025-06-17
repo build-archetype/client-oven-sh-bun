@@ -1,6 +1,38 @@
 #!/bin/bash
 set -euo pipefail
 
+# Fix HOME environment variable if not set (common in CI environments running as root)
+if [ -z "${HOME:-}" ]; then
+    # Determine appropriate HOME directory based on current user
+    if [ "$(id -u)" = "0" ]; then
+        # Running as root - use a writable directory since /root is often read-only in CI
+        # Try writable locations in order of preference
+        for potential_home in "/tmp/root-home" "/var/tmp/root-home" "/opt/buildkite-agent/root-home" "/tmp"; do
+            if mkdir -p "$potential_home" 2>/dev/null; then
+                export HOME="$potential_home"
+                break
+            fi
+        done
+        
+        # Fallback if all else fails
+        if [ -z "${HOME:-}" ]; then
+            export HOME="/tmp"
+        fi
+    else
+        # Try to get HOME from current user
+        HOME=$(getent passwd "$(whoami)" | cut -d: -f6 2>/dev/null || echo "/tmp")
+        export HOME
+    fi
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] HOME was not set, using: $HOME"
+fi
+
+# Fix USER environment variable if not set (common in CI environments)
+if [ -z "${USER:-}" ]; then
+    USER=$(whoami)
+    export USER
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] USER was not set, using: $USER"
+fi
+
 # SSH options for VM connectivity
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
 
@@ -71,6 +103,12 @@ log "======================="
 # This is a workaround for a bug in Tart where the .tart directory is not owned by the user running the script.
 # This can be removed once we are confident that tart permissions are working correctly.
 fix_tart_permissions() {
+    # Safety check - HOME should be set by now, but fallback if not
+    if [ -z "${HOME:-}" ]; then
+        log "Warning: HOME still not set in fix_tart_permissions, using /root fallback"
+        export HOME="/root"
+    fi
+    
     local tart_dir="$HOME/.tart"
     local real_user="${SUDO_USER:-$USER}"
     
@@ -337,6 +375,30 @@ version_compare() {
     return 0  # Equal
 }
 
+# Check if two versions are compatible for incremental updates (same major.minor)
+version_compatible() {
+    local v1="$1"
+    local v2="$2"
+    
+    # Split versions into arrays
+    IFS='.' read -ra V1 <<< "$v1"
+    IFS='.' read -ra V2 <<< "$v2"
+    
+    # Compare major.minor only
+    local major1=${V1[0]:-0}
+    local minor1=${V1[1]:-0}
+    local major2=${V2[0]:-0}
+    local minor2=${V2[1]:-0}
+    
+    [ "$major1" = "$major2" ] && [ "$minor1" = "$minor2" ]
+}
+
+# Get the minor version (e.g., "1.2" from "1.2.16")
+get_minor_version() {
+    local version="$1"
+    echo "$version" | sed -E 's/^([0-9]+\.[0-9]+)\..*/\1/'
+}
+
 # Parse image name to extract version and bootstrap info
 parse_image_name() {
     local image_name="$1"
@@ -344,10 +406,11 @@ parse_image_name() {
     local bootstrap_version=""
     
     # Extract Bun version and bootstrap version from image name
-    # Format: bun-build-macos-X.Y.Z-bootstrap-N.M
-    if [[ "$image_name" =~ bun-build-macos-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
-        bun_version="${BASH_REMATCH[1]}"
-        bootstrap_version="${BASH_REMATCH[2]}"
+    # Format: bun-build-macos-[MACOS_RELEASE]-[BUN_VERSION]-bootstrap-[BOOTSTRAP_VERSION]
+    # Example: bun-build-macos-13-1.2.16-bootstrap-4.1
+    if [[ "$image_name" =~ bun-build-macos-([0-9]+)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
+        bun_version="${BASH_REMATCH[2]}"      # Second capture group is Bun version
+        bootstrap_version="${BASH_REMATCH[3]}" # Third capture group is Bootstrap version
     fi
     
     echo "$bun_version|$bootstrap_version"
@@ -366,8 +429,11 @@ check_local_image_version() {
     
     # Results
     local exact_match=""
-    local usable_images=()
+    local compatible_images=()  # Same minor version (e.g., 1.2.x)
+    local usable_images=()      # Different minor version but could be useful
     local all_bun_images=()
+    
+    local target_minor=$(get_minor_version "$target_bun_version")
     
     # Parse each line for bun-build-macos images
     while IFS= read -r line; do
@@ -389,17 +455,40 @@ check_local_image_version() {
                 if [ "$image_name" = "$target_image_name" ]; then
                     exact_match="$image_name"
                     log "    ✅ Exact match found!" >&2
-                # Check for usable match (same Bun version, different bootstrap)
-                elif [ "$bun_ver" = "$target_bun_version" ] && [ "$bootstrap_ver" != "$target_bootstrap_version" ]; then
+                # Check for compatible match (same minor version)
+                elif [ -n "$bun_ver" ] && version_compatible "$bun_ver" "$target_bun_version"; then
+                    compatible_images+=("$image_name")
+                    log "    🔄 Compatible match (same minor version: $(get_minor_version "$bun_ver"))" >&2
+                # Check for usable match (different minor but could bootstrap)
+                elif [ -n "$bun_ver" ] && [ "$bun_ver" != "$target_bun_version" ]; then
                     usable_images+=("$image_name")
-                    log "    🔄 Usable match (different bootstrap)" >&2
+                    log "    🔧 Usable base (different minor: $(get_minor_version "$bun_ver"))" >&2
                 fi
             fi
         fi
     done <<< "$tart_output"
     
-    # Return results (format: exact|usable1,usable2|all1,all2)
-    # Handle empty arrays properly
+    # Find best compatible image (highest version with same minor)
+    local best_compatible=""
+    if [ ${#compatible_images[@]} -gt 0 ]; then
+        local best_compatible_version=""
+        for image in "${compatible_images[@]}"; do
+            local version_info=$(parse_image_name "$image")
+            local bun_ver="${version_info%|*}"
+            if [ -z "$best_compatible_version" ] || version_compare "$bun_ver" "$best_compatible_version"; then
+                best_compatible="$image"
+                best_compatible_version="$bun_ver"
+            fi
+        done
+        log "  🎯 Best compatible: $best_compatible (Bun: $best_compatible_version)" >&2
+    fi
+    
+    # Return results (format: exact|compatible|usable|all)
+    local compatible_list=""
+    if [ -n "$best_compatible" ]; then
+        compatible_list="$best_compatible"
+    fi
+    
     local usable_list=""
     if [ ${#usable_images[@]} -gt 0 ]; then
         usable_list=$(IFS=','; echo "${usable_images[*]}")
@@ -410,46 +499,341 @@ check_local_image_version() {
         all_list=$(IFS=','; echo "${all_bun_images[*]}")
     fi
     
-    echo "$exact_match|$usable_list|$all_list"
+    echo "$exact_match|$compatible_list|$usable_list|$all_list"
 }
 
 # Check if remote image exists
 check_remote_image() {
     local remote_url="$1"
+    local force_remote_refresh="${2:-false}"
     log "🌐 Checking remote image: $remote_url" >&2
     
-    # Fix permissions before trying to use tart
+    # TEMPORARY: Skip remote check if authentication token looks like Buildkite token
+    if [[ "${GITHUB_TOKEN:-}" =~ ^bkct_ ]]; then
+        log "⚠️  Detected Buildkite token instead of GitHub token - skipping remote registry check" >&2
+        log "   Buildkite tokens (bkct_*) cannot authenticate to GitHub Container Registry" >&2
+        log "   Need GitHub token (ghp_* or gho_*) for registry access" >&2
+        return 1
+    fi
+    
+    # Fix permissions before trying to use tart (redirect output)
     fix_tart_permissions >&2
     
-    # Show that download is starting since VM images are large (GB+) and can take 10-30+ minutes
+    # Extract the image name from the URL for local checking
+    # URL format: ghcr.io/org/repo/image:tag
+    local remote_image_name
+    if [[ "$remote_url" =~ ([^/]+):([^:]+)$ ]]; then
+        remote_image_name="${BASH_REMATCH[1]}:${BASH_REMATCH[2]}"
+    else
+        # Fallback parsing
+        remote_image_name=$(basename "$remote_url")
+    fi
+    
+    # Skip cache checking if force refresh is requested
+    if [ "$force_remote_refresh" = "true" ]; then
+        log "   Force remote refresh requested - skipping cache check" >&2
+    else
+        # First check if this remote image is already cached locally
+        log "   Checking if remote image is already cached locally..." >&2
+        local tart_output=$(tart list 2>&1)
+        
+        # Check for cached remote image
+        if echo "$tart_output" | grep -q "^remote.*${remote_url}"; then
+            log "✅ Remote image already cached locally - no download needed" >&2
+            log "   Use --force-remote-refresh to force re-download latest version" >&2
+            return 0
+        fi
+        
+        # Also check if there's a local image with matching tag that might be from this remote
+        local image_tag="${remote_url##*:}"
+        if echo "$tart_output" | grep -q "remote.*${image_tag}"; then
+            log "✅ Found cached remote image with matching tag - no download needed" >&2
+            log "   Use --force-remote-refresh to force re-download latest version" >&2
+            return 0
+        fi
+        
+        log "   Remote image not found in local cache - downloading..." >&2
+    fi
+    
+    # Set up registry authentication before pulling
+    log "🔐 Setting up registry authentication..." >&2
+    local auth_setup=false
+    local original_username="${TART_REGISTRY_USERNAME:-}"
+    local original_password="${TART_REGISTRY_PASSWORD:-}"
+    
+    # Check if we have credentials
+    if [ -n "${GITHUB_TOKEN:-}" ] && [ -n "${GITHUB_USERNAME:-}" ]; then
+        log "   Using GitHub credentials from environment" >&2
+        log "   Username: $GITHUB_USERNAME" >&2
+        log "   Token: ${GITHUB_TOKEN:0:8}... (${#GITHUB_TOKEN} chars)" >&2
+        export TART_REGISTRY_USERNAME="$GITHUB_USERNAME"
+        export TART_REGISTRY_PASSWORD="$GITHUB_TOKEN"
+        auth_setup=true
+    elif [ -f /tmp/github-token.txt ] && [ -f /tmp/github-username.txt ]; then
+        log "   Using GitHub credentials from legacy files" >&2
+        local file_token=$(cat /tmp/github-token.txt 2>/dev/null || echo "")
+        local file_username=$(cat /tmp/github-username.txt 2>/dev/null || echo "")
+        if [ -n "$file_token" ] && [ -n "$file_username" ]; then
+            log "   Username: $file_username" >&2
+            log "   Token: ${file_token:0:8}... (${#file_token} chars)" >&2
+            export TART_REGISTRY_USERNAME="$file_username"
+            export TART_REGISTRY_PASSWORD="$file_token"
+            auth_setup=true
+        fi
+    fi
+    
+    if [ "$auth_setup" = false ]; then
+        log "   ⚠️  No credentials found - attempting unauthenticated pull" >&2
+    else
+        log "   ✅ Registry authentication configured" >&2
+    fi
+    
+    # Not cached or force refresh - need to pull
     log "📥 Starting download of remote VM image (may be 5-15GB+, please wait)..." >&2
     
-    # Run tart pull - redirect ALL output to stderr to avoid contaminating return values
-    if tart pull "$remote_url" >&2; then
+    # Run tart pull directly to show native progress output (percentages, etc.)
+    # Redirect to stderr to prevent pollution of decision output
+    local pull_result=0
+    if tart pull "$remote_url" > /dev/stderr 2>&1; then
         log "✅ Remote image found and downloaded successfully" >&2
-        return 0
+        log "   Cached for future use - subsequent pulls will be instant" >&2
+        pull_result=0
     else
         log "❌ Remote image not found or download failed" >&2
+        if [ "$auth_setup" = false ]; then
+            log "   Possible causes:" >&2
+            log "   - Image doesn't exist in registry" >&2
+            log "   - Registry requires authentication (set GITHUB_TOKEN and GITHUB_USERNAME)" >&2
+        else
+            log "   Possible causes:" >&2
+            log "   - Image doesn't exist in registry" >&2
+            log "   - Authentication failed (check GITHUB_TOKEN permissions)" >&2
+            log "   - Network connectivity issues" >&2
+        fi
+        pull_result=1
+    fi
+    
+    # Clean up authentication (restore original values if they existed)
+    if [ "$auth_setup" = true ]; then
+        if [ -n "$original_username" ]; then
+            export TART_REGISTRY_USERNAME="$original_username"
+        else
+            unset TART_REGISTRY_USERNAME 2>/dev/null || true
+        fi
+        
+        if [ -n "$original_password" ]; then
+            export TART_REGISTRY_PASSWORD="$original_password"
+        else
+            unset TART_REGISTRY_PASSWORD 2>/dev/null || true
+        fi
+        log "   🧹 Registry authentication cleaned up" >&2
+    fi
+    
+    return $pull_result
+}
+
+# Validate that a VM image has all required tools installed
+validate_vm_image_tools() {
+    local image_name="$1"
+    log "🔬 Validating tools in VM image: $image_name" >&2
+    
+    # Start the VM temporarily for validation (redirect all output to stderr)
+    log "   Starting VM for validation..." >&2
+    tart run "$image_name" --no-graphics >/dev/null 2>&1 &
+    local vm_pid=$!
+    
+    # Wait for VM to boot (reduced from 30s to 2s - modern VMs boot faster)
+    sleep 2
+    
+    # Get VM IP (redirect stderr to avoid pollution)
+    local vm_ip=""
+    for i in {1..10}; do
+        vm_ip=$(tart ip "$image_name" 2>/dev/null || echo "")
+        if [ -n "$vm_ip" ]; then
+            break
+        fi
+        sleep 2
+    done
+    
+    if [ -z "$vm_ip" ]; then
+        log "   ❌ Could not get VM IP for validation" >&2
+        # Cleanup with output redirection
+        kill $vm_pid >/dev/null 2>&1 || true
+        return 1
+    fi
+    
+    # Wait for SSH to be available
+    local ssh_ready=false
+    for i in {1..10}; do
+        if sshpass -p "admin" ssh $SSH_OPTS -o ConnectTimeout=2 admin@"$vm_ip" "echo 'test'" >/dev/null 2>&1; then
+            ssh_ready=true
+            break
+        fi
+        sleep 2
+    done
+    
+    if [ "$ssh_ready" != "true" ]; then
+        log "   ❌ SSH not available for validation" >&2
+        # Cleanup with output redirection
+        kill $vm_pid >/dev/null 2>&1 || true
+        return 1
+    fi
+    
+    # Check critical tools
+    log "   Checking critical tools..." >&2
+    local validation_cmd='
+        export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+        
+        echo "=== TOOL VALIDATION ==="
+        missing_tools=""
+        
+        # Check bun (most critical)
+        if command -v bun >/dev/null 2>&1; then
+            echo "✅ bun: $(bun --version)"
+        else
+            echo "❌ bun: MISSING"
+            missing_tools="$missing_tools bun"
+        fi
+        
+        # Check other critical tools
+        for tool in cargo cmake clang ninja; do
+            if command -v "$tool" >/dev/null 2>&1; then
+                echo "✅ $tool: available"
+            else
+                echo "❌ $tool: MISSING"
+                missing_tools="$missing_tools $tool"
+            fi
+        done
+        
+        echo "======================="
+        echo ""
+        echo "=== CODESIGNING ENVIRONMENT CHECK ==="
+        echo "Verifying codesigning tools and SDK for Mach-O generation..."
+        
+        # Check codesigning tools
+        echo "🔐 Codesigning Tools:"
+        codesign_missing=""
+        for tool in codesign xcrun; do
+            if command -v "$tool" >/dev/null 2>&1; then
+                echo "  ✅ $tool: available"
+            else
+                echo "  ❌ $tool: MISSING"
+                codesign_missing="$codesign_missing $tool"
+            fi
+        done
+        
+        # Check SDK availability
+        echo ""
+        echo "📱 SDK Check:"
+        if command -v xcrun >/dev/null 2>&1; then
+            sdk_path=$(xcrun --show-sdk-path 2>/dev/null || echo "FAILED")
+            if [ "$sdk_path" != "FAILED" ] && [ -d "$sdk_path" ]; then
+                echo "  ✅ SDK path: $sdk_path"
+                
+                # Check key SDK components
+                if [ -d "$sdk_path/usr/include" ] && [ -d "$sdk_path/usr/lib" ]; then
+                    echo "  ✅ SDK components: headers and libraries present"
+                else
+                    echo "  ⚠️  SDK components: missing headers or libraries"
+                fi
+            else
+                echo "  ❌ SDK path: not accessible or missing"
+                codesign_missing="$codesign_missing SDK"
+            fi
+        else
+            echo "  ❌ xcrun: not available for SDK detection"
+            codesign_missing="$codesign_missing xcrun"
+        fi
+        
+        # Check Xcode tools
+        echo ""
+        echo "🛠️  Developer Tools:"
+        if command -v xcode-select >/dev/null 2>&1; then
+            xcode_path=$(xcode-select -p 2>/dev/null || echo "NOT SET")
+            if [ -d "$xcode_path" ]; then
+                echo "  ✅ Xcode developer path: $xcode_path"
+            else
+                echo "  ❌ Xcode developer path: invalid or missing"
+                codesign_missing="$codesign_missing xcode-select"
+            fi
+        else
+            echo "  ❌ xcode-select: not available"
+            codesign_missing="$codesign_missing xcode-select"
+        fi
+        
+        echo "============================================"
+        
+        # Return status
+        if [ -n "$missing_tools" ]; then
+            echo "VALIDATION_FAILED: Missing tools:$missing_tools"
+            exit 1
+        elif [ -n "$codesign_missing" ]; then
+            echo "VALIDATION_FAILED: Missing codesigning tools:$codesign_missing"
+            exit 1
+        else
+            echo "VALIDATION_PASSED: All critical tools and codesigning environment ready"
+            exit 0
+        fi
+    '
+    
+    local validation_result
+    local validation_success=false
+    if validation_result=$(sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$validation_cmd" 2>&1); then
+        validation_success=true
+    fi
+    
+    # Log validation output (to stderr to avoid pollution)
+    echo "$validation_result" | while read -r line; do
+        log "   $line" >&2
+    done
+    
+    # Cleanup VM with proper output redirection to prevent pollution
+    log "   Shutting down validation VM..." >&2
+    
+    # Try graceful shutdown first (redirect all output)
+    sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
+    
+    # Wait for VM to stop (reduced from 30s to 2s)
+    sleep 2
+    
+    # Force kill if still running (redirect all output)
+    kill $vm_pid >/dev/null 2>&1 || true
+    
+    # Wait for complete cleanup (reduced from 5s to 2s)
+    sleep 2
+    
+    if [ "$validation_success" = "true" ]; then
+        log "   ✅ VM image validation passed - tools and codesigning environment ready" >&2
+        return 0
+    else
+        log "   ❌ VM image validation failed - missing tools or codesigning environment" >&2
         return 1
     fi
 }
 
-# Make smart caching decision
+# Enhanced caching decision that includes tool validation
 make_caching_decision() {
     local target_bun_version="$1"
     local target_bootstrap_version="$2"
     local target_image_name="$3"
     local remote_image_url="$4"
     local force_refresh="$5"
+    local force_remote_refresh="${6:-false}"
+    local local_dev_mode="${7:-false}"
     
     log "🧠 Making smart caching decision..." >&2
     log "  Target: Bun $target_bun_version, Bootstrap $target_bootstrap_version" >&2
     log "  Force refresh: $force_refresh" >&2
+    log "  Force remote refresh: $force_remote_refresh" >&2
+    log "  Local dev mode: $local_dev_mode" >&2
     
     # If force refresh, skip all local checks
     if [ "$force_refresh" = true ]; then
         log "🔄 Force refresh requested - will check remote then build" >&2
-        if check_remote_image "$remote_image_url"; then
+        if [ "$local_dev_mode" = true ]; then
+            log "🏠 Local dev mode: Skipping remote check, will build from base" >&2
+            echo "build_new"
+        elif check_remote_image "$remote_image_url" "$force_remote_refresh"; then
             echo "use_remote"
         else
             echo "build_new"
@@ -457,33 +841,52 @@ make_caching_decision() {
         return
     fi
     
-    # Check local images
+    # Check local images first (always do this regardless of mode)
     local local_analysis=$(check_local_image_version "$target_bun_version" "$target_bootstrap_version" "$target_image_name")
-    local exact_match="${local_analysis%%|*}"
-    local usable_images="${local_analysis%|*}"
-    usable_images="${usable_images#*|}"
     
-    # Priority 1: Exact local match
+    # Parse the enhanced results: exact|compatible|usable|all
+    local exact_match="${local_analysis%%|*}"
+    local remaining="${local_analysis#*|}"
+    local compatible_match="${remaining%%|*}"
+    remaining="${remaining#*|}"
+    local usable_images="${remaining%%|*}"
+    local all_images="${remaining#*|}"
+    
+    # Priority 1: Exact local match - trust existing images (no validation to avoid deleting working images)
     if [ -n "$exact_match" ]; then
-        log "🎯 Decision: Use exact local match ($exact_match)" >&2
+        log "🔍 Found exact local match: $exact_match" >&2
+        log "🎯 Decision: Use exact local match ($exact_match) - trusting existing image" >&2
         echo "use_local_exact|$exact_match"
         return
     fi
     
-    # Priority 2: Check remote for perfect match
-    log "🌐 No exact local match, checking remote..." >&2
-    if check_remote_image "$remote_image_url"; then
-        log "🎯 Decision: Use remote perfect match" >&2
-        echo "use_remote|$remote_image_url"
+    # Priority 2: Compatible local match (same minor version - incremental update)
+    if [ -n "$compatible_match" ]; then
+        log "🔍 Found compatible local match: $compatible_match" >&2
+        log "🔄 Compatible local image found: $compatible_match" >&2
+        log "🎯 Decision: Build incrementally from compatible local base" >&2
+        echo "build_incremental|$compatible_match"
         return
     fi
     
-    # Priority 3: Check for newer bootstrap versions only (removed old fallback)
-    # Bootstrap version changes are critical - always build new if version doesn't match
-    # Old logic that used different bootstrap versions removed for safety
+    # Priority 3: Check remote registry (skip only in local dev mode)
+    if [ "$local_dev_mode" = true ]; then
+        log "🏠 Local dev mode: Skipping remote registry checks" >&2
+        log "🎯 Decision: Build new image from local base (local dev mode)" >&2
+        echo "build_new"
+        return
+    else
+        log "🌐 Checking remote registry..." >&2
+        if check_remote_image "$remote_image_url" "$force_remote_refresh"; then
+            log "🎯 Decision: Use remote image" >&2
+            echo "use_remote|$remote_image_url"
+            return
+        fi
+        log "❌ No remote image found, will build new" >&2
+    fi
     
-    # Priority 4: Build new image
-    log "🎯 Decision: Build new image (no suitable local or remote found)" >&2
+    # Priority 4: Build from scratch
+    log "🎯 Decision: Build new image from scratch (no valid options found)" >&2
     echo "build_new"
 }
 
@@ -493,11 +896,24 @@ execute_caching_decision() {
     local target_image_name="$2"
     local remote_image_url="$3"
     
-    # Debug the decision string
-    log "⚡ Executing decision: '$decision'" >&2
+    # Clean up the decision string in case it got polluted with VM messages
+    # Extract the last line that looks like a valid decision
+    local clean_decision
+    if echo "$decision" | grep -q "guest has stopped\|virtual machine"; then
+        log "⚠️  Decision string appears polluted with VM messages, cleaning..." >&2
+        # Get the last line that looks like a decision (contains build_ or use_)
+        clean_decision=$(echo "$decision" | grep -E "(build_|use_)" | tail -1 || echo "$decision")
+        log "   Original: '$decision'" >&2
+        log "   Cleaned:  '$clean_decision'" >&2
+    else
+        clean_decision="$decision"
+    fi
     
-    local action="${decision%%|*}"
-    local target="${decision#*|}"
+    # Debug the decision string
+    log "⚡ Executing decision: '$clean_decision'" >&2
+    
+    local action="${clean_decision%%|*}"
+    local target="${clean_decision#*|}"
     
     log "  Action: '$action'" >&2
     log "  Target: '$target'" >&2
@@ -520,16 +936,29 @@ execute_caching_decision() {
             return 0
             ;;
             
+        "build_incremental")
+            log "🔄 Building incrementally from compatible base: $target" >&2
+            # Set environment variable for main build logic to know about incremental build
+            export INCREMENTAL_BASE_IMAGE="$target"
+            return 1  # Signal that we need to build
+            ;;
+            
         "build_new")
             log "🏗️  Building new image: $target_image_name" >&2
+            # Clear any incremental base image
+            unset INCREMENTAL_BASE_IMAGE
             return 1  # Signal that we need to build
             ;;
             
         *)
-            log "❌ Unknown decision: '$decision'" >&2
+            log "❌ Unknown decision: '$clean_decision'" >&2
             log "❌ Action was: '$action'" >&2
             log "❌ Target was: '$target'" >&2
             log "❌ This suggests a parsing error in the decision string" >&2
+            log "❌ Original decision was: '$decision'" >&2
+            # Fallback to build_new if we can't parse the decision
+            log "🔄 Falling back to build_new as safe default..." >&2
+            unset INCREMENTAL_BASE_IMAGE
             return 1
             ;;
     esac
@@ -576,14 +1005,29 @@ main() {
     # Parse arguments
     local force_refresh=false
     local cleanup_only=false
+    local force_rebuild_all=false
+    local force_remote_refresh=false
+    local local_dev_mode=false
     for arg in "$@"; do
         case $arg in
             --force-refresh)
                 force_refresh=true
                 shift
                 ;;
+            --force-remote-refresh)
+                force_remote_refresh=true
+                shift
+                ;;
             --cleanup-only)
                 cleanup_only=true
+                shift
+                ;;
+            --force-rebuild-all)
+                force_rebuild_all=true
+                shift
+                ;;
+            --local-dev)
+                local_dev_mode=true
                 shift
                 ;;
             --release=*)
@@ -594,10 +1038,25 @@ main() {
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
                 echo "Options:"
-                echo "  --force-refresh     Force refresh of base image"
-                echo "  --cleanup-only      Clean up old VM images and exit"
-                echo "  --release=VERSION   macOS release version (13, 14) [default: 14]"
-                echo "  --help, -h          Show this help message"
+                echo "  --force-refresh         Force refresh of base image"
+                echo "  --force-remote-refresh  Force re-download of remote images (ignore cache)"
+                echo "  --cleanup-only          Clean up old VM images and exit"
+                echo "  --local-dev             Enable local development mode (skip remote registry)"
+                echo "  --force-rebuild-all     Delete all local VM images and rebuild from scratch"
+                echo "  --release=VERSION       macOS release version (13, 14) [default: 14]"
+                echo "  --help, -h              Show this help message"
+                echo ""
+                echo "Local Development:"
+                echo "  Use --local-dev to skip remote registry checks and work offline"
+                echo "  This mode focuses on local image caching and base image reuse"
+                echo ""
+                echo "Caching Behavior:"
+                echo "  • Local images are automatically cached and reused"
+                echo "  • Remote images are checked and cached after first download"
+                echo "  • Use --force-remote-refresh to get latest remote versions"
+                echo "  • Use --force-refresh to skip all caching and rebuild"
+                echo "  • Use --local-dev to skip remote registry entirely (offline mode)"
+                echo "  • VM validation ensures cached images have required tools"
                 echo ""
                 echo "Environment Variables:"
                 echo "  MACOS_RELEASE       macOS release version (default: 14)"
@@ -606,12 +1065,17 @@ main() {
                 echo "  REGISTRY            Container registry (default: ghcr.io)"
                 echo "  ORGANIZATION        Organization name (default: build-archetype)"
                 echo "  REPOSITORY          Repository name (default: client-oven-sh-bun)"
+                echo "  GITHUB_TOKEN        GitHub token for registry authentication"
+                echo "  GITHUB_USERNAME     GitHub username for registry authentication"
                 echo ""
                 echo "Examples:"
-                echo "  $0                    # Build macOS 14 base image"
-                echo "  $0 --release=13       # Build macOS 13 base image"
-                echo "  $0 --force-refresh    # Force rebuild of base image"
-                echo "  $0 --cleanup-only     # Clean up old images and exit"
+                echo "  $0                        # Build macOS 14 image (check local → remote → build)"
+                echo "  $0 --local-dev            # Local development mode (skip remote registry)"
+                echo "  $0 --release=13           # Build macOS 13 base image"
+                echo "  $0 --force-refresh        # Force rebuild of base image"
+                echo "  $0 --force-remote-refresh # Force re-download of remote images"
+                echo "  $0 --force-rebuild-all    # Delete all local VMs and rebuild"
+                echo "  $0 --cleanup-only         # Clean up old images and exit"
                 exit 0
                 ;;
         esac
@@ -619,6 +1083,74 @@ main() {
     
     # Fix Tart permissions first thing
     fix_tart_permissions
+    
+    # === TEMPORARY INSTALLATION STEP ===
+    # Add any temporary installations here before image operations
+    log "=== TEMPORARY INSTALLATIONS ==="
+    log "🔧 Running temporary installation steps..."
+    
+    # Check and install sshpass (required for VM SSH operations)
+    log "Checking for sshpass..."
+    if ! command -v sshpass >/dev/null 2>&1; then
+        log "🔧 sshpass is required but not found - installing automatically..."
+        
+        # Try to use Homebrew to install sshpass
+        if command -v brew >/dev/null 2>&1; then
+            log "   Installing sshpass via Homebrew..."
+            if brew install sshpass; then
+                log "✅ sshpass installed successfully"
+            else
+                log "❌ Failed to install sshpass via Homebrew"
+                log "   Please install sshpass manually:"
+                log "   brew install sshpass"
+                exit 1
+            fi
+        else
+            log "❌ Homebrew not found - cannot auto-install sshpass"
+            log "   Please install sshpass manually:"
+            log "   1. Install Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+            log "   2. Install sshpass: brew install sshpass"
+            exit 1
+        fi
+        
+        # Verify installation
+        if ! command -v sshpass >/dev/null 2>&1; then
+            log "❌ sshpass installation failed - still not available"
+            exit 1
+        fi
+    else
+        log "✅ sshpass is available"
+    fi
+    
+    log "✅ Temporary installation steps completed"
+    log "=== END TEMPORARY INSTALLATIONS ==="
+    
+    # Handle force rebuild all - delete all bun-build VMs
+    if [ "$force_rebuild_all" = true ]; then
+        log "=== FORCE REBUILD ALL ==="
+        log "🗑️  Deleting all local bun-build VM images..."
+        
+        local tart_output=$(tart list 2>&1)
+        local deleted_count=0
+        
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+) ]]; then
+                local image_name="${BASH_REMATCH[1]}"
+                if [[ "$image_name" =~ ^bun-build- ]]; then
+                    log "  Deleting: $image_name"
+                    if tart delete "$image_name" 2>/dev/null; then
+                        log "    ✅ Deleted successfully"
+                        deleted_count=$((deleted_count + 1))
+                    else
+                        log "    ⚠️  Failed to delete (may not exist)"
+                    fi
+                fi
+            fi
+        done <<< "$tart_output"
+        
+        log "✅ Deleted $deleted_count VM images - will rebuild from scratch"
+        log "=== END FORCE REBUILD ALL ==="
+    fi
     
     # Clean up old VM images to free storage space (do this early!)
     cleanup_old_images
@@ -672,7 +1204,7 @@ main() {
     log "=== SMART CACHING ANALYSIS ==="
     
     # Make intelligent caching decision
-    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh")
+    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh" "$force_remote_refresh" "$local_dev_mode")
     
     log "Caching decision: $caching_decision"
     
@@ -686,17 +1218,42 @@ main() {
     fi
     
     # If we reach here, we need to build a new image
-    log "=== BUILDING NEW BASE IMAGE ==="
-    log "Building new base image for Bun ${BUN_VERSION}..."
-    
-    # Clean up the specific image we're about to build (if it exists)
-    log "Cleaning up target image if it exists: $LOCAL_IMAGE_NAME"
-    tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "Target image doesn't exist (expected)"
-    
-    # Clone base image
-    log "Cloning base image: $BASE_IMAGE"
-    tart clone "$BASE_IMAGE" "$LOCAL_IMAGE_NAME"
-    log "✅ Base image cloned"
+    if [ -n "${INCREMENTAL_BASE_IMAGE:-}" ]; then
+        log "=== BUILDING INCREMENTAL IMAGE ==="
+        log "Building incremental image for Bun ${BUN_VERSION} from base: $INCREMENTAL_BASE_IMAGE"
+        
+        # Clean up the specific image we're about to build (if it exists)
+        log "Cleaning up target image if it exists: $LOCAL_IMAGE_NAME"
+        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "Target image doesn't exist (expected)"
+        
+        # Clone from incremental base instead of raw macOS image
+        log "Cloning from incremental base: $INCREMENTAL_BASE_IMAGE"
+        tart clone "$INCREMENTAL_BASE_IMAGE" "$LOCAL_IMAGE_NAME"
+        log "✅ Incremental base cloned"
+        
+        # Allocate VM resources for build performance
+        log "Allocating VM resources for build performance..."
+        log "  Setting memory: ${MACOS_VM_MEMORY:-6144}MB (${MACOS_VM_CONFIG_DESCRIPTION:-conservative default})"
+        log "  Setting CPUs: ${MACOS_VM_CPU:-4} cores"
+        tart set "$LOCAL_IMAGE_NAME" --memory "${MACOS_VM_MEMORY:-6144}" --cpu "${MACOS_VM_CPU:-4}"
+        log "✅ VM resources allocated"
+        
+        IS_INCREMENTAL_BUILD=true
+    else
+        log "=== BUILDING NEW BASE IMAGE ==="
+        log "Building new base image for Bun ${BUN_VERSION}..."
+        
+        # Clean up the specific image we're about to build (if it exists)
+        log "Cleaning up target image if it exists: $LOCAL_IMAGE_NAME"
+        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "Target image doesn't exist (expected)"
+        
+        # Clone base image
+        log "Cloning base image: $BASE_IMAGE"
+        tart clone "$BASE_IMAGE" "$LOCAL_IMAGE_NAME"
+        log "✅ Base image cloned"
+        
+        IS_INCREMENTAL_BUILD=false
+    fi
     
     # Pass the version to bootstrap script
     log "Making bootstrap script executable..."
@@ -705,11 +1262,11 @@ main() {
     # Start VM with shared directory
     log "Starting VM: $LOCAL_IMAGE_NAME"
     tart run "$LOCAL_IMAGE_NAME" --dir=workspace:"$PWD" --no-graphics &
-VM_PID=$!
+    VM_PID=$!
 
     # Wait for VM to boot
-    log "Waiting for VM to boot (60 seconds)..."
-    sleep 60
+    log "Waiting for VM to boot (reduced from 60s to 2s - retry logic handles slow boots)..."
+    sleep 2
     
     # Get VM IP
     log "Getting VM IP address..."
@@ -721,7 +1278,7 @@ VM_PID=$!
             break
         fi
         log "Attempt $i: waiting for VM IP..."
-        sleep 10
+        sleep 2
     done
     
     if [ -z "$VM_IP" ]; then
@@ -760,15 +1317,15 @@ VM_PID=$!
                 log "❌ Bootstrap failed on attempt $i"
             fi
         else
-            log "SSH attempt $i failed, retrying in 30 seconds..."
+            log "SSH attempt $i failed, retrying in 2 seconds..."
         fi
-        sleep 30
+        sleep 2
     done
     
     if [ "$SSH_SUCCESS" != "true" ]; then
         log "❌ Bootstrap failed after 30 SSH attempts"
         kill $VM_PID 2>/dev/null || true
-    exit 1
+        exit 1
     fi
 
     # Validate that all required tools are installed
@@ -777,7 +1334,7 @@ VM_PID=$!
     
     # Wait for VM to be ready for validation
     log "Waiting for VM to be ready for validation..."
-    sleep 10
+    sleep 2
     
     # Get VM IP for validation
     VM_IP=""
@@ -788,7 +1345,7 @@ VM_PID=$!
             break
         fi
         log "Attempt $i: waiting for VM IP..."
-        sleep 10
+        sleep 2
     done
     
     if [ -z "$VM_IP" ]; then
@@ -832,12 +1389,174 @@ VM_PID=$!
         exit 1
     fi
 
+    # TEMPORARY: Run codesigning environment diagnostics
+    log "=== CODESIGNING ENVIRONMENT DIAGNOSTICS (TEMPORARY) ==="
+    log "Running codesigning environment check for debugging..."
+    
+    local codesigning_check='
+        echo ""
+        echo "=== CODESIGNING & SDK ENVIRONMENT DIAGNOSTICS ==="
+        echo "Checking environment for '"'"'bun build --compile'"'"' / Mach-O generation issues..."
+        echo ""
+        
+        # Check Xcode tools
+        echo "📋 Xcode Developer Tools:"
+        if command -v xcode-select >/dev/null 2>&1; then
+            xcode_path=$(xcode-select -p 2>/dev/null || echo "NOT SET")
+            echo "  ✅ xcode-select: $xcode_path"
+            
+            # Check if the path actually exists
+            if [ -d "$xcode_path" ]; then
+                echo "  ✅ Developer directory exists: $xcode_path"
+            else
+                echo "  ❌ Developer directory missing: $xcode_path"
+            fi
+        else
+            echo "  ❌ xcode-select: NOT FOUND"
+        fi
+        
+        # Check codesigning tools
+        echo ""
+        echo "🔐 Codesigning Tools:"
+        codesign_tools="codesign notarytool xcrun security"
+        for tool in $codesign_tools; do
+            if command -v "$tool" >/dev/null 2>&1; then
+                tool_path=$(which "$tool")
+                echo "  ✅ $tool: $tool_path"
+                
+                # Try to get version if possible
+                case "$tool" in
+                    codesign)
+                        version=$(codesign --version 2>/dev/null || echo "version unknown")
+                        echo "     Version: $version"
+                        ;;
+                    xcrun)
+                        version=$(xcrun --version 2>/dev/null || echo "version unknown")  
+                        echo "     Version: $version"
+                        ;;
+                esac
+            else
+                echo "  ❌ $tool: NOT FOUND"
+            fi
+        done
+        
+        # Check SDK paths and environment variables
+        echo ""
+        echo "🛠️  SDK Environment Variables:"
+        sdk_vars="SDK_PATH XCODE_SDK_PATH DEVELOPER_DIR SDKROOT MACOSX_DEPLOYMENT_TARGET"
+        for var in $sdk_vars; do
+            value=$(eval echo \$"$var")
+            if [ -n "$value" ]; then
+                echo "  ✅ $var: $value"
+                
+                # Check if SDK path actually exists
+                if [[ "$var" == *"SDK"* ]] && [ -n "$value" ]; then
+                    if [ -d "$value" ]; then
+                        echo "     Directory exists: YES"
+                    else
+                        echo "     Directory exists: NO"
+                    fi
+                fi
+            else
+                echo "  ⚠️  $var: NOT SET"
+            fi
+        done
+        
+        # Check SDK using xcrun
+        echo ""
+        echo "📱 macOS SDK Information:"
+        if command -v xcrun >/dev/null 2>&1; then
+            sdk_path=$(xcrun --show-sdk-path 2>/dev/null || echo "FAILED")
+            echo "  SDK Path: $sdk_path"
+            
+            if [ "$sdk_path" != "FAILED" ] && [ -d "$sdk_path" ]; then
+                echo "  ✅ SDK directory exists"
+                
+                sdk_version=$(xcrun --show-sdk-version 2>/dev/null || echo "unknown")
+                echo "  SDK Version: $sdk_version"
+                
+                sdk_platform=$(xcrun --show-sdk-platform-path 2>/dev/null || echo "unknown")
+                echo "  SDK Platform: $sdk_platform"
+                
+                # List some key SDK contents
+                if [ -d "$sdk_path/usr/include" ]; then
+                    echo "  ✅ Headers directory exists: $sdk_path/usr/include"
+                else
+                    echo "  ❌ Headers directory missing: $sdk_path/usr/include"
+                fi
+                
+                if [ -d "$sdk_path/usr/lib" ]; then
+                    echo "  ✅ Libraries directory exists: $sdk_path/usr/lib"
+                else
+                    echo "  ❌ Libraries directory missing: $sdk_path/usr/lib"
+                fi
+            else
+                echo "  ❌ SDK directory does not exist or xcrun failed"
+            fi
+        else
+            echo "  ❌ xcrun not available"
+        fi
+        
+        # Check Command Line Tools
+        echo ""
+        echo "⚒️  Command Line Tools:"
+        if [ -d "/Library/Developer/CommandLineTools" ]; then
+            echo "  ✅ Command Line Tools installed: /Library/Developer/CommandLineTools"
+            
+            if [ -f "/Library/Developer/CommandLineTools/usr/bin/codesign" ]; then
+                echo "  ✅ CommandLineTools codesign: /Library/Developer/CommandLineTools/usr/bin/codesign"
+            else
+                echo "  ❌ CommandLineTools codesign: NOT FOUND"
+            fi
+        else
+            echo "  ❌ Command Line Tools: NOT INSTALLED"
+        fi
+        
+        # Check for potential environment fixes
+        echo ""
+        echo "🔧 Suggested Environment Setup:"
+        if command -v xcrun >/dev/null 2>&1; then
+            suggested_sdk=$(xcrun --show-sdk-path 2>/dev/null)
+            suggested_dev=$(xcode-select -p 2>/dev/null)
+            
+            if [ -n "$suggested_sdk" ]; then
+                echo "  export SDK_PATH=\"$suggested_sdk\""
+                echo "  export XCODE_SDK_PATH=\"$suggested_sdk\""
+                echo "  export SDKROOT=\"$suggested_sdk\""
+            fi
+            
+            if [ -n "$suggested_dev" ]; then
+                echo "  export DEVELOPER_DIR=\"$suggested_dev\""
+            fi
+            
+            echo "  export MACOSX_DEPLOYMENT_TARGET=\"13.0\""
+        else
+            echo "  ❌ Cannot determine proper SDK paths - xcrun not available"
+        fi
+        
+        echo ""
+        echo "=== END CODESIGNING DIAGNOSTICS ==="
+        echo ""
+    '
+    
+    local codesigning_result
+    if codesigning_result=$(sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "$codesigning_check" 2>/dev/null); then
+        echo "$codesigning_result" | while read line; do
+            log "$line"
+        done
+        log "✅ Codesigning environment diagnostics completed"
+    else
+        log "❌ Failed to run codesigning diagnostics in VM"
+    fi
+    
+    log "=== END CODESIGNING DIAGNOSTICS ==="
+
     # Stop the VM gracefully
     log "Shutting down VM..."
     sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "sudo shutdown -h now" || true
     
-    # Wait for VM to stop
-    sleep 30
+    # Wait for VM to stop (reduced from 30s to 2s)
+    sleep 2
     kill $VM_PID 2>/dev/null || true
     
     log "✅ Bootstrap completed successfully"

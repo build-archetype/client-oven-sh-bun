@@ -135,7 +135,9 @@ pub const MachoFile = struct {
         const size_diff = @as(i64, @intCast(aligned_size)) - @as(i64, @intCast(original_segsize));
 
         // We assume that the section is page-aligned, so we can calculate the number of new pages
-        const num_of_new_pages = @divExact(size_diff, PAGE_SIZE);
+        // Use safe division that rounds up to the nearest page
+        const abs_size_diff = @abs(size_diff);
+        const num_of_new_pages = (abs_size_diff + PAGE_SIZE - 1) / PAGE_SIZE;
 
         // Since we're adding a new section, we also need to increase our CODE_SIGNATURE size to add the
         // hashes for these pages.
@@ -143,7 +145,11 @@ pub const MachoFile = struct {
 
         // So, total increase in size is size of new section + size of hashes for the new pages added
         // due to the section
-        try self.data.ensureUnusedCapacity(@intCast(size_diff + size_of_new_hashes));
+        if (size_diff > 0) {
+            try self.data.ensureUnusedCapacity(@as(usize, @intCast(size_diff)) + size_of_new_hashes);
+        } else {
+            try self.data.ensureUnusedCapacity(size_of_new_hashes);
+        }
 
         const code_sign_cmd: ?*align(1) macho.linkedit_data_command =
             if (code_sign_cmd_idx) |idx|

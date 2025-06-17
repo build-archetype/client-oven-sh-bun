@@ -146,10 +146,13 @@ if(UNIX)
   # needed for libuv stubs because they use
   # C23 feature which lets you define parameter without
   # name
-  register_compiler_flags(
-    DESCRIPTION "Allow C23 extensions"
-    -Wno-c23-extensions
-  )
+  # Only add this flag if clang version is 17 or higher
+  if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "17.0.0")
+    register_compiler_flags(
+      DESCRIPTION "Allow C23 extensions"
+      -Wno-c23-extensions
+    )
+  endif()
 endif()
 
 register_compiler_flags(

@@ -105,6 +105,52 @@ async function build(args) {
     }
   }
 
+  // Add Buildkite artifact-based cache flags if environment variables are set
+  if (process.env.BUILDKITE_CACHE_RESTORE === "ON") {
+    generateOptions["-DBUILDKITE_CACHE_RESTORE"] = "ON";
+    console.log("Buildkite cache restore enabled via environment variable");
+  }
+
+  if (process.env.BUILDKITE_CACHE_SAVE === "ON") {
+    generateOptions["-DBUILDKITE_CACHE_SAVE"] = "ON";
+    console.log("Buildkite cache save enabled via environment variable");
+  }
+
+  // Set up persistent cache environment for compilation steps (build-cpp, build-zig)
+  // Skip for linking step which should always be fresh
+  if (process.env.BUILDKITE_CACHE_TYPE === "persistent" && process.env.BUN_LINK_ONLY !== "ON") {
+    console.log("🔧 Setting up persistent cache environment for macOS compilation...");
+
+    const cacheBase = process.env.BUILDKITE_CACHE_BASE || "./buildkite-cache";
+
+    // Ensure cache directories exist
+    if (!existsSync(cacheBase)) {
+      mkdirSync(cacheBase, { recursive: true });
+      mkdirSync(`${cacheBase}/zig/global`, { recursive: true });
+      mkdirSync(`${cacheBase}/zig/local`, { recursive: true });
+      mkdirSync(`${cacheBase}/ccache`, { recursive: true });
+      mkdirSync(`${cacheBase}/npm`, { recursive: true });
+    }
+
+    // Set environment variables for build tools
+    process.env.ZIG_GLOBAL_CACHE_DIR = `${cacheBase}/zig/global`;
+    process.env.ZIG_LOCAL_CACHE_DIR = `${cacheBase}/zig/local`;
+    process.env.CCACHE_DIR = `${cacheBase}/ccache`;
+    process.env.NPM_CONFIG_CACHE = `${cacheBase}/npm`;
+
+    // Override CMake's ccache directory detection with our persistent cache
+    generateOptions["-DCCACHE_DIR_OVERRIDE"] = cmakePath(`${cacheBase}/ccache`);
+    generateOptions["-DZIG_GLOBAL_CACHE_DIR_OVERRIDE"] = cmakePath(`${cacheBase}/zig/global`);
+    generateOptions["-DZIG_LOCAL_CACHE_DIR_OVERRIDE"] = cmakePath(`${cacheBase}/zig/local`);
+
+    console.log("✅ Persistent cache environment configured:");
+    console.log(`   Cache base: ${cacheBase}`);
+    console.log(`   CCACHE_DIR=${process.env.CCACHE_DIR}`);
+    console.log(`   ZIG_GLOBAL_CACHE_DIR=${process.env.ZIG_GLOBAL_CACHE_DIR}`);
+    console.log(`   ZIG_LOCAL_CACHE_DIR=${process.env.ZIG_LOCAL_CACHE_DIR}`);
+    console.log(`   CMake overrides: CCACHE_DIR_OVERRIDE, ZIG_*_CACHE_DIR_OVERRIDE`);
+  }
+
   const toolchain = generateOptions["--toolchain"];
   if (toolchain) {
     const toolchainPath = resolve(import.meta.dirname, "..", "cmake", "toolchains", `${toolchain}.cmake`);
@@ -126,11 +172,43 @@ async function build(args) {
     }
   }
 
+  // Cache restore step (before main build)
+  if (process.env.BUILDKITE_CACHE_RESTORE === "ON") {
+    // Skip CMake cache operations for persistent cache (handled by rsync)
+    if (process.env.BUILDKITE_CACHE_TYPE === "persistent") {
+      console.log("Skipping CMake cache restore (using persistent workspace cache)");
+    } else {
+      console.log("Running cache restore step...");
+      try {
+        await startGroup("Cache Restore", () =>
+          spawn("cmake", ["--build", buildPath, "--target", "cache-restore"], { env }),
+        );
+      } catch (error) {
+        console.warn("Cache restore failed (continuing with build):", error.message);
+      }
+    }
+  }
+
   const buildArgs = Object.entries(buildOptions)
     .sort(([a], [b]) => (a === "--build" ? -1 : a.localeCompare(b)))
     .flatMap(([flag, value]) => [flag, value]);
 
   await startGroup("CMake Build", () => spawn("cmake", buildArgs, { env }));
+
+  // Cache save step (after main build)
+  if (process.env.BUILDKITE_CACHE_SAVE === "ON") {
+    // Skip CMake cache operations for persistent cache (handled by rsync)
+    if (process.env.BUILDKITE_CACHE_TYPE === "persistent") {
+      console.log("Skipping CMake cache save (using persistent workspace cache)");
+    } else {
+      console.log("Running cache save step...");
+      try {
+        await startGroup("Cache Save", () => spawn("cmake", ["--build", buildPath, "--target", "cache-save"], { env }));
+      } catch (error) {
+        console.warn("Cache save failed:", error.message);
+      }
+    }
+  }
 
   printDuration("total", Date.now() - startTime);
 }
@@ -218,7 +296,7 @@ async function spawn(command, args, options, label) {
 
   label ??= basename(command);
 
-  const pipe = process.env.CI === "true";
+  const pipe = process.env.CI === "true" && !(options?.stdio === "inherit");
   const subprocess = nodeSpawn(command, effectiveArgs, {
     stdio: pipe ? "pipe" : "inherit",
     ...options,
@@ -232,7 +310,7 @@ async function spawn(command, args, options, label) {
   let stdoutBuffer = "";
 
   let done;
-  if (pipe) {
+  if (pipe && subprocess.stdout && subprocess.stderr) {
     const stdout = new Promise(resolve => {
       subprocess.stdout.on("end", resolve);
       subprocess.stdout.on("data", data => {

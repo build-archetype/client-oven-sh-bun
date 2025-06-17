@@ -229,17 +229,34 @@ if [ "$goto_privileged_setup" = false ]; then
     case "$MONITORING_TYPE" in
       grafana-cloud)
         echo_color "$BLUE" "Grafana Cloud Configuration:"
-        if [ -z "${GRAFANA_CLOUD_USER:-}" ]; then
-          prompt_text GRAFANA_CLOUD_USER "Enter Grafana Cloud username/instance ID"
+        
+        # Support new official GCLOUD_* environment variables first, then fall back to old ones
+        if [ -z "${GCLOUD_HOSTED_METRICS_ID:-}" ] && [ -z "${GRAFANA_CLOUD_USER:-}" ]; then
+          prompt_text GCLOUD_HOSTED_METRICS_ID "Enter Grafana Cloud organization ID"
+        elif [ -n "${GRAFANA_CLOUD_USER:-}" ] && [ -z "${GCLOUD_HOSTED_METRICS_ID:-}" ]; then
+          # Backward compatibility: use old variable if new one not set
+          GCLOUD_HOSTED_METRICS_ID="$GRAFANA_CLOUD_USER"
         fi
-        if [ -z "${GRAFANA_CLOUD_API_KEY:-}" ]; then
-          prompt_secret GRAFANA_CLOUD_API_KEY "Enter Grafana Cloud API key"
+        
+        if [ -z "${GCLOUD_RW_API_KEY:-}" ] && [ -z "${GRAFANA_CLOUD_API_KEY:-}" ]; then
+          prompt_secret GCLOUD_RW_API_KEY "Enter Grafana Cloud API key"
+        elif [ -n "${GRAFANA_CLOUD_API_KEY:-}" ] && [ -z "${GCLOUD_RW_API_KEY:-}" ]; then
+          # Backward compatibility: use old variable if new one not set
+          GCLOUD_RW_API_KEY="$GRAFANA_CLOUD_API_KEY"
         fi
-        if [ -z "${GRAFANA_CLOUD_PROMETHEUS_URL:-}" ]; then
-          prompt_text GRAFANA_CLOUD_PROMETHEUS_URL "Enter Prometheus endpoint URL" "https://prometheus-prod-XX-XXX.grafana.net/api/prom/push"
+        
+        if [ -z "${GCLOUD_HOSTED_METRICS_URL:-}" ] && [ -z "${GRAFANA_CLOUD_PROMETHEUS_URL:-}" ]; then
+          prompt_text GCLOUD_HOSTED_METRICS_URL "Enter Prometheus endpoint URL" "https://prometheus-prod-XX-prod-us-east-0.grafana.net/api/prom/push"
+        elif [ -n "${GRAFANA_CLOUD_PROMETHEUS_URL:-}" ] && [ -z "${GCLOUD_HOSTED_METRICS_URL:-}" ]; then
+          # Backward compatibility: use old variable if new one not set
+          GCLOUD_HOSTED_METRICS_URL="$GRAFANA_CLOUD_PROMETHEUS_URL"
         fi
-        if [ -z "${GRAFANA_CLOUD_LOKI_URL:-}" ]; then
-          prompt_text GRAFANA_CLOUD_LOKI_URL "Enter Loki endpoint URL" "https://logs-prod-XXX.grafana.net/loki/api/v1/push"
+        
+        if [ -z "${GCLOUD_HOSTED_LOGS_URL:-}" ] && [ -z "${GRAFANA_CLOUD_LOKI_URL:-}" ]; then
+          prompt_text GCLOUD_HOSTED_LOGS_URL "Enter Loki endpoint URL" "https://logs-prod-XXX-prod-us-east-0.grafana.net/loki/api/v1/push"
+        elif [ -n "${GRAFANA_CLOUD_LOKI_URL:-}" ] && [ -z "${GCLOUD_HOSTED_LOGS_URL:-}" ]; then
+          # Backward compatibility: use old variable if new one not set
+          GCLOUD_HOSTED_LOGS_URL="$GRAFANA_CLOUD_LOKI_URL"
         fi
         ;;
       self-hosted)
@@ -281,10 +298,10 @@ if [ "$goto_privileged_setup" = false ]; then
     echo_color "$BLUE" "Storing monitoring credentials in secure keychain..."
     case "$MONITORING_TYPE" in
       grafana-cloud)
-        security add-generic-password -a "bun-ci" -s "grafana-cloud-user" -w "$GRAFANA_CLOUD_USER" -k "$CI_KEYCHAIN"
-        security add-generic-password -a "bun-ci" -s "grafana-cloud-api-key" -w "$GRAFANA_CLOUD_API_KEY" -k "$CI_KEYCHAIN"
-        security add-generic-password -a "bun-ci" -s "grafana-cloud-prometheus-url" -w "$GRAFANA_CLOUD_PROMETHEUS_URL" -k "$CI_KEYCHAIN"
-        security add-generic-password -a "bun-ci" -s "grafana-cloud-loki-url" -w "$GRAFANA_CLOUD_LOKI_URL" -k "$CI_KEYCHAIN"
+        security add-generic-password -a "bun-ci" -s "gcloud-hosted-metrics-id" -w "$GCLOUD_HOSTED_METRICS_ID" -k "$CI_KEYCHAIN"
+        security add-generic-password -a "bun-ci" -s "gcloud-rw-api-key" -w "$GCLOUD_RW_API_KEY" -k "$CI_KEYCHAIN"
+        security add-generic-password -a "bun-ci" -s "gcloud-hosted-metrics-url" -w "$GCLOUD_HOSTED_METRICS_URL" -k "$CI_KEYCHAIN"
+        security add-generic-password -a "bun-ci" -s "gcloud-hosted-logs-url" -w "$GCLOUD_HOSTED_LOGS_URL" -k "$CI_KEYCHAIN"
         ;;
       self-hosted)
         security add-generic-password -a "bun-ci" -s "prometheus-url" -w "$PROMETHEUS_URL" -k "$CI_KEYCHAIN"
@@ -389,10 +406,10 @@ if [ "$goto_privileged_setup" = false ]; then
     echo "  Monitoring Type:          $MONITORING_TYPE"
     case "$MONITORING_TYPE" in
       grafana-cloud)
-        echo "  Grafana Cloud User:       $GRAFANA_CLOUD_USER"
+        echo "  Grafana Cloud Org ID:     $GCLOUD_HOSTED_METRICS_ID"
         echo "  Grafana Cloud API Key:    [hidden]"
-        echo "  Prometheus URL:           $GRAFANA_CLOUD_PROMETHEUS_URL"
-        echo "  Loki URL:                 $GRAFANA_CLOUD_LOKI_URL" ;;
+        echo "  Prometheus URL:           $GCLOUD_HOSTED_METRICS_URL"
+        echo "  Loki URL:                 $GCLOUD_HOSTED_LOGS_URL" ;;
       self-hosted)
         echo "  Prometheus URL:           $PROMETHEUS_URL"
         echo "  Loki URL:                 $LOKI_URL"
@@ -537,21 +554,6 @@ if [ "$goto_privileged_setup" = false ]; then
       fi
     else
       echo_color "$GREEN" "✅ Tart is already installed."
-    fi
-
-    # Install sshpass
-    if ! command -v sshpass &> /dev/null; then
-      echo_color "$YELLOW" "Installing sshpass for VM access..."
-      # Ensure cirruslabs tap is available
-      brew tap cirruslabs/cli || echo_color "$YELLOW" "⚠️ cirruslabs tap already added or failed"
-      brew install cirruslabs/cli/sshpass || echo_color "$YELLOW" "⚠️ Failed to install sshpass"
-      if command -v sshpass &> /dev/null; then
-        echo_color "$GREEN" "✅ sshpass installed successfully"
-      else
-        echo_color "$YELLOW" "⚠️ sshpass installation may have failed - VM access may not work"
-      fi
-    else
-      echo_color "$GREEN" "✅ sshpass is already installed"
     fi
 
     echo_color "$GREEN" "✅ All dependencies installed"
@@ -749,6 +751,51 @@ else
   exit 1
 fi
 
+# --- Install sshpass as the CI user ---
+echo_color "$BLUE" "Installing sshpass for $REAL_USER..."
+
+# Install sshpass as the CI user (needed for VM access)
+echo_color "$BLUE" "Installing sshpass as $REAL_USER..."
+if sudo -u "$REAL_USER" bash -c '
+  # Load Homebrew environment
+  if [ -f "/opt/homebrew/bin/brew" ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [ -f "/usr/local/bin/brew" ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+  
+  # Add cirruslabs tap and install sshpass
+  brew tap cirruslabs/cli || echo "Tap already exists or failed"
+  brew install cirruslabs/cli/sshpass
+'; then
+  echo_color "$GREEN" "✅ sshpass installed successfully for $REAL_USER"
+else
+  echo_color "$YELLOW" "⚠️ Failed to install sshpass for $REAL_USER (non-critical for basic CI)"
+fi
+
+# Verify sshpass installation as the CI user
+echo_color "$BLUE" "Verifying sshpass installation for $REAL_USER..."
+if sudo -u "$REAL_USER" bash -c '
+  if [ -f "/opt/homebrew/bin/brew" ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [ -f "/usr/local/bin/brew" ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+  command -v sshpass
+' >/dev/null; then
+  SSHPASS_VERSION=$(sudo -u "$REAL_USER" bash -c '
+    if [ -f "/opt/homebrew/bin/brew" ]; then
+      eval "$(/opt/homebrew/bin/brew shellenv)"
+    elif [ -f "/usr/local/bin/brew" ]; then
+      eval "$(/usr/local/bin/brew shellenv)"
+    fi
+    sshpass -V 2>&1 | head -1 || echo "version unknown"
+  ')
+  echo_color "$GREEN" "✅ sshpass verified for $REAL_USER: $SSHPASS_VERSION"
+else
+  echo_color "$YELLOW" "⚠️ sshpass not accessible for $REAL_USER (VM access may not work)"
+fi
+
 # --- Configure monitoring (if enabled) ---
 if [ "${MONITORING_ENABLED:-false}" = true ]; then
   echo_color "$BLUE" "Configuring monitoring and logging..."
@@ -782,10 +829,10 @@ if [ "${MONITORING_ENABLED:-false}" = true ]; then
   case "${MONITORING_TYPE:-grafana-cloud}" in
     grafana-cloud)
       # Load Grafana Cloud credentials
-      GRAFANA_CLOUD_USER=$(security find-generic-password -a "bun-ci" -s "grafana-cloud-user" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "")
-      GRAFANA_CLOUD_API_KEY=$(security find-generic-password -a "bun-ci" -s "grafana-cloud-api-key" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "")
-      GRAFANA_CLOUD_PROMETHEUS_URL=$(security find-generic-password -a "bun-ci" -s "grafana-cloud-prometheus-url" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "")
-      GRAFANA_CLOUD_LOKI_URL=$(security find-generic-password -a "bun-ci" -s "grafana-cloud-loki-url" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "")
+      GCLOUD_HOSTED_METRICS_ID=$(security find-generic-password -a "bun-ci" -s "gcloud-hosted-metrics-id" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "")
+      GCLOUD_RW_API_KEY=$(security find-generic-password -a "bun-ci" -s "gcloud-rw-api-key" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "")
+      GCLOUD_HOSTED_METRICS_URL=$(security find-generic-password -a "bun-ci" -s "gcloud-hosted-metrics-url" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "")
+      GCLOUD_HOSTED_LOGS_URL=$(security find-generic-password -a "bun-ci" -s "gcloud-hosted-logs-url" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "")
       
       cat > "$REAL_HOME/.alloy/config.alloy" << EOF
 // Grafana Alloy configuration for Bun CI monitoring
@@ -861,10 +908,10 @@ prometheus.relabel "add_labels" {
 // Send metrics to Grafana Cloud
 prometheus.remote_write "grafana_cloud" {
   endpoint {
-    url = "$GRAFANA_CLOUD_PROMETHEUS_URL"
+    url = "$GCLOUD_HOSTED_METRICS_URL"
     basic_auth {
-      username = "$GRAFANA_CLOUD_USER"
-      password = "$GRAFANA_CLOUD_API_KEY"
+      username = "$GCLOUD_HOSTED_METRICS_ID"
+      password = "$GCLOUD_RW_API_KEY"
     }
   }
 }
@@ -1028,10 +1075,10 @@ loki.relabel "builds" {
 // Send logs to Grafana Cloud
 loki.write "grafana_cloud" {
   endpoint {
-    url = "$GRAFANA_CLOUD_LOKI_URL"
+    url = "$GCLOUD_HOSTED_LOGS_URL"
     basic_auth {
-      username = "$GRAFANA_CLOUD_USER"
-      password = "$GRAFANA_CLOUD_API_KEY"
+      username = "$GCLOUD_HOSTED_METRICS_ID"
+      password = "$GCLOUD_RW_API_KEY"
     }
   }
 }
@@ -1276,6 +1323,39 @@ else
     ls -la "$REAL_HOME/.buildkite-agent/hooks/" || echo "Directory does not exist"
 fi
 
+# --- Set hostname to match Buildkite agent name ---
+echo_color "$BLUE" "Setting hostname to match Buildkite agent name..."
+
+# Get the Buildkite agent name from the configuration file
+BUILDKITE_AGENT_NAME=""
+if [ -f "$REAL_HOME/.buildkite-agent/buildkite-agent.cfg" ]; then
+    BUILDKITE_AGENT_NAME=$(grep '^name=' "$REAL_HOME/.buildkite-agent/buildkite-agent.cfg" | cut -d'=' -f2 | tr -d '"')
+elif [ -f "/opt/homebrew/etc/buildkite-agent/buildkite-agent.cfg" ]; then
+    BUILDKITE_AGENT_NAME=$(grep '^name=' "/opt/homebrew/etc/buildkite-agent/buildkite-agent.cfg" | cut -d'=' -f2 | tr -d '"')
+fi
+
+if [ -n "$BUILDKITE_AGENT_NAME" ]; then
+    echo_color "$BLUE" "Setting hostname to: $BUILDKITE_AGENT_NAME"
+    
+    # Set hostname using scutil
+    if sudo scutil --set HostName "$BUILDKITE_AGENT_NAME" && \
+       sudo scutil --set LocalHostName "$BUILDKITE_AGENT_NAME" && \
+       sudo scutil --set ComputerName "$BUILDKITE_AGENT_NAME"; then
+        echo_color "$GREEN" "✅ Hostname successfully set to: $BUILDKITE_AGENT_NAME"
+        
+        # Flush DNS cache to ensure the hostname change takes effect
+        echo_color "$BLUE" "Flushing DNS cache..."
+        sudo dscacheutil -flushcache
+        sudo killall -HUP mDNSResponder 2>/dev/null || true
+        
+        echo_color "$GREEN" "✅ DNS cache flushed"
+    else
+        echo_color "$YELLOW" "⚠️  Failed to set hostname (non-fatal)"
+    fi
+else
+    echo_color "$YELLOW" "⚠️  Could not determine Buildkite agent name for hostname (non-fatal)"
+fi
+
 # VPN setup (if enabled)
 if [ "$VPN_ENABLED" = true ]; then
   case "$VPN_TYPE" in
@@ -1295,39 +1375,77 @@ PersistentKeepalive = 25
 EOF
       ;;
     tailscale)
-      # Ensure tailscaled is running
-      if [ -f "/opt/homebrew/bin/brew" ]; then
-        sudo -u "$REAL_USER" /opt/homebrew/bin/brew services start tailscale
-      elif [ -f "/usr/local/bin/brew" ]; then
-        sudo -u "$REAL_USER" /usr/local/bin/brew services start tailscale
+      # Install Tailscale system daemon (more reliable than brew services)
+      echo_color "$BLUE" "Installing Tailscale system daemon..."
+      
+      # Clean up any existing installations
+      if command -v tailscaled &>/dev/null; then
+        echo_color "$BLUE" "Cleaning up existing Tailscale installation..."
+        sudo /opt/homebrew/bin/tailscaled --cleanup 2>/dev/null || true
       fi
+      
+      # Install as system daemon
+      if sudo /opt/homebrew/bin/tailscaled install-system-daemon; then
+        echo_color "$GREEN" "✅ Tailscale system daemon installed successfully"
+      else
+        echo_color "$RED" "❌ Failed to install Tailscale system daemon"
+        exit 1
+      fi
+      
+      # Wait for daemon to be ready
+      echo_color "$BLUE" "Waiting for Tailscale daemon to be ready..."
+      for i in {1..30}; do
+        if tailscale status --json &>/dev/null 2>&1; then
+          echo_color "$GREEN" "Tailscale daemon is ready!"
+          break
+        fi
+        if [ $i -eq 30 ]; then
+          echo_color "$RED" "Tailscale daemon failed to start within timeout"
+          exit 1
+        fi
+        sleep 1
+      done
+      
+      # Connect to Tailscale network
       if [ -n "${TAILSCALE_AUTH_KEY-}" ]; then
-        # Start Tailscale with auth key
-        echo_color "$BLUE" "Starting Tailscale with auth key..."
-        tailscale up --authkey="$TAILSCALE_AUTH_KEY" --hostname="bun-ci-$(hostname)"
+        # Use auth key for automatic connection
+        echo_color "$BLUE" "Connecting to Tailscale network with auth key..."
+        TAILSCALE_HOSTNAME="$(hostname -s)"
+        
+        if tailscale up --authkey="$TAILSCALE_AUTH_KEY" --hostname="$TAILSCALE_HOSTNAME" --accept-routes --accept-dns=false; then
+          echo_color "$GREEN" "✅ Successfully connected to Tailscale network"
+        else
+          echo_color "$RED" "❌ Failed to connect to Tailscale network"
+          exit 1
+        fi
 
-        # Wait for Tailscale to be ready
-        echo_color "$BLUE" "Waiting for Tailscale to be ready..."
+        # Wait for Tailscale to be fully connected
+        echo_color "$BLUE" "Waiting for Tailscale connection to stabilize..."
         for i in {1..30}; do
-          if tailscale status &>/dev/null; then
-            echo_color "$GREEN" "Tailscale is ready!"
+          if tailscale status &>/dev/null && [ "$(tailscale status --json 2>/dev/null | jq -r '.BackendState' 2>/dev/null || echo 'Unknown')" = "Running" ]; then
+            echo_color "$GREEN" "Tailscale is fully connected!"
             break
           fi
           if [ $i -eq 30 ]; then
-            echo_color "$RED" "Tailscale failed to start within timeout"
-            exit 1
+            echo_color "$YELLOW" "⚠️  Tailscale connection may not be fully stable yet"
+            break
           fi
-          sleep 1
+          sleep 2
         done
 
-        # Get Tailscale IP
-        TAILSCALE_IP=$(tailscale ip --1)
-        echo_color "$GREEN" "Tailscale IP: $TAILSCALE_IP"
-
-        # Configure SSH access
-        echo_color "$BLUE" "Configuring SSH access..."
-        mkdir -p /etc/ssh/sshd_config.d
-        cat > /etc/ssh/sshd_config.d/tailscale.conf << EOF
+        # Get and display Tailscale information
+        TAILSCALE_IP=$(tailscale ip --4 2>/dev/null || echo "IP not available")
+        TAILSCALE_HOSTNAME_ACTUAL=$(tailscale status --json 2>/dev/null | jq -r '.Self.HostName' 2>/dev/null || echo "Unknown")
+        
+        echo_color "$GREEN" "✅ Tailscale connection details:"
+        echo_color "$GREEN" "  - Hostname: $TAILSCALE_HOSTNAME_ACTUAL"
+        echo_color "$GREEN" "  - IP Address: $TAILSCALE_IP"
+        
+        # Configure SSH access for Tailscale
+        if [ "$TAILSCALE_IP" != "IP not available" ]; then
+          echo_color "$BLUE" "Configuring SSH access for Tailscale..."
+          mkdir -p /etc/ssh/sshd_config.d
+          cat > /etc/ssh/sshd_config.d/tailscale.conf << EOF
 # Allow Tailscale IPs
 Match Address ${TAILSCALE_IP}
     PermitRootLogin no
@@ -1336,38 +1454,46 @@ Match Address ${TAILSCALE_IP}
     AllowGroups buildkite-agent wheel
 EOF
 
-        # Enable and restart SSH server to apply changes (macOS)
-        echo_color "$BLUE" "Ensuring SSH server is enabled..."
-        # Check for Full Disk Access by attempting a harmless systemsetup command
-        FDA_CHECK_OUTPUT=$(sudo systemsetup -getremotelogin 2>&1)
-        if echo "$FDA_CHECK_OUTPUT" | grep -q "Full Disk Access"; then
-          echo_color "$YELLOW" "\nIMPORTANT: macOS requires your Terminal app to have Full Disk Access to enable Remote Login (SSH) from the command line."
-          echo_color "$YELLOW" "If you see a permissions error, follow these steps:"
-          echo_color "$YELLOW" "1. Open System Settings → Privacy & Security → Full Disk Access."
-          echo_color "$YELLOW" "2. Click the + button and add your Terminal app (e.g., Terminal, iTerm)."
-          echo_color "$YELLOW" "3. Quit and reopen your Terminal app, then re-run this script."
-          echo_color "$YELLOW" "\nAfter granting access and restarting, re-run this script."
-          echo_color "$YELLOW" "Press SPACEBAR to exit."
-          # Wait for spacebar
-          while true; do
-            read -rsn1 key
-            if [[ $key == " " ]]; then
-              break
+          # Enable SSH with Full Disk Access check
+          echo_color "$BLUE" "Enabling SSH access..."
+          FDA_CHECK_OUTPUT=$(sudo systemsetup -getremotelogin 2>&1)
+          if echo "$FDA_CHECK_OUTPUT" | grep -q "Full Disk Access"; then
+            echo_color "$YELLOW" "\n⚠️  Cannot enable SSH automatically - Full Disk Access required"
+            echo_color "$YELLOW" "To enable SSH manually after setup completes:"
+            echo_color "$YELLOW" "  1. Grant Full Disk Access: System Settings → Privacy & Security → Full Disk Access → Add Terminal"
+            echo_color "$YELLOW" "  2. Enable SSH: System Settings → General → Sharing → Remote Login → Turn On"
+            echo_color "$YELLOW" "  3. Or run: sudo systemsetup -setremotelogin on"
+            echo_color "$BLUE" "SSH configuration file created at: /etc/ssh/sshd_config.d/tailscale.conf"
+          else
+            # Full Disk Access available, enable SSH
+            if sudo systemsetup -setremotelogin on; then
+              echo_color "$GREEN" "✅ SSH enabled successfully"
+              
+              # Try to restart SSH daemon if the service exists
+              if sudo launchctl list | grep -q com.openssh.sshd; then
+                echo_color "$BLUE" "Restarting SSH daemon..."
+                sudo launchctl kickstart -k system/com.openssh.sshd
+              fi
+              
+              echo_color "$GREEN" "✅ SSH access configured for Tailscale IP: $TAILSCALE_IP"
+              echo_color "$GREEN" "You can now connect via: ssh $REAL_USER@$TAILSCALE_IP"
+            else
+              echo_color "$YELLOW" "⚠️  Failed to enable SSH automatically"
+              echo_color "$YELLOW" "Enable manually: System Settings → General → Sharing → Remote Login"
             fi
-          done
-          exit 1
-        fi
-        sudo systemsetup -setremotelogin on
-        # Try to restart SSH daemon if the service exists
-        if sudo launchctl list | grep -q com.openssh.sshd; then
-          echo_color "$BLUE" "Restarting SSH daemon..."
-          sudo launchctl kickstart -k system/com.openssh.sshd
+          fi
         else
-          echo_color "$YELLOW" "SSH daemon service not found; enabled SSH but did not restart (may not be needed on this macOS version)."
+          echo_color "$YELLOW" "⚠️  Could not configure SSH - Tailscale IP not available"
         fi
+        
       else
-        echo_color "$YELLOW" "No Tailscale auth key provided. Starting Tailscale in interactive mode..."
-        tailscale up --hostname="bun-ci-$(hostname)"
+        echo_color "$YELLOW" "No Tailscale auth key provided. Starting in interactive mode..."
+        echo_color "$BLUE" "You'll need to authenticate manually:"
+        echo_color "$BLUE" "  1. Run: tailscale up --hostname=\"$(hostname -s)\""
+        echo_color "$BLUE" "  2. Follow the authentication URL that appears"
+        
+        # Still try to run tailscale up for the URL
+        tailscale up --hostname="$(hostname -s)" --accept-routes --accept-dns=false || true
       fi
       ;;
     unifi)
@@ -1561,11 +1687,11 @@ CRITICAL_TOOLS=(
   "git:Git"
   "tart:Tart VM"
   "jq:JSON processor"
+  "sshpass:SSH password utility"
 )
 
 # Optional tools
 OPTIONAL_TOOLS=(
-  "sshpass:SSH password utility"
   "tailscale:Tailscale VPN"
   "cmake:CMake build system"
   "ninja:Ninja build system"
@@ -1619,6 +1745,15 @@ verify_tool() {
             eval \"\$(/usr/local/bin/brew shellenv)\"
           fi
           tart --version 2>/dev/null
+        " 2>/dev/null))" ;;
+      "sshpass") 
+        version=" ($(sudo -u "$REAL_USER" bash -c "
+          if [ -f '/opt/homebrew/bin/brew' ]; then
+            eval \"\$(/opt/homebrew/bin/brew shellenv)\"
+          elif [ -f '/usr/local/bin/brew' ]; then
+            eval \"\$(/usr/local/bin/brew shellenv)\"
+          fi
+          sshpass -V 2>&1 | head -1 | grep -o '[0-9][0-9.]*' || echo 'version unknown'
         " 2>/dev/null))" ;;
       *) version="" ;;
     esac
