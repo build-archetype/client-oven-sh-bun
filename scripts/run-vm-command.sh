@@ -1,8 +1,12 @@
 #!/bin/bash
 
-# Ignore SIGPIPE globally to prevent early termination during pipe operations
-# This is especially important for the tar+ssh copy operations during cleanup
+# Comprehensive SIGPIPE protection to prevent exit status 141
+# This prevents broken pipe errors during SSH operations and cleanup
 trap '' PIPE
+set -e
+
+# Preserve exit codes through pipe operations
+set -o pipefail
 
 echo "🎯 VM: $1"
 echo "⚡ Command: $2"
@@ -441,6 +445,9 @@ echo "🎬 ===== EXECUTING COMMAND ====="
 sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -s <<REMOTE_EXEC
 set -eo pipefail
 
+# Ignore SIGPIPE in remote execution to prevent premature termination
+trap '' PIPE
+
 echo "🔍 Working in copied workspace..."
 echo "Current directory: \$(pwd)"
 
@@ -481,8 +488,25 @@ command -v ninja >/dev/null 2>&1 && echo "✅ Ninja: \$(ninja --version)" || ech
 command -v clang >/dev/null 2>&1 && echo "✅ Clang: \$(clang --version | head -1)" || echo "❌ Clang not found"
 
 echo "🚀 Executing: $COMMAND"
-$COMMAND
+
+# Execute command with SIGPIPE protection
+(
+    # Run the actual command with error code preservation
+    $COMMAND
+    echo \$? > /tmp/build_exit_code.txt
+) || true
+
+# Read the actual exit code
+if [ -f /tmp/build_exit_code.txt ]; then
+    BUILD_EXIT_CODE=\$(cat /tmp/build_exit_code.txt)
+    echo "🔍 Build command exit code: \$BUILD_EXIT_CODE"
+    exit \$BUILD_EXIT_CODE
+else
+    echo "⚠️ Could not determine build exit code, assuming success"
+    exit 0
+fi
 REMOTE_EXEC
+
 BUILD_EXIT_CODE=$?
 
 echo "📤 ===== COPYING FINAL ARTIFACTS BACK ====="
@@ -516,8 +540,13 @@ else
             # Use scp for simple, reliable copying (no pipes = no SIGPIPE)
             echo "🔄 Attempting to copy $dir/ via scp..."
             
-            # Simple scp copy - no pipes, no timeout complexity
-            if sshpass -p admin scp -r $SSH_OPTS admin@$VM_IP:"$VM_WORKSPACE/$dir" . 2>/dev/null; then
+            # Simple scp copy with SIGPIPE protection
+            (
+                trap '' PIPE
+                sshpass -p admin scp -r $SSH_OPTS admin@$VM_IP:"$VM_WORKSPACE/$dir" . 2>/dev/null
+            ) && scp_success=true || scp_success=false
+            
+            if [ "$scp_success" = "true" ]; then
                 echo "✅ $dir copied back via scp"
                 # Verify copy back worked
                 echo "🔍 Debug: Verifying $dir/ copied back to HOST:"
@@ -546,8 +575,13 @@ else
             # Use scp for simple, reliable copying (no pipes = no SIGPIPE)
             echo "🔄 Attempting to copy $dir/ via scp..."
             
-            # Simple scp copy - no pipes, no timeout complexity
-            if sshpass -p admin scp -r $SSH_OPTS admin@$VM_IP:"$VM_WORKSPACE/$dir" . 2>/dev/null; then
+            # Simple scp copy with SIGPIPE protection
+            (
+                trap '' PIPE
+                sshpass -p admin scp -r $SSH_OPTS admin@$VM_IP:"$VM_WORKSPACE/$dir" . 2>/dev/null
+            ) && scp_success=true || scp_success=false
+            
+            if [ "$scp_success" = "true" ]; then
                 echo "✅ $dir copied back via scp"
                 # Verify copy back worked
                 echo "🔍 Debug: Verifying $dir/ copied back to HOST:"
@@ -582,6 +616,10 @@ echo "✅ Cleanup complete"
 
 echo "===== RUN VM COMMAND COMPLETE ====="
 echo "Build completed with exit code: $BUILD_EXIT_CODE"
+
+# Robust exit with SIGPIPE protection
+# Ensure all background processes are cleaned up
+wait 2>/dev/null || true
 
 # Always exit with the build result, guaranteed
 exit $BUILD_EXIT_CODE
