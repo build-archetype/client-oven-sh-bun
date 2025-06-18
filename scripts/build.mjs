@@ -116,41 +116,6 @@ async function build(args) {
     console.log("Buildkite cache save enabled via environment variable");
   }
 
-  // Set up persistent cache environment for compilation steps (build-cpp, build-zig)
-  // Skip for linking step which should always be fresh
-  if (process.env.BUILDKITE_CACHE_TYPE === "persistent" && process.env.BUN_LINK_ONLY !== "ON") {
-    console.log("🔧 Setting up persistent cache environment for macOS compilation...");
-    
-    const cacheBase = process.env.BUILDKITE_CACHE_BASE || "./buildkite-cache";
-    
-    // Ensure cache directories exist
-    if (!existsSync(cacheBase)) {
-      mkdirSync(cacheBase, { recursive: true });
-      mkdirSync(`${cacheBase}/zig/global`, { recursive: true });
-      mkdirSync(`${cacheBase}/zig/local`, { recursive: true });
-      mkdirSync(`${cacheBase}/ccache`, { recursive: true });
-      mkdirSync(`${cacheBase}/npm`, { recursive: true });
-    }
-
-    // Set environment variables for build tools
-    process.env.ZIG_GLOBAL_CACHE_DIR = `${cacheBase}/zig/global`;
-    process.env.ZIG_LOCAL_CACHE_DIR = `${cacheBase}/zig/local`;
-    process.env.CCACHE_DIR = `${cacheBase}/ccache`;
-    process.env.NPM_CONFIG_CACHE = `${cacheBase}/npm`;
-    
-    // Override CMake's ccache directory detection with our persistent cache
-    generateOptions["-DCCACHE_DIR_OVERRIDE"] = cmakePath(`${cacheBase}/ccache`);
-    generateOptions["-DZIG_GLOBAL_CACHE_DIR_OVERRIDE"] = cmakePath(`${cacheBase}/zig/global`);
-    generateOptions["-DZIG_LOCAL_CACHE_DIR_OVERRIDE"] = cmakePath(`${cacheBase}/zig/local`);
-    
-    console.log("✅ Persistent cache environment configured:");
-    console.log(`   Cache base: ${cacheBase}`);
-    console.log(`   CCACHE_DIR=${process.env.CCACHE_DIR}`);
-    console.log(`   ZIG_GLOBAL_CACHE_DIR=${process.env.ZIG_GLOBAL_CACHE_DIR}`);
-    console.log(`   ZIG_LOCAL_CACHE_DIR=${process.env.ZIG_LOCAL_CACHE_DIR}`);
-    console.log(`   CMake overrides: CCACHE_DIR_OVERRIDE, ZIG_*_CACHE_DIR_OVERRIDE`);
-  }
-
   const toolchain = generateOptions["--toolchain"];
   if (toolchain) {
     const toolchainPath = resolve(import.meta.dirname, "..", "cmake", "toolchains", `${toolchain}.cmake`);

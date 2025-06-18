@@ -635,9 +635,59 @@ create_and_run_vm() {
     # Make run-vm-command.sh executable
     chmod +x ./scripts/run-vm-command.sh
 
+    # Handle artifact download for link step (before VM execution)
+    if [ "${BUN_LINK_ONLY:-}" = "ON" ]; then
+        log "🔗 Link step - downloading build artifacts before VM execution..."
+        
+        # Download C++ artifact
+        if buildkite-agent artifact download "libbun-profile.a.gz" . --build "$BUILDKITE_BUILD_ID"; then
+            gunzip "libbun-profile.a.gz"
+            mkdir -p build
+            mv "libbun-profile.a" "./build/"
+            log "✅ Downloaded and extracted C++ artifact: libbun-profile.a"
+        else
+            log "❌ Failed to download C++ artifact from current build"
+            exit 1
+        fi
+        
+        # Download Zig artifact
+        if buildkite-agent artifact download "bun-zig.o.gz" . --build "$BUILDKITE_BUILD_ID"; then
+            gunzip "bun-zig.o.gz"
+            mkdir -p build
+            mv "bun-zig.o" "./build/"
+            log "✅ Downloaded and extracted Zig artifact: bun-zig.o"
+        else
+            log "❌ Failed to download Zig artifact from current build"
+            exit 1
+        fi
+        
+        log "📁 All artifacts ready for linking in VM"
+    fi
+
     # Execute the command
     log "Executing command in VM: $command"
     profile_build_step "VM-$BUILD_TYPE-Build" ./scripts/run-vm-command.sh "$vm_name" "$command"
+
+    # Handle artifact upload after successful builds (C++ and Zig steps only)
+    if [ "${BUN_CPP_ONLY:-}" = "ON" ]; then
+        log "🔧 C++ build completed - uploading libbun-profile.a artifact..."
+        if [ -f "./build/libbun-profile.a" ]; then
+            gzip -c "./build/libbun-profile.a" > "./libbun-profile.a.gz"
+            buildkite-agent artifact upload "libbun-profile.a.gz" || log "❌ Failed to upload C++ artifact"
+            log "✅ C++ artifact uploaded: libbun-profile.a.gz"
+        else
+            log "❌ C++ artifact not found: ./build/libbun-profile.a"
+        fi
+    elif [ "${BUN_ZIG_ONLY:-}" = "ON" ] || [[ "$command" == *"--target bun-zig"* ]]; then
+        log "⚡ Zig build completed - uploading bun-zig.o artifact..."
+        if [ -f "./build/bun-zig.o" ]; then
+            gzip -c "./build/bun-zig.o" > "./bun-zig.o.gz"
+            buildkite-agent artifact upload "bun-zig.o.gz" || log "❌ Failed to upload Zig artifact"
+            log "✅ Zig artifact uploaded: bun-zig.o.gz"
+        else
+            log "❌ Zig artifact not found: ./build/bun-zig.o"
+        fi
+    fi
 
     # TEMPORARY DEBUG: Verify cache state after build completion (for C++ and Zig builds)
     if [ "${BUN_CPP_ONLY:-}" = "ON" ] || [ "${BUN_ZIG_ONLY:-}" = "ON" ] || [[ "$command" == *"--target bun-zig"* ]] || [[ "$command" == *"--target bun"* ]]; then
@@ -840,6 +890,38 @@ main() {
         log "Cache save enabled - setting BUILDKITE_CACHE_SAVE environment variable"
         export BUILDKITE_CACHE_SAVE=ON
     fi
+    
+    # Create buildkite_env.sh file for VM environment
+    log "🔧 Creating buildkite_env.sh for VM environment..."
+    cat > buildkite_env.sh << 'EOF'
+# Basic environment variables for VM build process
+export BUILDKITE=true
+export APPLE=true
+export CI=true
+EOF
+    
+    # Add build type environment variables
+    if [ "${BUN_CPP_ONLY:-}" = "ON" ]; then
+        echo "export BUN_CPP_ONLY=ON" >> buildkite_env.sh
+        log "   Added BUN_CPP_ONLY=ON to VM environment"
+    fi
+    
+    if [ "${BUN_ZIG_ONLY:-}" = "ON" ]; then
+        echo "export BUN_ZIG_ONLY=ON" >> buildkite_env.sh
+        log "   Added BUN_ZIG_ONLY=ON to VM environment"
+    fi
+    
+    if [ "${BUN_LINK_ONLY:-}" = "ON" ]; then
+        echo "export BUN_LINK_ONLY=ON" >> buildkite_env.sh
+        log "   Added BUN_LINK_ONLY=ON to VM environment"
+    fi
+    
+    # Add commit hash for reference
+    local commit_hash=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+    echo "export BUILDKITE_COMMIT=$commit_hash" >> buildkite_env.sh
+    log "   Added BUILDKITE_COMMIT=$commit_hash to VM environment"
+    
+    log "✅ buildkite_env.sh created for VM environment"
     
     # The build command will handle cache operations internally via environment variables
     local full_command="$command"

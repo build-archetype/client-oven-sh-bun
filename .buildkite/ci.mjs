@@ -555,12 +555,10 @@ function getBuildZigStep(platform, options) {
  * @returns {Step}
  */
 function getLinkBunStep(platform, options) {
-  const { os } = platform;
   const command = getBuildCommand(platform, options);
-  
   const step = {
     key: `${getTargetKey(platform)}-build-bun`,
-    label: `${getTargetLabel(platform)} - build-bun (link)`,
+    label: `${getTargetLabel(platform)} - build-bun`,
     depends_on: [`${getTargetKey(platform)}-build-cpp`, `${getTargetKey(platform)}-build-zig`],
     agents: getCppAgent(platform, options),
     retry: getRetry(),
@@ -571,7 +569,6 @@ function getLinkBunStep(platform, options) {
     },
     command: `${command} --target bun`,
   };
-  // If macOS, run in VM - no cache operations, just link the artifacts from current build
   if (platform.os === "darwin") {
     step.command = [
       `./scripts/build-macos-vm.sh --release=${platform.release}`,
@@ -587,17 +584,23 @@ function getLinkBunStep(platform, options) {
  * @returns {Step}
  */
 function getBuildBunStep(platform, options) {
-  return {
+  const command = getBuildCommand(platform, options);
+  const step = {
     key: `${getTargetKey(platform)}-build-bun`,
     label: `${getTargetLabel(platform)} - build-bun`,
     agents: getCppAgent(platform, options),
     retry: getRetry(),
     cancel_on_build_failing: isMergeQueue(),
-    env: {
-      ...getBuildEnv(platform, options),
-    },
-    command: getBuildCommand(platform, options),
+    env: getBuildEnv(platform, options),
+    command: `${command} --target bun`,
   };
+  if (platform.os === "darwin") {
+    step.command = [
+      `./scripts/build-macos-vm.sh --release=${platform.release}`,
+      `./scripts/ci-macos.sh --release=${platform.release} "${command} --target bun"`
+    ];
+  }
+  return step;
 }
 
 /**
