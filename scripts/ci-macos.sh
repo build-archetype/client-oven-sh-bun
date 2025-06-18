@@ -82,7 +82,7 @@ ensure_vm_image_available() {
     # If we get here, both local and registry failed
     log "❌ Base image '$base_vm_image' not available locally or in registry"
     log "Please run the prep step to create base image first:"
-    log "Run: ./scripts/build-macos-vm.sh --release=$release"
+    log "Run: ./scripts/build-macos-vm.sh --release=$release --disable-autoupdate"
     return 1
 }
 
@@ -276,7 +276,7 @@ create_and_run_vm() {
     # Check if forced rebuild is requested
     if [ "$FORCE_BASE_IMAGE_REBUILD" = "true" ]; then
         log "🔄 Force rebuild requested - please run image prep step manually"
-        log "Run: ./scripts/build-macos-vm.sh --release=$release --force-refresh"
+        log "Run: ./scripts/build-macos-vm.sh --release=$release --disable-autoupdate"
         exit 1
     fi
     

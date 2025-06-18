@@ -820,12 +820,14 @@ make_caching_decision() {
     local force_refresh="$5"
     local force_remote_refresh="${6:-false}"
     local local_dev_mode="${7:-false}"
+    local disable_autoupdate="${8:-false}"
     
     log "🧠 Making smart caching decision..." >&2
     log "  Target: Bun $target_bun_version, Bootstrap $target_bootstrap_version" >&2
     log "  Force refresh: $force_refresh" >&2
     log "  Force remote refresh: $force_remote_refresh" >&2
     log "  Local dev mode: $local_dev_mode" >&2
+    log "  Disable autoupdate: $disable_autoupdate" >&2
     
     # If force refresh, skip all local checks
     if [ "$force_refresh" = true ]; then
@@ -1008,6 +1010,7 @@ main() {
     local force_rebuild_all=false
     local force_remote_refresh=false
     local local_dev_mode=false
+    local disable_autoupdate=false
     for arg in "$@"; do
         case $arg in
             --force-refresh)
@@ -1030,6 +1033,10 @@ main() {
                 local_dev_mode=true
                 shift
                 ;;
+            --disable-autoupdate)
+                disable_autoupdate=true
+                shift
+                ;;
             --release=*)
                 MACOS_RELEASE="${arg#*=}"
                 shift
@@ -1043,6 +1050,7 @@ main() {
                 echo "  --cleanup-only          Clean up old VM images and exit"
                 echo "  --local-dev             Enable local development mode (skip remote registry)"
                 echo "  --force-rebuild-all     Delete all local VM images and rebuild from scratch"
+                echo "  --disable-autoupdate    Disable version-based VM selection (use existing VMs)"
                 echo "  --release=VERSION       macOS release version (13, 14) [default: 14]"
                 echo "  --help, -h              Show this help message"
                 echo ""
@@ -1056,6 +1064,7 @@ main() {
                 echo "  • Use --force-remote-refresh to get latest remote versions"
                 echo "  • Use --force-refresh to skip all caching and rebuild"
                 echo "  • Use --local-dev to skip remote registry entirely (offline mode)"
+                echo "  • Use --disable-autoupdate to skip version checks (use existing VMs)"
                 echo "  • VM validation ensures cached images have required tools"
                 echo ""
                 echo "Environment Variables:"
@@ -1076,6 +1085,7 @@ main() {
                 echo "  $0 --force-remote-refresh # Force re-download of remote images"
                 echo "  $0 --force-rebuild-all    # Delete all local VMs and rebuild"
                 echo "  $0 --cleanup-only         # Clean up old images and exit"
+                echo "  $0 --disable-autoupdate   # Use existing VMs without version checks"
                 exit 0
                 ;;
         esac
@@ -1199,12 +1209,50 @@ main() {
     log "  Remote URL: $REMOTE_IMAGE_URL"
     log "  Bootstrap version: $BOOTSTRAP_VERSION"
     log "  Force refresh: $force_refresh"
+    log "  Disable autoupdate: $disable_autoupdate"
+    
+    # Check for disable-autoupdate mode
+    if [ "$disable_autoupdate" = true ]; then
+        log "=== DISABLE AUTOUPDATE MODE ==="
+        log "🔒 Autoupdate disabled - using existing VMs without version checks"
+        
+        # Find the most recent VM image for this macOS release
+        local tart_output=$(tart list 2>&1)
+        local existing_image=""
+        local latest_image=""
+        
+        while IFS= read -r line; do
+            if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+) ]]; then
+                local image_name="${BASH_REMATCH[1]}"
+                if [[ "$image_name" =~ ^bun-build-macos-${MACOS_RELEASE}- ]]; then
+                    existing_image="$image_name"
+                    if [ -z "$latest_image" ] || [[ "$image_name" > "$latest_image" ]]; then
+                        latest_image="$image_name"
+                    fi
+                fi
+            fi
+        done <<< "$tart_output"
+        
+        if [ -n "$latest_image" ]; then
+            log "✅ Using existing VM: $latest_image"
+            log "Final image name: $latest_image"
+            log "Available images:"
+            tart list | grep -E "(NAME|bun-build-macos)" || tart list
+            exit 0
+        else
+            log "❌ No existing VM found for macOS $MACOS_RELEASE"
+            log "   Available VMs:"
+            tart list | grep -E "bun-build-macos" || log "   (none)"
+            log "   Please build a VM first without --disable-autoupdate"
+            exit 1
+        fi
+    fi
     
     # SMART CACHING LOGIC
     log "=== SMART CACHING ANALYSIS ==="
     
     # Make intelligent caching decision
-    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh" "$force_remote_refresh" "$local_dev_mode")
+    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh" "$force_remote_refresh" "$local_dev_mode" "$disable_autoupdate")
     
     log "Caching decision: $caching_decision"
     
