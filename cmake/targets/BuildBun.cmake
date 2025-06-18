@@ -669,9 +669,13 @@ endif()
 set(BUN_CPP_OUTPUT ${BUILD_PATH}/${CMAKE_STATIC_LIBRARY_PREFIX}${bun}${CMAKE_STATIC_LIBRARY_SUFFIX})
 
 if(BUN_LINK_ONLY)
-  add_executable(${bun} ${BUN_CPP_OUTPUT} ${BUN_ZIG_OUTPUT} ${WINDOWS_RESOURCES})
+  # For link-only builds, create a minimal empty source file since add_executable requires sources
+  set(EMPTY_SOURCE_FILE ${BUILD_PATH}/empty_main.cpp)
+  file(WRITE ${EMPTY_SOURCE_FILE} "// Empty source file for link-only build\nint main() { return 0; }")
+  add_executable(${bun} ${EMPTY_SOURCE_FILE} ${WINDOWS_RESOURCES})
   set_target_properties(${bun} PROPERTIES LINKER_LANGUAGE CXX)
-  target_link_libraries(${bun} PRIVATE ${BUN_CPP_OUTPUT})
+  # Link the pre-built C++ library and Zig object file
+  target_link_libraries(${bun} PRIVATE ${BUN_CPP_OUTPUT} ${BUN_ZIG_OUTPUT})
 elseif(BUN_CPP_ONLY)
   add_library(${bun} STATIC ${BUN_CPP_SOURCES})
   register_command(
@@ -685,7 +689,7 @@ elseif(BUN_CPP_ONLY)
       ${CMAKE_COMMAND} -E true
     ARTIFACTS
       ${BUN_CPP_OUTPUT}
-  )
+)
 else()
   add_executable(${bun} ${BUN_CPP_SOURCES} ${WINDOWS_RESOURCES})
   target_link_libraries(${bun} PRIVATE ${BUN_ZIG_OUTPUT})

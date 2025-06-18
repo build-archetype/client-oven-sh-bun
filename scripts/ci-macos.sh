@@ -642,13 +642,13 @@ create_and_run_vm() {
         # Download C++ artifact (try compressed first, then uncompressed)
         if buildkite-agent artifact download "libbun-profile.a.gz" . --build "$BUILDKITE_BUILD_ID" 2>/dev/null; then
             gunzip "libbun-profile.a.gz"
-            mkdir -p build
-            mv "libbun-profile.a" "./build/"
-            log "✅ Downloaded and extracted C++ artifact: libbun-profile.a (compressed)"
+            mkdir -p build/release
+            mv "libbun-profile.a" "./build/release/"
+            log "✅ Downloaded and extracted C++ artifact: build/release/libbun-profile.a (compressed)"
         elif buildkite-agent artifact download "libbun-profile.a" . --build "$BUILDKITE_BUILD_ID" 2>/dev/null; then
-            mkdir -p build
-            mv "libbun-profile.a" "./build/"
-            log "✅ Downloaded C++ artifact: libbun-profile.a (uncompressed)"
+            mkdir -p build/release
+            mv "libbun-profile.a" "./build/release/"
+            log "✅ Downloaded C++ artifact: build/release/libbun-profile.a (uncompressed)"
         else
             log "❌ Failed to download C++ artifact from current build (tried both compressed and uncompressed)"
             exit 1
@@ -657,13 +657,13 @@ create_and_run_vm() {
         # Download Zig artifact (try compressed first, then uncompressed)
         if buildkite-agent artifact download "bun-zig.o.gz" . --build "$BUILDKITE_BUILD_ID" 2>/dev/null; then
             gunzip "bun-zig.o.gz"
-            mkdir -p build
-            mv "bun-zig.o" "./build/"
-            log "✅ Downloaded and extracted Zig artifact: bun-zig.o (compressed)"
+            mkdir -p build/release
+            mv "bun-zig.o" "./build/release/"
+            log "✅ Downloaded and extracted Zig artifact: build/release/bun-zig.o (compressed)"
         elif buildkite-agent artifact download "bun-zig.o" . --build "$BUILDKITE_BUILD_ID" 2>/dev/null; then
-            mkdir -p build
-            mv "bun-zig.o" "./build/"
-            log "✅ Downloaded Zig artifact: bun-zig.o (uncompressed)"
+            mkdir -p build/release
+            mv "bun-zig.o" "./build/release/"
+            log "✅ Downloaded Zig artifact: build/release/bun-zig.o (uncompressed)"
         else
             log "❌ Failed to download Zig artifact from current build (tried both compressed and uncompressed)"
             exit 1
@@ -679,21 +679,21 @@ create_and_run_vm() {
     # Handle artifact upload after successful builds (C++ and Zig steps only)
     if [ "${BUN_CPP_ONLY:-}" = "ON" ]; then
         log "🔧 C++ build completed - uploading libbun-profile.a artifact..."
-        if [ -f "./build/libbun-profile.a" ]; then
-            gzip -c "./build/libbun-profile.a" > "./libbun-profile.a.gz"
+        if [ -f "./build/release/libbun-profile.a" ]; then
+            gzip -c "./build/release/libbun-profile.a" > "./libbun-profile.a.gz"
             buildkite-agent artifact upload "libbun-profile.a.gz" || log "❌ Failed to upload C++ artifact"
             log "✅ C++ artifact uploaded: libbun-profile.a.gz"
         else
-            log "❌ C++ artifact not found: ./build/libbun-profile.a"
+            log "❌ C++ artifact not found: ./build/release/libbun-profile.a"
         fi
     elif [ "${BUN_ZIG_ONLY:-}" = "ON" ] || [[ "$command" == *"--target bun-zig"* ]]; then
         log "⚡ Zig build completed - uploading bun-zig.o artifact..."
-        if [ -f "./build/bun-zig.o" ]; then
-            gzip -c "./build/bun-zig.o" > "./bun-zig.o.gz"
+        if [ -f "./build/release/bun-zig.o" ]; then
+            gzip -c "./build/release/bun-zig.o" > "./bun-zig.o.gz"
             buildkite-agent artifact upload "bun-zig.o.gz" || log "❌ Failed to upload Zig artifact"
             log "✅ Zig artifact uploaded: bun-zig.o.gz"
         else
-            log "❌ Zig artifact not found: ./build/bun-zig.o"
+            log "❌ Zig artifact not found: ./build/release/bun-zig.o"
         fi
     fi
 
