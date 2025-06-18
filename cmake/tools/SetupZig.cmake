@@ -20,7 +20,7 @@ else()
   unsupported(CMAKE_SYSTEM_NAME)
 endif()
 
-set(ZIG_COMMIT "a207204ee57a061f2fb96c7bae0c491b609e73a5")
+set(ZIG_COMMIT "0a0120fa92cd7f6ab244865688b351df634f0707")
 optionx(ZIG_TARGET STRING "The zig target to use" DEFAULT ${DEFAULT_ZIG_TARGET})
 
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -52,63 +52,16 @@ optionx(ZIG_OPTIMIZE "ReleaseFast|ReleaseSafe|ReleaseSmall|Debug" "The Zig optim
 # Change to "bc" to experiment, "Invalid record" means it is not valid output.
 optionx(ZIG_OBJECT_FORMAT "obj|bc" "Output file format for Zig object files" DEFAULT obj)
 
-# Use overrides from cache manager if set, otherwise use defaults
-if(DEFINED ZIG_LOCAL_CACHE_DIR_OVERRIDE)
-  optionx(ZIG_LOCAL_CACHE_DIR FILEPATH "The path to local the zig cache directory" DEFAULT ${ZIG_LOCAL_CACHE_DIR_OVERRIDE})
-  optionx(ZIG_GLOBAL_CACHE_DIR FILEPATH "The path to the global zig cache directory" DEFAULT ${ZIG_GLOBAL_CACHE_DIR_OVERRIDE})
-  # Ensure the override directories exist
-  file(MAKE_DIRECTORY ${ZIG_LOCAL_CACHE_DIR_OVERRIDE})
-  file(MAKE_DIRECTORY ${ZIG_GLOBAL_CACHE_DIR_OVERRIDE})
-  message(STATUS "Using ephemeral Zig cache directories:")
-  message(STATUS "  Local: ${ZIG_LOCAL_CACHE_DIR_OVERRIDE}")
-  message(STATUS "  Global: ${ZIG_GLOBAL_CACHE_DIR_OVERRIDE}")
-elseif(CMAKE_CURRENT_SOURCE_DIR MATCHES "My Shared Files")
-  # Auto-detect Tart mounted directories and use VM-local cache to avoid AccessDenied errors
-  # Zig translate-c and other operations don't work well on mounted filesystems
-  set(TART_VM_LOCAL_CACHE_DIR "/tmp/zig-cache/local")
-  set(TART_VM_GLOBAL_CACHE_DIR "/tmp/zig-cache/global")
-  optionx(ZIG_LOCAL_CACHE_DIR FILEPATH "The path to local the zig cache directory" DEFAULT ${TART_VM_LOCAL_CACHE_DIR})
-  optionx(ZIG_GLOBAL_CACHE_DIR FILEPATH "The path to the global zig cache directory" DEFAULT ${TART_VM_GLOBAL_CACHE_DIR})
-  file(MAKE_DIRECTORY ${TART_VM_LOCAL_CACHE_DIR})
-  file(MAKE_DIRECTORY ${TART_VM_GLOBAL_CACHE_DIR})
-  message(STATUS "🔧 Detected Tart mounted directory - using VM-local Zig cache directories:")
-  message(STATUS "  Local: ${TART_VM_LOCAL_CACHE_DIR}")
-  message(STATUS "  Global: ${TART_VM_GLOBAL_CACHE_DIR}")
-  message(STATUS "  (This avoids AccessDenied errors during Zig translate-c operations)")
-elseif(CI AND APPLE)
-  # For CI on macOS, use build directory for reliable permissions
-  optionx(ZIG_LOCAL_CACHE_DIR FILEPATH "The path to local the zig cache directory" DEFAULT ${BUILD_PATH}/cache/zig/local)
-  optionx(ZIG_GLOBAL_CACHE_DIR FILEPATH "The path to the global zig cache directory" DEFAULT ${BUILD_PATH}/cache/zig/global)
-  file(MAKE_DIRECTORY ${BUILD_PATH}/cache/zig/local)
-  file(MAKE_DIRECTORY ${BUILD_PATH}/cache/zig/global)
-  message(STATUS "Using macOS CI Zig cache directories:")
-  message(STATUS "  Local: ${BUILD_PATH}/cache/zig/local")
-  message(STATUS "  Global: ${BUILD_PATH}/cache/zig/global")
+optionx(ZIG_LOCAL_CACHE_DIR FILEPATH "The path to local the zig cache directory" DEFAULT ${CACHE_PATH}/zig/local)
+optionx(ZIG_GLOBAL_CACHE_DIR FILEPATH "The path to the global zig cache directory" DEFAULT ${CACHE_PATH}/zig/global)
+
+if(CI)
+  set(ZIG_COMPILER_SAFE_DEFAULT ON)
 else()
-  optionx(ZIG_LOCAL_CACHE_DIR FILEPATH "The path to local the zig cache directory" DEFAULT ${BUILD_PATH}/cache/zig/local)
-  optionx(ZIG_GLOBAL_CACHE_DIR FILEPATH "The path to the global zig cache directory" DEFAULT ${BUILD_PATH}/cache/zig/global)
-  file(MAKE_DIRECTORY ${BUILD_PATH}/cache/zig/local)
-  file(MAKE_DIRECTORY ${BUILD_PATH}/cache/zig/global)
-  message(STATUS "Using default Zig cache directories:")
-  message(STATUS "  Local: ${BUILD_PATH}/cache/zig/local")
-  message(STATUS "  Global: ${BUILD_PATH}/cache/zig/global")
+  set(ZIG_COMPILER_SAFE_DEFAULT OFF)
 endif()
 
-# TEMPORARY FIX: Commented out to avoid Zig compiler crash in Response.zig
-# The ReleaseSafe build of the Zig compiler has a known issue analyzing Response.zig
-# with "inline else" patterns. Re-enable this once upstream fixes the compiler crash.
-# Related to upstream commit 773484a62 (uWS refactoring).
-#
-# if(CI AND CMAKE_HOST_APPLE)
-#   set(ZIG_COMPILER_SAFE_DEFAULT ON)
-# else()
-#   set(ZIG_COMPILER_SAFE_DEFAULT OFF)
-# endif()
-#
-# optionx(ZIG_COMPILER_SAFE BOOL "Download a ReleaseSafe build of the Zig compiler. Only availble on macos aarch64." DEFAULT ${ZIG_COMPILER_SAFE_DEFAULT})
-
-# Temporary: Always use regular Zig compiler build (not ReleaseSafe)
-optionx(ZIG_COMPILER_SAFE BOOL "Download a ReleaseSafe build of the Zig compiler. Only availble on macos aarch64." DEFAULT OFF)
+optionx(ZIG_COMPILER_SAFE BOOL "Download a ReleaseSafe build of the Zig compiler." DEFAULT ${ZIG_COMPILER_SAFE_DEFAULT})
 
 setenv(ZIG_LOCAL_CACHE_DIR ${ZIG_LOCAL_CACHE_DIR})
 setenv(ZIG_GLOBAL_CACHE_DIR ${ZIG_GLOBAL_CACHE_DIR})
@@ -144,54 +97,3 @@ register_command(
   OUTPUTS
     ${ZIG_EXECUTABLE}
 )
-
-# Check if we're in a Tart mounted directory (containing "My Shared Files")
-string(FIND "${CMAKE_BUILD_ROOT}" "My Shared Files" TART_MOUNT_FOUND)
-if(TART_MOUNT_FOUND GREATER -1)
-  message(STATUS "🔧 Detected Tart mounted directory - using hybrid Zig cache strategy")
-  message(STATUS "   Persistent cache: ${ZIG_LOCAL_CACHE_DIR} (mounted)")
-  message(STATUS "   Execution cache: /tmp/zig-cache/* (VM-local)")
-  
-  # Use VM-local cache directories for execution (avoids AccessDenied errors)
-  set(ENV{ZIG_LOCAL_CACHE_DIR_OVERRIDE} "/tmp/zig-cache/local")
-  set(ENV{ZIG_GLOBAL_CACHE_DIR_OVERRIDE} "/tmp/zig-cache/global")
-  
-  # Add cache synchronization to the Zig build process
-  # Before Zig build: Copy persistent cache to VM-local
-  # After Zig build: Copy VM-local cache back to persistent
-  set(ZIG_CACHE_SYNC_SCRIPT "${CMAKE_BINARY_DIR}/sync-zig-cache.sh")
-  file(WRITE "${ZIG_CACHE_SYNC_SCRIPT}" "#!/bin/bash\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "set -euo pipefail\n\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "# Sync Zig cache between persistent (mounted) and VM-local directories\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "PERSISTENT_LOCAL=\"${ZIG_LOCAL_CACHE_DIR}\"\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "PERSISTENT_GLOBAL=\"${ZIG_GLOBAL_CACHE_DIR}\"\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "VM_LOCAL=\"/tmp/zig-cache/local\"\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "VM_GLOBAL=\"/tmp/zig-cache/global\"\n\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "if [[ \"$1\" == \"before\" ]]; then\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  echo \"📥 Copying persistent Zig cache to VM-local for execution...\"\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  mkdir -p \"$VM_LOCAL\" \"$VM_GLOBAL\"\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  if [[ -d \"$PERSISTENT_LOCAL\" ]]; then\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "    rsync -a \"$PERSISTENT_LOCAL/\" \"$VM_LOCAL/\" || true\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  fi\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  if [[ -d \"$PERSISTENT_GLOBAL\" ]]; then\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "    rsync -a \"$PERSISTENT_GLOBAL/\" \"$VM_GLOBAL/\" || true\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  fi\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "elif [[ \"$1\" == \"after\" ]]; then\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  echo \"📤 Copying VM-local Zig cache back to persistent storage...\"\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  mkdir -p \"$PERSISTENT_LOCAL\" \"$PERSISTENT_GLOBAL\"\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  if [[ -d \"$VM_LOCAL\" ]]; then\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "    rsync -a \"$VM_LOCAL/\" \"$PERSISTENT_LOCAL/\" || true\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  fi\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  if [[ -d \"$VM_GLOBAL\" ]]; then\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "    rsync -a \"$VM_GLOBAL/\" \"$PERSISTENT_GLOBAL/\" || true\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "  fi\n")
-  file(APPEND "${ZIG_CACHE_SYNC_SCRIPT}" "fi\n")
-  
-  # Make the script executable
-  file(CHMOD "${ZIG_CACHE_SYNC_SCRIPT}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
-  
-else()
-  # Normal environment - use mounted cache directories directly
-  set(ENV{ZIG_LOCAL_CACHE_DIR_OVERRIDE} "${ZIG_LOCAL_CACHE_DIR}")
-  set(ENV{ZIG_GLOBAL_CACHE_DIR_OVERRIDE} "${ZIG_GLOBAL_CACHE_DIR}")
-endif()
