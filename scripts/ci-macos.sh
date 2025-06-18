@@ -639,25 +639,33 @@ create_and_run_vm() {
     if [ "${BUN_LINK_ONLY:-}" = "ON" ]; then
         log "🔗 Link step - downloading build artifacts before VM execution..."
         
-        # Download C++ artifact
-        if buildkite-agent artifact download "libbun-profile.a.gz" . --build "$BUILDKITE_BUILD_ID"; then
+        # Download C++ artifact (try compressed first, then uncompressed)
+        if buildkite-agent artifact download "libbun-profile.a.gz" . --build "$BUILDKITE_BUILD_ID" 2>/dev/null; then
             gunzip "libbun-profile.a.gz"
             mkdir -p build
             mv "libbun-profile.a" "./build/"
-            log "✅ Downloaded and extracted C++ artifact: libbun-profile.a"
+            log "✅ Downloaded and extracted C++ artifact: libbun-profile.a (compressed)"
+        elif buildkite-agent artifact download "libbun-profile.a" . --build "$BUILDKITE_BUILD_ID" 2>/dev/null; then
+            mkdir -p build
+            mv "libbun-profile.a" "./build/"
+            log "✅ Downloaded C++ artifact: libbun-profile.a (uncompressed)"
         else
-            log "❌ Failed to download C++ artifact from current build"
+            log "❌ Failed to download C++ artifact from current build (tried both compressed and uncompressed)"
             exit 1
         fi
         
-        # Download Zig artifact
-        if buildkite-agent artifact download "bun-zig.o.gz" . --build "$BUILDKITE_BUILD_ID"; then
+        # Download Zig artifact (try compressed first, then uncompressed)
+        if buildkite-agent artifact download "bun-zig.o.gz" . --build "$BUILDKITE_BUILD_ID" 2>/dev/null; then
             gunzip "bun-zig.o.gz"
             mkdir -p build
             mv "bun-zig.o" "./build/"
-            log "✅ Downloaded and extracted Zig artifact: bun-zig.o"
+            log "✅ Downloaded and extracted Zig artifact: bun-zig.o (compressed)"
+        elif buildkite-agent artifact download "bun-zig.o" . --build "$BUILDKITE_BUILD_ID" 2>/dev/null; then
+            mkdir -p build
+            mv "bun-zig.o" "./build/"
+            log "✅ Downloaded Zig artifact: bun-zig.o (uncompressed)"
         else
-            log "❌ Failed to download Zig artifact from current build"
+            log "❌ Failed to download Zig artifact from current build (tried both compressed and uncompressed)"
             exit 1
         fi
         
