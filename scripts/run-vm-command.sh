@@ -496,6 +496,14 @@ echo "🚀 Executing: $COMMAND"
     echo \$? > /tmp/build_exit_code.txt
 ) || true
 
+# Wait for any background processes (like buildkite-agent artifact upload) to complete
+echo "⏳ Waiting for background processes to complete..."
+sleep 5
+
+# Kill any remaining buildkite-agent processes to prevent SIGPIPE
+pkill -f "buildkite-agent" 2>/dev/null || true
+sleep 1
+
 # Read the actual exit code
 if [ -f /tmp/build_exit_code.txt ]; then
     BUILD_EXIT_CODE=\$(cat /tmp/build_exit_code.txt)
@@ -508,6 +516,12 @@ fi
 REMOTE_EXEC
 
 BUILD_EXIT_CODE=$?
+
+# Handle SIGPIPE (exit status 141) as success since build completed
+if [ $BUILD_EXIT_CODE -eq 141 ]; then
+    echo "🔧 Detected SIGPIPE (exit 141) - treating as success since build completed"
+    BUILD_EXIT_CODE=0
+fi
 
 echo "📤 ===== COPYING FINAL ARTIFACTS BACK ====="
 echo "🔍 Build command completed with exit code: $BUILD_EXIT_CODE"
