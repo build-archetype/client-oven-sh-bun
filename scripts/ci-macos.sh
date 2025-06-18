@@ -14,10 +14,26 @@ log() {
 # Function to get base VM image name for a specific macOS release
 get_base_vm_image() {
     local release="${1:-14}"
-    local bun_version="${2:-1.2.16}"
+    local bun_version="${2:-$(detect_bun_version)}"
     # Auto-detect bootstrap version from script (single source of truth)
     local bootstrap_version="${3:-$(get_bootstrap_version)}"
     echo "bun-build-macos-${release}-${bun_version}-bootstrap-${bootstrap_version}"
+}
+
+# Function to detect current Bun version from package.json
+detect_bun_version() {
+    local package_json="package.json"
+    if [ -f "$package_json" ]; then
+        # Extract version from package.json
+        local version=$(grep '"version"' "$package_json" | sed -E 's/.*"version": "([^"]+)".*/\1/' | head -1)
+        if [ -n "$version" ]; then
+            echo "$version"
+            return
+        fi
+    fi
+    
+    # Fallback if package.json not found or version not parsed
+    echo "1.2.17"  # Updated fallback to match current version
 }
 
 # Get bootstrap version from the bootstrap script (single source of truth)
