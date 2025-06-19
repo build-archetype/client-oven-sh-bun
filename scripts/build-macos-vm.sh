@@ -972,7 +972,7 @@ comprehensive_vm_validation() {
                     if [ -f "$potential_ninja" ]; then
                         echo "   ✅ Found ninja via brew: $potential_ninja"
                         echo "   ⚠️  PATH issue - ninja installed but not accessible"
-                    else
+            else
                         echo "   ❌ Expected ninja not found: $potential_ninja"
                     fi
                 fi
@@ -1086,10 +1086,50 @@ EOF
     
     # Cleanup VM
     log "   🛑 Shutting down validation VM..."
-    sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
-    sleep 10
+    
+    # Use proper Tart shutdown instead of forceful kill
+    # The old method was corrupting VMs with sudo shutdown + kill
+    local stop_attempts=0
+    local max_stop_attempts=3
+    
+    while [ $stop_attempts -lt $max_stop_attempts ]; do
+        stop_attempts=$((stop_attempts + 1))
+        log "   Attempting graceful VM stop (attempt $stop_attempts/$max_stop_attempts)..."
+        
+        if tart stop "$vm_name" 2>/dev/null; then
+            log "   ✅ VM stopped gracefully via tart"
+            
+            # Wait for VM to actually stop
+            local wait_attempts=0
+            while tart list | grep "$vm_name" | grep -q "running" && [ $wait_attempts -lt 10 ]; do
+                sleep 2
+                wait_attempts=$((wait_attempts + 1))
+            done
+            
+            if ! tart list | grep "$vm_name" | grep -q "running"; then
+                log "   ✅ VM completely stopped and ready for cloning"
+                break
+            else
+                log "   ⚠️  VM still showing as running, trying again..."
+            fi
+        else
+            log "   ⚠️  Tart stop failed, trying again..."
+        fi
+        
+        if [ $stop_attempts -lt $max_stop_attempts ]; then
+            sleep 5
+        fi
+    done
+    
+    # Final check - if VM is still running after all attempts, this is a problem
+    if tart list | grep "$vm_name" | grep -q "running"; then
+        log "   ❌ WARNING: VM still running after stop attempts - may be corrupted"
+        log "   ❌ This could cause clone failures in ci-macos.sh"
+        return 1
+    fi
+    
+    # Clean up any remaining background processes
     kill $vm_pid >/dev/null 2>&1 || true
-    sleep 5
     
     if [ "$validation_success" = true ]; then
         log "   ✅ VM passed comprehensive validation - ready for building"
@@ -1701,7 +1741,7 @@ main() {
             
             log "   ✅ VM booted and SSH ready (IP: $vm_ip)"
             log "   🔧 Running comprehensive tool and functionality validation..."
-            
+    
             # Comprehensive validation (same as build mode)
             local validation_cmd='
                 # Comprehensive PATH setup for all common installation locations
@@ -1917,16 +1957,56 @@ EOF
             
             # Cleanup VM
             log "   🛑 Shutting down validation VM..."
-            sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
-            sleep 10
+            
+            # Use proper Tart shutdown instead of forceful kill
+            # The old method was corrupting VMs with sudo shutdown + kill
+            local stop_attempts=0
+            local max_stop_attempts=3
+            
+            while [ $stop_attempts -lt $max_stop_attempts ]; do
+                stop_attempts=$((stop_attempts + 1))
+                log "   Attempting graceful VM stop (attempt $stop_attempts/$max_stop_attempts)..."
+                
+                if tart stop "$vm_name" 2>/dev/null; then
+                    log "   ✅ VM stopped gracefully via tart"
+                    
+                    # Wait for VM to actually stop
+                    local wait_attempts=0
+                    while tart list | grep "$vm_name" | grep -q "running" && [ $wait_attempts -lt 10 ]; do
+                        sleep 2
+                        wait_attempts=$((wait_attempts + 1))
+                    done
+                    
+                    if ! tart list | grep "$vm_name" | grep -q "running"; then
+                        log "   ✅ VM completely stopped and ready for cloning"
+                        break
+                    else
+                        log "   ⚠️  VM still showing as running, trying again..."
+                    fi
+                else
+                    log "   ⚠️  Tart stop failed, trying again..."
+                fi
+                
+                if [ $stop_attempts -lt $max_stop_attempts ]; then
+                    sleep 5
+                fi
+            done
+            
+            # Final check - if VM is still running after all attempts, this is a problem
+            if tart list | grep "$vm_name" | grep -q "running"; then
+                log "   ❌ WARNING: VM still running after stop attempts - may be corrupted"
+                log "   ❌ This could cause clone failures in ci-macos.sh"
+                return 1
+            fi
+            
+            # Clean up any remaining background processes
             kill $vm_pid >/dev/null 2>&1 || true
-            sleep 5
             
             if [ "$validation_success" = true ]; then
                 log "✅ VM passed comprehensive validation - ready for building"
                 log "🎯 Base VM is ready for cloning: $LOCAL_IMAGE_NAME"
-        exit 0
-            else
+            exit 0
+        else
                 log "❌ VM failed comprehensive validation - not ready for building"
                 log "🔧 VM exists but is missing tools or has broken dependencies"
                 log "   Run without --check-only to rebuild and fix the VM"
@@ -1951,7 +2031,7 @@ EOF
             log "✅ Target VM passed validation - already ready for building!"
             log "🎯 Using existing VM: $LOCAL_IMAGE_NAME"
             log "   No rebuild necessary - VM is fully prepared and validated"
-            exit 0
+        exit 0
         else
             log "❌ Target VM exists but failed validation - will rebuild"
             log "🔧 Deleting corrupted target VM and rebuilding from scratch"

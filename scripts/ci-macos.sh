@@ -453,50 +453,28 @@ create_and_run_vm() {
         exit 1
     fi
     
-    # TEMPORARY WORKAROUND: Skip VM cloning if SKIP_VM_CLONE is set
-    if [ "${SKIP_VM_CLONE:-}" = "true" ]; then
-        log "⚠️  TEMPORARY WORKAROUND: Skipping VM clone due to SKIP_VM_CLONE=true"
-        log "   Assuming base VM is already working and using it directly"
-        log "   Base VM: $base_vm_image"
-        
-        # Use the base VM directly instead of cloning
-        vm_name="$base_vm_image"
-        log "✅ Using base VM directly: $vm_name"
-        
-        # Skip the clone operation entirely and go straight to VM startup
-        log "🔄 Proceeding to VM startup without cloning..."
-        
-    else
-        log "🔄 Attempting VM clone..."
-        
-        if ! tart clone "$base_vm_image" "$vm_name"; then
-            log "❌ Failed to clone VM from base image: $base_vm_image"
-            log "   This could indicate disk space issues or corrupted base image"
-            exit 1
-        fi
-        log "✅ VM cloned successfully: $vm_name"
-        
-        # Allocate VM resources for build performance
-        log "Allocating VM resources for build performance..."
-        log "  Setting memory: ${MACOS_VM_MEMORY:-6144}MB (${MACOS_VM_CONFIG_DESCRIPTION:-conservative default})"
-        log "  Setting CPUs: ${MACOS_VM_CPU:-4} cores"
-        tart set "$vm_name" --memory "${MACOS_VM_MEMORY:-6144}" --cpu "${MACOS_VM_CPU:-4}"
-        log "✅ VM resources allocated"
+    log "🔄 Attempting VM clone..."
+    
+    if ! tart clone "$base_vm_image" "$vm_name"; then
+        log "❌ Failed to clone VM from base image: $base_vm_image"
+        log "   This could indicate disk space issues or corrupted base image"
+        exit 1
     fi
+    log "✅ VM cloned successfully: $vm_name"
+    
+    # Allocate VM resources for build performance
+    log "Allocating VM resources for build performance..."
+    log "  Setting memory: ${MACOS_VM_MEMORY:-6144}MB (${MACOS_VM_CONFIG_DESCRIPTION:-conservative default})"
+    log "  Setting CPUs: ${MACOS_VM_CPU:-4} cores"
+    tart set "$vm_name" --memory "${MACOS_VM_MEMORY:-6144}" --cpu "${MACOS_VM_CPU:-4}"
+    log "✅ VM resources allocated"
     
     # Set up cleanup trap IMMEDIATELY after VM creation to prevent orphaned VMs
     cleanup_trap() {
         local exit_code=$?
         log "🛡️  Cleanup trap triggered (exit code: $exit_code)"
         if [ -n "${VM_NAME_FOR_CLEANUP:-}" ]; then
-            # SAFETY: Don't delete base VMs when using skip workaround
-            if [ "${SKIP_VM_CLONE:-}" = "true" ] && [ "$VM_NAME_FOR_CLEANUP" = "$base_vm_image" ]; then
-                log "⚠️  SKIP_VM_CLONE mode: Not deleting base VM $VM_NAME_FOR_CLEANUP"
-                log "   Only stopping the VM if it's running"
-                tart stop "$VM_NAME_FOR_CLEANUP" 2>/dev/null || true
-            else
-                cleanup_vm "$VM_NAME_FOR_CLEANUP"
-            fi
+            cleanup_vm "$VM_NAME_FOR_CLEANUP"
         else
             log "⚠️  No VM name available for cleanup"
         fi
@@ -904,7 +882,6 @@ show_usage() {
     echo "Environment Variables:"
     echo "  BASE_VM_IMAGE             Base VM image to clone (auto-determined if not set)"
     echo "  FORCE_BASE_IMAGE_REBUILD  Set to 'true' to force base image rebuild (default: false)"
-    echo "  SKIP_VM_CLONE             Set to 'true' to use base VM directly without cloning (TEMPORARY DEBUG)"
     echo ""
     echo "Examples:"
     echo "  $0                                           # Run default build on macOS 14"
