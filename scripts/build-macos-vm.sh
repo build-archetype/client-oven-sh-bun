@@ -783,146 +783,292 @@ check_remote_image() {
     return $pull_result
 }
 
-# Validate that a VM image has all required tools installed
-validate_vm_image_tools() {
-    local image_name="$1"
-    log "🔬 Validating tools in VM image: $image_name" >&2
+# Comprehensive VM validation that thoroughly checks if VM is ready for building
+comprehensive_vm_validation() {
+    local vm_name="$1"
+    local validation_mode="${2:-normal}"  # normal or check-only
     
-    # Start the VM temporarily for validation (redirect all output to stderr)
-    log "   Starting VM for validation..." >&2
-    tart run "$image_name" --no-graphics >/dev/null 2>&1 &
+    log "🔬 Comprehensive VM validation: $vm_name"
+    
+    # Step 1: Validate VM structure and detect corruption
+    log "   📁 Checking VM file structure..."
+    local vm_path="$HOME/.tart/vms/${vm_name}"
+    
+    if [ ! -d "$vm_path" ]; then
+        log "   ❌ VM directory missing: $vm_path"
+        return 1
+    fi
+    
+    # Check for essential VM files
+    local config_file="$vm_path/config.json"
+    local disk_file="$vm_path/disk.img"
+    
+    if [ ! -f "$config_file" ]; then
+        log "   ❌ config.json missing - VM corrupted"
+        return 1
+    elif ! jq . "$config_file" >/dev/null 2>&1; then
+        log "   ❌ config.json invalid JSON - VM corrupted"
+        return 1
+    elif [ ! -f "$disk_file" ]; then
+        log "   ❌ disk.img missing - VM corrupted"
+        return 1
+    else
+        log "   ✅ VM file structure valid"
+    fi
+    
+    # Step 2: Start VM and validate connectivity
+    log "   🚀 Starting VM for validation..."
+    tart run "$vm_name" --no-graphics >/dev/null 2>&1 &
     local vm_pid=$!
     
-    # Wait for VM to boot (reduced from 30s to 2s - modern VMs boot faster)
-    sleep 2
+    # Wait for VM to boot (increased timeout for reliability)
+    sleep 20
     
-    # Get VM IP (redirect stderr to avoid pollution)
+    # Get VM IP with retries
     local vm_ip=""
-    for i in {1..10}; do
-        vm_ip=$(tart ip "$image_name" 2>/dev/null || echo "")
+    for i in {1..30}; do
+        vm_ip=$(tart ip "$vm_name" 2>/dev/null || echo "")
         if [ -n "$vm_ip" ]; then
+            log "   ✅ VM booted successfully (IP: $vm_ip)"
             break
         fi
         sleep 2
     done
     
     if [ -z "$vm_ip" ]; then
-        log "   ❌ Could not get VM IP for validation" >&2
-        # Cleanup with output redirection
+        log "   ❌ Could not get VM IP - VM failed to boot properly"
         kill $vm_pid >/dev/null 2>&1 || true
         return 1
     fi
     
-    # Wait for SSH to be available
+    # Wait for SSH to be available with retries
     local ssh_ready=false
-    for i in {1..10}; do
-        if sshpass -p "admin" ssh $SSH_OPTS -o ConnectTimeout=2 admin@"$vm_ip" "echo 'test'" >/dev/null 2>&1; then
+    for i in {1..30}; do
+        if sshpass -p "admin" ssh $SSH_OPTS -o ConnectTimeout=3 admin@"$vm_ip" "echo 'ready'" >/dev/null 2>&1; then
             ssh_ready=true
+            log "   ✅ SSH connectivity established"
             break
         fi
         sleep 2
     done
     
     if [ "$ssh_ready" != "true" ]; then
-        log "   ❌ SSH not available for validation" >&2
-        # Cleanup with output redirection
+        log "   ❌ SSH not available - VM not responding to SSH"
         kill $vm_pid >/dev/null 2>&1 || true
         return 1
     fi
     
-    # Check critical tools
-    log "   Checking critical tools..." >&2
+    # Step 3: Comprehensive tool validation and functionality testing
+    log "   🔧 Running comprehensive tool validation..."
     local validation_cmd='
-        export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+        # Comprehensive PATH setup for all common installation locations
+        export PATH="/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
         
-        echo "=== TOOL VALIDATION ==="
+        # Source shell profiles that might set additional PATH
+        [ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile" 2>/dev/null || true
+        [ -f "$HOME/.bash_profile" ] && source "$HOME/.bash_profile" 2>/dev/null || true
+        [ -f "$HOME/.profile" ] && source "$HOME/.profile" 2>/dev/null || true
+        [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env" 2>/dev/null || true
+        
+        echo "=== COMPREHENSIVE VM VALIDATION ==="
+        echo "Current PATH: $PATH"
+        echo "Architecture: $(uname -m)"
+        echo "macOS Version: $(sw_vers -productVersion)"
+        echo ""
+        
         missing_tools=""
+        failed_tests=""
         
-        # Check bun (most critical)
-        if command -v bun >/dev/null 2>&1; then
-            echo "✅ bun: $(bun --version)"
+        # Function to test tool functionality
+        test_tool() {
+            local tool="$1"
+            local test_cmd="$2"
+            local expected_pattern="$3"
+            
+            if ! command -v "$tool" >/dev/null 2>&1; then
+                echo "❌ $tool: NOT FOUND"
+                missing_tools="$missing_tools $tool"
+                return 1
+            fi
+            
+            local tool_path=$(command -v "$tool")
+            echo "🔍 $tool: found at $tool_path"
+            
+            # Test basic functionality
+            if [ -n "$test_cmd" ]; then
+                echo "   Testing: $test_cmd"
+                local output
+                if output=$(eval "$test_cmd" 2>&1); then
+                    if [ -n "$expected_pattern" ]; then
+                        if echo "$output" | grep -q "$expected_pattern"; then
+                            echo "   ✅ $tool: functional test passed"
+                            return 0
+                        else
+                            echo "   ❌ $tool: functional test failed - unexpected output"
+                            echo "   Expected pattern: $expected_pattern"
+                            echo "   Actual output: $output"
+                            failed_tests="$failed_tests $tool"
+                            return 1
+                        fi
+                    else
+                        echo "   ✅ $tool: functional test passed"
+                        return 0
+                    fi
+                else
+                    echo "   ❌ $tool: functional test failed - command failed"
+                    echo "   Error output: $output"
+                    failed_tests="$failed_tests $tool"
+                    return 1
+                fi
+            else
+                echo "   ✅ $tool: presence verified"
+                return 0
+            fi
+        }
+        
+        echo "🔧 Testing critical build tools..."
+        
+        # Test Bun with functionality check
+        test_tool "bun" "bun --version" "[0-9]"
+        
+        # Test Rust toolchain
+        test_tool "cargo" "cargo --version" "cargo [0-9]"
+        test_tool "rustc" "rustc --version" "rustc [0-9]"
+        
+        # Test CMake
+        test_tool "cmake" "cmake --version" "cmake version [0-9]"
+        
+        # Test Ninja with special diagnostics
+        if ! command -v ninja >/dev/null 2>&1; then
+            echo "❌ ninja: NOT FOUND"
+            echo "   🔍 Ninja diagnostics:"
+            echo "   Checking common ninja locations..."
+            for ninja_path in /opt/homebrew/bin/ninja /usr/local/bin/ninja /usr/bin/ninja; do
+                if [ -f "$ninja_path" ]; then
+                    echo "   ✅ Found ninja file at: $ninja_path"
+                    if [ -x "$ninja_path" ]; then
+                        echo "   ✅ Ninja is executable"
+                        version=$("$ninja_path" --version 2>/dev/null || echo "version check failed")
+                        echo "   ✅ Ninja version: $version"
+                        echo "   ⚠️  Ninja exists but not in PATH - PATH issue detected"
+                    else
+                        echo "   ❌ Ninja exists but is not executable"
+                    fi
+                else
+                    echo "   ❌ Not found: $ninja_path"
+                fi
+            done
+            
+            # Check Homebrew ninja installation
+            if command -v brew >/dev/null 2>&1; then
+                echo "   🍺 Checking Homebrew ninja installation..."
+                brew_info=$(brew list ninja 2>/dev/null || echo "not installed")
+                echo "   Brew ninja status: $brew_info"
+                
+                if [ "$brew_info" != "not installed" ]; then
+                    brew_prefix=$(brew --prefix 2>/dev/null || echo "unknown")
+                    echo "   Brew prefix: $brew_prefix"
+                    potential_ninja="$brew_prefix/bin/ninja"
+                    if [ -f "$potential_ninja" ]; then
+                        echo "   ✅ Found ninja via brew: $potential_ninja"
+                        echo "   ⚠️  PATH issue - ninja installed but not accessible"
+                    else
+                        echo "   ❌ Expected ninja not found: $potential_ninja"
+                    fi
+                fi
+            fi
+            missing_tools="$missing_tools ninja"
         else
-            echo "❌ bun: MISSING"
-            missing_tools="$missing_tools bun"
+            test_tool "ninja" "ninja --version" "[0-9]"
         fi
         
-        # Check other critical tools
-        for tool in cargo cmake clang ninja; do
-            if command -v "$tool" >/dev/null 2>&1; then
-                echo "✅ $tool: available"
-            else
-                echo "❌ $tool: MISSING"
-                missing_tools="$missing_tools $tool"
-            fi
-        done
+        # Test C/C++ compilers
+        test_tool "clang" "clang --version" "clang version"
+        test_tool "clang++" "clang++ --version" "clang version"
         
-        echo "======================="
+        # Test codesigning tools (critical for Bun builds)
+        test_tool "codesign" "codesign --version" ""
+        test_tool "xcrun" "xcrun --version" "xcrun version"
+        
+        # Test SDK availability
         echo ""
-        echo "=== CODESIGNING ENVIRONMENT CHECK ==="
-        echo "Verifying codesigning tools and SDK for Mach-O generation..."
-        
-        # Check codesigning tools
-        echo "🔐 Codesigning Tools:"
-        codesign_missing=""
-        for tool in codesign xcrun; do
-            if command -v "$tool" >/dev/null 2>&1; then
-                echo "  ✅ $tool: available"
-            else
-                echo "  ❌ $tool: MISSING"
-                codesign_missing="$codesign_missing $tool"
-            fi
-        done
-        
-        # Check SDK availability
-        echo ""
-        echo "📱 SDK Check:"
+        echo "🛠️  Testing SDK and development environment..."
         if command -v xcrun >/dev/null 2>&1; then
             sdk_path=$(xcrun --show-sdk-path 2>/dev/null || echo "FAILED")
             if [ "$sdk_path" != "FAILED" ] && [ -d "$sdk_path" ]; then
-                echo "  ✅ SDK path: $sdk_path"
+                echo "✅ SDK available: $sdk_path"
                 
-                # Check key SDK components
+                # Test critical SDK components
                 if [ -d "$sdk_path/usr/include" ] && [ -d "$sdk_path/usr/lib" ]; then
-                    echo "  ✅ SDK components: headers and libraries present"
+                    echo "✅ SDK components: headers and libraries present"
                 else
-                    echo "  ⚠️  SDK components: missing headers or libraries"
+                    echo "❌ SDK components: missing headers or libraries"
+                    failed_tests="$failed_tests SDK"
                 fi
             else
-                echo "  ❌ SDK path: not accessible or missing"
-                codesign_missing="$codesign_missing SDK"
+                echo "❌ SDK not accessible: $sdk_path"
+                failed_tests="$failed_tests SDK"
             fi
-        else
-            echo "  ❌ xcrun: not available for SDK detection"
-            codesign_missing="$codesign_missing xcrun"
         fi
         
-        # Check Xcode tools
+        # Test basic compilation (critical test)
         echo ""
-        echo "🛠️  Developer Tools:"
-        if command -v xcode-select >/dev/null 2>&1; then
-            xcode_path=$(xcode-select -p 2>/dev/null || echo "NOT SET")
-            if [ -d "$xcode_path" ]; then
-                echo "  ✅ Xcode developer path: $xcode_path"
+        echo "🏗️  Testing basic C++ compilation..."
+        cat > /tmp/test_compile.cpp << "EOF"
+#include <iostream>
+int main() {
+    std::cout << "Hello World" << std::endl;
+    return 0;
+}
+EOF
+        
+        if clang++ -o /tmp/test_compile /tmp/test_compile.cpp 2>/dev/null; then
+            if /tmp/test_compile 2>/dev/null | grep -q "Hello World"; then
+                echo "✅ C++ compilation test: PASSED"
+                rm -f /tmp/test_compile /tmp/test_compile.cpp
             else
-                echo "  ❌ Xcode developer path: invalid or missing"
-                codesign_missing="$codesign_missing xcode-select"
+                echo "❌ C++ compilation test: executable failed to run correctly"
+                failed_tests="$failed_tests compilation"
             fi
         else
-            echo "  ❌ xcode-select: not available"
-            codesign_missing="$codesign_missing xcode-select"
+            echo "❌ C++ compilation test: FAILED to compile"
+            failed_tests="$failed_tests compilation"
         fi
         
-        echo "============================================"
+        # Test Bun compilation capability (most critical test)
+        echo ""
+        echo "🎯 Testing Bun build capability..."
+        cat > /tmp/test_bun.js << "EOF"
+console.log("Hello from Bun!");
+EOF
         
-        # Return status
+        if bun build /tmp/test_bun.js --outfile /tmp/test_bun_built.js 2>/dev/null; then
+            if [ -f /tmp/test_bun_built.js ]; then
+                echo "✅ Bun build test: PASSED"
+                rm -f /tmp/test_bun.js /tmp/test_bun_built.js
+            else
+                echo "❌ Bun build test: output file not created"
+                failed_tests="$failed_tests bun-build"
+            fi
+        else
+            echo "❌ Bun build test: FAILED"
+            failed_tests="$failed_tests bun-build"
+        fi
+        
+        echo ""
+        echo "=== VALIDATION SUMMARY ==="
         if [ -n "$missing_tools" ]; then
-            echo "VALIDATION_FAILED: Missing tools:$missing_tools"
-            exit 1
-        elif [ -n "$codesign_missing" ]; then
-            echo "VALIDATION_FAILED: Missing codesigning tools:$codesign_missing"
+            echo "❌ MISSING TOOLS:$missing_tools"
+        fi
+        if [ -n "$failed_tests" ]; then
+            echo "❌ FAILED TESTS:$failed_tests"
+        fi
+        
+        if [ -n "$missing_tools" ] || [ -n "$failed_tests" ]; then
+            echo "VALIDATION_FAILED: VM not ready for building"
             exit 1
         else
-            echo "VALIDATION_PASSED: All critical tools and codesigning environment ready"
+            echo "VALIDATION_PASSED: VM ready for production builds"
             exit 0
         fi
     '
@@ -933,487 +1079,24 @@ validate_vm_image_tools() {
         validation_success=true
     fi
     
-    # Log validation output (to stderr to avoid pollution)
+    # Log validation output
     echo "$validation_result" | while read -r line; do
-        log "   $line" >&2
+        log "   $line"
     done
     
-    # Cleanup VM with proper output redirection to prevent pollution
-    log "   Shutting down validation VM..." >&2
-    
-    # Try graceful shutdown first (redirect all output)
+    # Cleanup VM
+    log "   🛑 Shutting down validation VM..."
     sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
-    
-    # Wait for VM to stop (reduced from 30s to 2s)
-    sleep 2
-    
-    # Force kill if still running (redirect all output)
+    sleep 10
     kill $vm_pid >/dev/null 2>&1 || true
+    sleep 5
     
-    # Wait for complete cleanup (reduced from 5s to 2s)
-    sleep 2
-    
-    if [ "$validation_success" = "true" ]; then
-        log "   ✅ VM image validation passed - tools and codesigning environment ready" >&2
+    if [ "$validation_success" = true ]; then
+        log "   ✅ VM passed comprehensive validation - ready for building"
         return 0
     else
-        log "   ❌ VM image validation failed - missing tools or codesigning environment" >&2
+        log "   ❌ VM failed comprehensive validation - not ready for building"
         return 1
-    fi
-}
-
-# Enhanced caching decision that includes tool validation
-make_caching_decision() {
-    local target_bun_version="$1"
-    local target_bootstrap_version="$2"
-    local target_image_name="$3"
-    local remote_image_url="$4"
-    local force_refresh="$5"
-    local force_remote_refresh="${6:-false}"
-    local local_dev_mode="${7:-false}"
-    local disable_autoupdate="${8:-false}"
-    local force_oci_rebuild="${9:-false}"
-    
-    log "🧠 Making smart caching decision..." >&2
-    log "  Target: Bun $target_bun_version, Bootstrap $target_bootstrap_version" >&2
-    log "  Force refresh: $force_refresh" >&2
-    log "  Force OCI rebuild: $force_oci_rebuild" >&2
-    log "  Force remote refresh: $force_remote_refresh" >&2
-    log "  Local dev mode: $local_dev_mode" >&2
-    log "  Disable autoupdate: $disable_autoupdate" >&2
-    
-    # If force OCI rebuild, skip all checks and build from OCI base images
-    if [ "$force_oci_rebuild" = true ]; then
-        log "🔄 Force OCI rebuild requested - will build directly from OCI base images" >&2
-        log "🎯 Decision: Build new image from OCI base (skipping all caches and registry)" >&2
-        echo "build_new_oci"
-        return
-    fi
-    
-    # If force refresh, skip all local checks
-    if [ "$force_refresh" = true ]; then
-        log "🔄 Force refresh requested - will check remote then build" >&2
-        if [ "$local_dev_mode" = true ]; then
-            log "🏠 Local dev mode: Skipping remote check, will build from base" >&2
-            echo "build_new"
-        elif check_remote_image "$remote_image_url" "$force_remote_refresh"; then
-            echo "use_remote"
-        else
-            echo "build_new"
-        fi
-        return
-    fi
-    
-    # Check local images first (always do this regardless of mode)
-    local local_analysis=$(check_local_image_version "$target_bun_version" "$target_bootstrap_version" "$target_image_name")
-    
-    # Parse the enhanced results: exact|compatible|usable|all
-    local exact_match="${local_analysis%%|*}"
-    local remaining="${local_analysis#*|}"
-    local compatible_match="${remaining%%|*}"
-    remaining="${remaining#*|}"
-    local usable_images="${remaining%%|*}"
-    local all_images="${remaining#*|}"
-    
-    # Priority 1: Exact local match - trust existing images (no validation to avoid deleting working images)
-    if [ -n "$exact_match" ]; then
-        log "🔍 Found exact local match: $exact_match" >&2
-        log "🎯 Decision: Use exact local match ($exact_match) - trusting existing image" >&2
-        echo "use_local_exact|$exact_match"
-        return
-    fi
-    
-    # Priority 2: Compatible local match (same minor version - incremental update)
-    if [ -n "$compatible_match" ]; then
-        log "🔍 Found compatible local match: $compatible_match" >&2
-        log "🔄 Compatible local image found: $compatible_match" >&2
-        log "🎯 Decision: Build incrementally from compatible local base" >&2
-        echo "build_incremental|$compatible_match"
-        return
-    fi
-    
-    # Priority 3: Check remote registry (skip only in local dev mode)
-    if [ "$local_dev_mode" = true ]; then
-        log "🏠 Local dev mode: Skipping remote registry checks" >&2
-        log "🎯 Decision: Build new image from local base (local dev mode)" >&2
-        echo "build_new"
-        return
-    else
-        log "🌐 Checking remote registry..." >&2
-        if check_remote_image "$remote_image_url" "$force_remote_refresh"; then
-            log "🎯 Decision: Use remote image" >&2
-            echo "use_remote|$remote_image_url"
-            return
-        fi
-        log "❌ No remote image found, will build new" >&2
-    fi
-    
-    # Priority 4: Build from scratch
-    log "🎯 Decision: Build new image from scratch (no valid options found)" >&2
-    echo "build_new"
-}
-
-# Execute the caching decision
-execute_caching_decision() {
-    local decision="$1"
-    local target_image_name="$2"
-    local remote_image_url="$3"
-    
-    # Clean up the decision string in case it got polluted with VM messages
-    # Extract the last line that looks like a valid decision
-    local clean_decision
-    if echo "$decision" | grep -q "guest has stopped\|virtual machine"; then
-        log "⚠️  Decision string appears polluted with VM messages, cleaning..." >&2
-        # Get the last line that looks like a decision (contains build_ or use_)
-        clean_decision=$(echo "$decision" | grep -E "(build_|use_)" | tail -1 || echo "$decision")
-        log "   Original: '$decision'" >&2
-        log "   Cleaned:  '$clean_decision'" >&2
-    else
-        clean_decision="$decision"
-    fi
-    
-    # Debug the decision string
-    log "⚡ Executing decision: '$clean_decision'" >&2
-    
-    local action="${clean_decision%%|*}"
-    local target="${clean_decision#*|}"
-    
-    log "  Action: '$action'" >&2
-    log "  Target: '$target'" >&2
-    
-    case "$action" in
-        "use_local_exact")
-            log "✅ Using exact local match: $target" >&2
-            log "Image ready: $target_image_name" >&2
-            return 0
-            ;;
-            
-        "use_remote")
-            log "📥 Using remote image: $remote_image_url" >&2
-            # Clean up any existing local image to avoid conflicts
-            tart delete "$target_image_name" 2>/dev/null || log "No existing local image to delete" >&2
-            # Clone from remote (already pulled in check_remote_image)
-            log "📋 Cloning remote image to local storage..." >&2
-            tart clone "$remote_image_url" "$target_image_name"
-            log "✅ Remote image cloned locally as: $target_image_name" >&2
-            return 0
-            ;;
-            
-        "build_incremental")
-            log "🔄 Building incrementally from compatible base: $target" >&2
-            # Set environment variable for main build logic to know about incremental build
-            export INCREMENTAL_BASE_IMAGE="$target"
-            return 1  # Signal that we need to build
-            ;;
-            
-        "build_new")
-            log "🏗️  Building new image: $target_image_name" >&2
-            # Clear any incremental base image
-            unset INCREMENTAL_BASE_IMAGE
-            return 1  # Signal that we need to build
-            ;;
-            
-        "build_new_oci")
-            log "🏗️  Building new image from OCI base images: $target_image_name" >&2
-            log "   Skipping registry checks and building directly from OCI base" >&2
-            # Clear any incremental base image
-            unset INCREMENTAL_BASE_IMAGE
-            # Set flag to indicate OCI rebuild
-            export BUILD_FROM_OCI=true
-            return 1  # Signal that we need to build
-            ;;
-            
-        *)
-            log "❌ Unknown decision: '$clean_decision'" >&2
-            log "❌ Action was: '$action'" >&2
-            log "❌ Target was: '$target'" >&2
-            log "❌ This suggests a parsing error in the decision string" >&2
-            log "❌ Original decision was: '$decision'" >&2
-            # Fallback to build_new if we can't parse the decision
-            log "🔄 Falling back to build_new as safe default..." >&2
-            unset INCREMENTAL_BASE_IMAGE
-            return 1
-            ;;
-    esac
-}
-
-# Check if local image exists and get its creation time (legacy function, kept for compatibility)
-get_local_image_info() {
-    local image_name="$1"
-    
-    log "🔍 Checking for local image: $image_name"
-    
-    # Get the full tart list output
-    local tart_output=$(tart list 2>&1)
-    
-    # Check if our specific image exists
-    if echo "$tart_output" | grep -q "^local.*${image_name}"; then
-        log "✅ Found local image: $image_name"
-        echo "exists"
-    else
-        log "❌ No local image found: $image_name"
-        echo "missing"
-    fi
-}
-
-# Get bootstrap version from the bootstrap script (single source of truth)
-get_bootstrap_version() {
-    local script_path="$1"
-    if [ ! -f "$script_path" ]; then
-        echo "0"
-        return
-    fi
-    
-    # Extract version from comment like "# Version: 4.0 - description"
-    local version=$(grep -E "^# Version: " "$script_path" | sed -E 's/^# Version: ([0-9.]+).*/\1/' | head -1)
-    if [ -n "$version" ]; then
-        echo "$version"
-    else
-        echo "0"
-    fi
-}
-
-# Enhanced GitHub credentials loading with keychain support
-load_github_credentials() {
-    local force_prompt="${1:-false}"
-    local interactive_mode="${2:-true}"
-    
-    log "🔐 Loading GitHub credentials for registry access..."
-    
-    # If credentials already loaded and not forcing prompt, use them
-    if [ "$force_prompt" != "true" ] && [ -n "${GITHUB_USERNAME:-}" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
-        log "✅ Using existing GitHub credentials: $GITHUB_USERNAME"
-        export TART_REGISTRY_USERNAME="$GITHUB_USERNAME"
-        export TART_REGISTRY_PASSWORD="$GITHUB_TOKEN"
-        return 0
-    fi
-    
-    # Method 1: Try loading from CI keychain (most secure)
-    log "   Trying CI keychain..."
-    local keychain_username=""
-    local keychain_token=""
-    
-    # Check if CI keychain exists
-    local ci_keychain="$HOME/Library/Keychains/bun-ci.keychain-db"
-    local keychain_password_file="$HOME/.buildkite-agent/ci-keychain-password.txt"
-    
-    if [ -f "$ci_keychain" ]; then
-        log "   Found CI keychain: $ci_keychain"
-        
-        # Unlock keychain if password file exists
-        if [ -f "$keychain_password_file" ]; then
-            local keychain_password=$(cat "$keychain_password_file" 2>/dev/null || echo "")
-            if [ -n "$keychain_password" ]; then
-                security unlock-keychain -p "$keychain_password" "$ci_keychain" 2>/dev/null || true
-            fi
-        fi
-        
-        # Load credentials using search all keychains method (works over SSH)
-        keychain_username=$(security find-generic-password -a "bun-ci" -s "github-username" -w 2>/dev/null || echo "")
-        keychain_token=$(security find-generic-password -a "bun-ci" -s "github-token" -w 2>/dev/null || echo "")
-        
-        if [ -n "$keychain_username" ] && [ -n "$keychain_token" ]; then
-            log "✅ Loaded GitHub credentials from CI keychain: $keychain_username"
-            export GITHUB_USERNAME="$keychain_username"
-            export GITHUB_TOKEN="$keychain_token"
-            export TART_REGISTRY_USERNAME="$keychain_username"
-            export TART_REGISTRY_PASSWORD="$keychain_token"
-            return 0
-        else
-            log "   CI keychain exists but no credentials found"
-        fi
-    else
-        log "   No CI keychain found at $ci_keychain"
-    fi
-    
-    # Method 2: Try environment variables
-    log "   Trying environment variables..."
-    if [ -n "${GITHUB_USERNAME:-}" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
-        log "✅ Using GitHub credentials from environment: $GITHUB_USERNAME"
-        export TART_REGISTRY_USERNAME="$GITHUB_USERNAME"
-        export TART_REGISTRY_PASSWORD="$GITHUB_TOKEN"
-        return 0
-    else
-        log "   No environment variables found"
-    fi
-    
-    # Method 3: Try legacy credential files
-    log "   Trying legacy credential files..."
-    if [ -f /tmp/github-token.txt ] && [ -f /tmp/github-username.txt ]; then
-        local file_token=$(cat /tmp/github-token.txt 2>/dev/null || echo "")
-        local file_username=$(cat /tmp/github-username.txt 2>/dev/null || echo "")
-        if [ -n "$file_token" ] && [ -n "$file_username" ]; then
-            log "✅ Using GitHub credentials from legacy files: $file_username"
-            export GITHUB_USERNAME="$file_username"
-            export GITHUB_TOKEN="$file_token"
-            export TART_REGISTRY_USERNAME="$file_username"
-            export TART_REGISTRY_PASSWORD="$file_token"
-            return 0
-        else
-            log "   Legacy files exist but are empty or unreadable"
-        fi
-    else
-        log "   No legacy credential files found"
-    fi
-    
-    # Method 4: Try helper script from setup-mac-server.sh
-    log "   Trying helper script..."
-    local helper_script="$HOME/.buildkite-agent/load-github-credentials.sh"
-    if [ -f "$helper_script" ] && [ -x "$helper_script" ]; then
-        log "   Found credentials helper script: $helper_script"
-        if source "$helper_script" 2>/dev/null; then
-            if [ -n "${GITHUB_USERNAME:-}" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
-                log "✅ Loaded GitHub credentials from helper script: $GITHUB_USERNAME"
-                return 0
-            fi
-        fi
-        log "   Helper script failed to load credentials"
-    else
-        log "   No helper script found at $helper_script"
-    fi
-    
-    # Method 5: Interactive prompt (only if in interactive mode and not in CI)
-    if [ "$interactive_mode" = "true" ] && [ -t 0 ] && [ -z "${CI:-}" ] && [ -z "${BUILDKITE:-}" ]; then
-        log "   No credentials found, prompting user..."
-        
-        # Prompt for credentials
-        local input_username=""
-        local input_token=""
-        
-        echo -n "Enter GitHub username for registry access: "
-        read input_username
-        
-        if [ -n "$input_username" ]; then
-            echo -n "Enter GitHub token (will be hidden): "
-            # Read token securely
-            local char
-            while IFS= read -r -s -n1 char; do
-                if [[ $char == $'\0' || $char == $'\n' ]]; then
-                    break
-                fi
-                if [[ $char == $'\177' ]]; then
-                    if [ -n "$input_token" ]; then
-                        input_token="${input_token%?}"
-                        printf '\b \b'
-                    fi
-                else
-                    input_token+="$char"
-                    printf '•'
-                fi
-            done
-            echo
-            
-            if [ -n "$input_token" ]; then
-                log "✅ Using manually entered GitHub credentials: $input_username"
-                export GITHUB_USERNAME="$input_username"
-                export GITHUB_TOKEN="$input_token"
-                export TART_REGISTRY_USERNAME="$input_username"
-                export TART_REGISTRY_PASSWORD="$input_token"
-                
-                # Offer to store in keychain for future use
-                echo -n "Store credentials in CI keychain for future use? (y/n): "
-                read store_choice
-                if [[ "$store_choice" == "y" || "$store_choice" == "Y" ]]; then
-                    store_credentials_in_keychain "$input_username" "$input_token"
-                fi
-                
-                return 0
-            else
-                log "   No token entered"
-            fi
-        else
-            log "   No username entered"
-        fi
-    else
-        log "   Skipping interactive prompt (non-interactive mode or CI environment)"
-    fi
-    
-    # No credentials found
-    log "❌ No GitHub credentials found"
-    log "   Registry operations will be attempted without authentication"
-    log "   This may fail for private repositories or pushing images"
-    return 1
-}
-
-# Store credentials in CI keychain for future use
-store_credentials_in_keychain() {
-    local username="$1"
-    local token="$2"
-    
-    log "🔒 Storing GitHub credentials in CI keychain..."
-    
-    # Create CI keychain if it doesn't exist
-    local ci_keychain="$HOME/Library/Keychains/bun-ci.keychain-db"
-    local keychain_password_file="$HOME/.buildkite-agent/ci-keychain-password.txt"
-    
-    if [ ! -f "$ci_keychain" ]; then
-        log "   Creating CI keychain..."
-        
-        # Create directories
-        mkdir -p "$HOME/.buildkite-agent"
-        mkdir -p "$HOME/Library/Keychains"
-        
-        # Generate secure password
-        local keychain_password=$(openssl rand -base64 32)
-        
-        # Create keychain
-        security create-keychain -p "$keychain_password" "$ci_keychain"
-        security set-keychain-settings "$ci_keychain"
-        security list-keychains -s "$ci_keychain" $(security list-keychains -d user | tr -d '"')
-        security unlock-keychain -p "$keychain_password" "$ci_keychain"
-        
-        # Store password for future use
-        echo "$keychain_password" > "$keychain_password_file"
-        chmod 600 "$keychain_password_file"
-        
-        log "   ✅ CI keychain created"
-    else
-        log "   Using existing CI keychain"
-        
-        # Unlock if password file exists
-        if [ -f "$keychain_password_file" ]; then
-            local keychain_password=$(cat "$keychain_password_file" 2>/dev/null || echo "")
-            if [ -n "$keychain_password" ]; then
-                security unlock-keychain -p "$keychain_password" "$ci_keychain" 2>/dev/null || true
-            fi
-        fi
-    fi
-    
-    # Store credentials (remove existing first to avoid duplicates)
-    security delete-generic-password -a "bun-ci" -s "github-username" "$ci_keychain" 2>/dev/null || true
-    security delete-generic-password -a "bun-ci" -s "github-token" "$ci_keychain" 2>/dev/null || true
-    
-    # Add new credentials
-    security add-generic-password -a "bun-ci" -s "github-username" -w "$username" "$ci_keychain"
-    security add-generic-password -a "bun-ci" -s "github-token" -w "$token" "$ci_keychain"
-    
-    log "   ✅ Credentials stored securely in CI keychain"
-    
-    # Create helper script if it doesn't exist
-    local helper_script="$HOME/.buildkite-agent/load-github-credentials.sh"
-    if [ ! -f "$helper_script" ]; then
-        cat > "$helper_script" << 'CREDENTIALS_SCRIPT_END'
-#!/bin/bash
-# Load GitHub credentials from keychain (using search all keychains method that works over SSH)
-
-GITHUB_USERNAME=$(security find-generic-password -a "bun-ci" -s "github-username" -w 2>/dev/null)
-GITHUB_TOKEN=$(security find-generic-password -a "bun-ci" -s "github-token" -w 2>/dev/null)
-
-if [ -n "$GITHUB_USERNAME" ] && [ -n "$GITHUB_TOKEN" ]; then
-    export TART_REGISTRY_USERNAME="$GITHUB_USERNAME"
-    export TART_REGISTRY_PASSWORD="$GITHUB_TOKEN"
-    export GITHUB_USERNAME="$GITHUB_USERNAME"
-    export GITHUB_TOKEN="$GITHUB_TOKEN"
-    echo "✅ GitHub credentials loaded: $GITHUB_USERNAME"
-    return 0
-else
-    echo "❌ Failed to load GitHub credentials from keychain"
-    return 1
-fi
-CREDENTIALS_SCRIPT_END
-        
-        chmod +x "$helper_script"
-        log "   ✅ Helper script created at $helper_script"
     fi
 }
 
@@ -1652,140 +1335,59 @@ main() {
     REMOTE_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}-${ARCH}:${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
     LATEST_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}-${ARCH}:latest"
     
-    # Handle check-only mode - exit early with status code
+    # Handle check-only mode - but with comprehensive validation
     if [ "$check_only" = true ]; then
         log "=== CHECK-ONLY MODE ==="
-        log "🔍 Checking if base VM exists: $LOCAL_IMAGE_NAME"
+        log "🔍 Checking if base VM exists and is ready: $LOCAL_IMAGE_NAME"
         
         # Check if the exact VM exists locally
         if tart list 2>/dev/null | grep -q "^local.*$LOCAL_IMAGE_NAME"; then
             log "✅ Base VM exists: $LOCAL_IMAGE_NAME"
-            exit 0
-        else
-            log "❌ Base VM does not exist: $LOCAL_IMAGE_NAME"
-            log "   Available VMs:"
-            tart list | grep -E "bun-build-macos" || log "   (no bun-build-macos VMs found)"
-            exit 1
-        fi
-    fi
-    
-    log "Configuration:"
-    log "  macOS Release: $MACOS_RELEASE"
-    log "  Architecture: $ARCH"
-    log "  Base image: $BASE_IMAGE"
-    log "  Local name: $LOCAL_IMAGE_NAME"
-    log "  Remote URL: $REMOTE_IMAGE_URL"
-    log "  Bootstrap version: $BOOTSTRAP_VERSION"
-    log "  Force refresh: $force_refresh"
-    log "  Disable autoupdate: $disable_autoupdate"
-    
-    # Check for disable-autoupdate mode
-    if [ "$disable_autoupdate" = true ]; then
-        log "=== DISABLE AUTOUPDATE MODE ==="
-        log "🔒 Autoupdate disabled - using existing VMs without version checks"
-        
-        # Find the most recent VM image for this macOS release and architecture
-        local tart_output=$(tart list 2>&1)
-        local existing_image=""
-        local best_version="0.0.0"
-        
-        # Look for any bun-build-macos image with matching macOS release and architecture
-        while IFS= read -r line; do
-            if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+) ]]; then
-                local image_name="${BASH_REMATCH[1]}"
+            log "🔬 Running comprehensive validation to ensure VM is ready for building..."
+            
+            # Use the same validation logic as the build mode
+            # Validate VM structure and detect corruption
+            local vm_path="$HOME/.tart/vms/${LOCAL_IMAGE_NAME}"
+            local corruption_detected=false
+            
+            if [ -d "$vm_path" ]; then
+                # Check for essential VM files
+                local config_file="$vm_path/config.json"
+                local disk_file="$vm_path/disk.img"
                 
-                # Check if it matches our macOS release and architecture pattern
-                if [[ "$image_name" =~ ^bun-build-macos-${MACOS_RELEASE}-(${ARCH})-[0-9]+\.[0-9]+\.[0-9]+-bootstrap-[0-9]+\.[0-9]+$ ]]; then
-                    # Parse version from this image
-                    local image_info=$(parse_image_name "$image_name")
-                    local remaining="${image_info#*|}"  # Skip macOS release
-                    remaining="${remaining#*|}"         # Skip architecture
-                    local bun_version="${remaining%%|*}" # Get Bun version
-                    
-                    log "    Found candidate: $image_name (Bun: $bun_version)"
-                    
-                    # Keep track of the highest version
-                    if version_compare "$bun_version" "$best_version"; then
-                        existing_image="$image_name"
-                        best_version="$bun_version"
-                        log "      ✅ New best candidate (version: $bun_version)"
-                    else
-                        log "      ⬇️  Older version: $bun_version <= $best_version"
-                    fi
+                if [ ! -f "$config_file" ]; then
+                    log "   ❌ config.json missing - VM corrupted"
+                    corruption_detected=true
+                elif ! jq . "$config_file" >/dev/null 2>&1; then
+                    log "   ❌ config.json invalid JSON - VM corrupted"
+                    corruption_detected=true
+                elif [ ! -f "$disk_file" ]; then
+                    log "   ❌ disk.img missing - VM corrupted"
+                    corruption_detected=true
+                else
+                    log "   ✅ VM structure appears valid"
                 fi
-            fi
-        done <<< "$tart_output"
-        
-        if [ -n "$existing_image" ]; then
-            log "✅ Using existing VM: $existing_image (version: $best_version)"
-            log "Final image name: $existing_image"
-            log "Available images:"
-            tart list | grep -E "(NAME|bun-build-macos)" || tart list
-            exit 0
-        else
-            log "❌ No existing VM found for macOS $MACOS_RELEASE with architecture $ARCH"
-            log "   Looking for pattern: bun-build-macos-${MACOS_RELEASE}-${ARCH}-*"
-            log "   Available VMs:"
-            tart list | grep -E "bun-build-macos" || log "   (none)"
-            log "   Please build a VM first without --disable-autoupdate"
-            exit 1
-        fi
-    fi
-    
-    # === SIMPLE VM CHECK AND BUILD LOGIC
-    log "=== SIMPLE VM CHECK ==="
-
-    # Step 1: Check if exact VM exists and validate its integrity
-    if tart list 2>/dev/null | grep -q "^local.*$LOCAL_IMAGE_NAME"; then
-        log "✅ Found VM: $LOCAL_IMAGE_NAME"
-        
-        # Validate VM structure and detect corruption
-        log "🔍 Validating VM integrity..."
-        local vm_path="$HOME/.tart/vms/${LOCAL_IMAGE_NAME}"
-        local corruption_detected=false
-        
-        if [ -d "$vm_path" ]; then
-            # Check for essential VM files
-            local config_file="$vm_path/config.json"
-            local disk_file="$vm_path/disk.img"
-            
-            if [ ! -f "$config_file" ]; then
-                log "   ❌ config.json missing - VM corrupted"
-                corruption_detected=true
-            elif ! jq . "$config_file" >/dev/null 2>&1; then
-                log "   ❌ config.json invalid JSON - VM corrupted"
-                corruption_detected=true
-            elif [ ! -f "$disk_file" ]; then
-                log "   ❌ disk.img missing - VM corrupted"
-                corruption_detected=true
             else
-                log "   ✅ VM structure appears valid"
+                log "   ❌ VM directory missing - metadata corruption"
+                corruption_detected=true
             fi
-        else
-            log "   ❌ VM directory missing - metadata corruption"
-            corruption_detected=true
-        fi
-        
-        # If corruption detected, delete and rebuild
-        if [ "$corruption_detected" = true ]; then
-            log "🔧 VM corruption detected - deleting and rebuilding..."
-            tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
-            log "   Deleted corrupted VM, will rebuild from scratch"
-        else
-            # VM exists and structure is valid - now validate dependencies
-            log "🔬 Validating VM dependencies via SSH..."
             
-            # Start the VM temporarily for validation
-            log "   Starting VM for dependency validation..."
+            if [ "$corruption_detected" = true ]; then
+                log "❌ VM is corrupted and not ready for building"
+                exit 1
+            fi
+            
+            # Now run comprehensive dependency validation
+            log "   Starting VM for comprehensive dependency validation..."
             tart run "$LOCAL_IMAGE_NAME" --no-graphics >/dev/null 2>&1 &
             local vm_pid=$!
             
             # Wait for VM to boot
-            sleep 15
+            sleep 20
             
             # Get VM IP
             local vm_ip=""
-            for i in {1..20}; do
+            for i in {1..30}; do
                 vm_ip=$(tart ip "$LOCAL_IMAGE_NAME" 2>/dev/null || echo "")
                 if [ -n "$vm_ip" ]; then
                     break
@@ -1793,199 +1395,272 @@ main() {
                 sleep 3
             done
             
-            if [ -n "$vm_ip" ]; then
-                # Wait for SSH to be available
-                local ssh_ready=false
-                for i in {1..20}; do
-                    if sshpass -p "admin" ssh $SSH_OPTS -o ConnectTimeout=3 admin@"$vm_ip" "echo 'ready'" >/dev/null 2>&1; then
-                        ssh_ready=true
-                        break
+            if [ -z "$vm_ip" ]; then
+                log "   ❌ Could not get VM IP - VM failed to boot properly"
+                kill $vm_pid >/dev/null 2>&1 || true
+                log "❌ VM is not ready for building"
+                exit 1
+            fi
+            
+            # Wait for SSH to be available
+            local ssh_ready=false
+            for i in {1..30}; do
+                if sshpass -p "admin" ssh $SSH_OPTS -o ConnectTimeout=3 admin@"$vm_ip" "echo 'ready'" >/dev/null 2>&1; then
+                    ssh_ready=true
+                    break
+                fi
+                sleep 3
+            done
+            
+            if [ "$ssh_ready" != "true" ]; then
+                log "   ❌ SSH not available - VM not responding properly"
+                kill $vm_pid >/dev/null 2>&1 || true
+                log "❌ VM is not ready for building"
+                exit 1
+            fi
+            
+            log "   ✅ VM booted and SSH ready (IP: $vm_ip)"
+            log "   🔧 Running comprehensive tool and functionality validation..."
+            
+            # Comprehensive validation (same as build mode)
+            local validation_cmd='
+                # Comprehensive PATH setup for all common installation locations
+                export PATH="/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+                
+                # Source shell profiles that might set additional PATH
+                [ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile" 2>/dev/null || true
+                [ -f "$HOME/.bash_profile" ] && source "$HOME/.bash_profile" 2>/dev/null || true
+                [ -f "$HOME/.profile" ] && source "$HOME/.profile" 2>/dev/null || true
+                [ -f "$HOME/.cargo/env" ] && source "$HOME/.cargo/env" 2>/dev/null || true
+                
+                echo "=== COMPREHENSIVE VM VALIDATION (CHECK-ONLY MODE) ==="
+                echo "Current PATH: $PATH"
+                echo "Architecture: $(uname -m)"
+                echo "macOS Version: $(sw_vers -productVersion)"
+                echo ""
+                
+                missing_tools=""
+                failed_tests=""
+                
+                echo "🔧 Testing critical build tools..."
+                
+                # Test Bun with functionality check
+                if ! command -v bun >/dev/null 2>&1; then
+                    echo "❌ bun: NOT FOUND"
+                    missing_tools="$missing_tools bun"
+                else
+                    echo "🔍 bun: found at $(command -v bun)"
+                    if bun_output=$(bun --version 2>&1) && echo "$bun_output" | grep -q "[0-9]"; then
+                        echo "   ✅ bun: functional test passed (version: $bun_output)"
+                    else
+                        echo "   ❌ bun: functional test failed"
+                        failed_tests="$failed_tests bun"
                     fi
-                    sleep 3
+                fi
+                
+                # Test Rust toolchain
+                for tool in cargo rustc; do
+                    if ! command -v "$tool" >/dev/null 2>&1; then
+                        echo "❌ $tool: NOT FOUND"
+                        missing_tools="$missing_tools $tool"
+                    else
+                        echo "🔍 $tool: found at $(command -v $tool)"
+                        if output=$($tool --version 2>&1) && echo "$output" | grep -q "[0-9]"; then
+                            echo "   ✅ $tool: functional test passed"
+                        else
+                            echo "   ❌ $tool: functional test failed"
+                            failed_tests="$failed_tests $tool"
+                        fi
+                    fi
                 done
                 
-                if [ "$ssh_ready" = true ]; then
-                    log "   ✅ SSH connection established"
-                    
-                    # Check critical dependencies
-                    local validation_cmd='
-                        # Comprehensive PATH setup for all common installation locations
-                        export PATH="/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
-                        
-                        # Also try to source common shell profiles that might set PATH
-                        [ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile" 2>/dev/null || true
-                        [ -f "$HOME/.bash_profile" ] && source "$HOME/.bash_profile" 2>/dev/null || true
-                        [ -f "$HOME/.profile" ] && source "$HOME/.profile" 2>/dev/null || true
-                        
-                        echo "=== DEPENDENCY VALIDATION ==="
-                        echo "Current PATH: $PATH"
-                        echo "Architecture: $(uname -m)"
-                        echo ""
-                        
-                        missing_deps=""
-                        
-                        # Check critical tools with detailed diagnostics
-                        for tool in bun cargo cmake clang ninja; do
-                            if command -v "$tool" >/dev/null 2>&1; then
-                                tool_path=$(command -v "$tool")
-                                echo "✅ $tool: available at $tool_path"
-                            else
-                                echo "❌ $tool: MISSING"
-                                
-                                # Special diagnostics for ninja
-                                if [ "$tool" = "ninja" ]; then
-                                    echo "   🔍 Ninja diagnostics:"
-                                    echo "   Checking common ninja locations..."
-                                    for ninja_path in /opt/homebrew/bin/ninja /usr/local/bin/ninja /usr/bin/ninja; do
-                                        if [ -f "$ninja_path" ]; then
-                                            echo "   ✅ Found ninja at: $ninja_path"
-                                            if [ -x "$ninja_path" ]; then
-                                                echo "   ✅ Ninja is executable"
-                                                version=$("$ninja_path" --version 2>/dev/null || echo "version check failed")
-                                                echo "   ✅ Ninja version: $version"
-                                            else
-                                                echo "   ❌ Ninja exists but is not executable"
-                                            fi
-                                        else
-                                            echo "   ❌ Not found: $ninja_path"
-                                        fi
-                                    done
-                                    
-                                    # Check if ninja is installed via brew
-                                    if command -v brew >/dev/null 2>&1; then
-                                        echo "   🍺 Checking Homebrew ninja installation..."
-                                        brew_info=$(brew list ninja 2>/dev/null || echo "not installed")
-                                        echo "   Brew ninja status: $brew_info"
-                                        
-                                        if [ "$brew_info" != "not installed" ]; then
-                                            brew_prefix=$(brew --prefix 2>/dev/null || echo "unknown")
-                                            echo "   Brew prefix: $brew_prefix"
-                                            potential_ninja="$brew_prefix/bin/ninja"
-                                            if [ -f "$potential_ninja" ]; then
-                                                echo "   ✅ Found ninja via brew: $potential_ninja"
-                                            else
-                                                echo "   ❌ Expected ninja not found: $potential_ninja"
-                                            fi
-                                        fi
-                                    fi
-                                fi
-                                
-                                missing_deps="$missing_deps $tool"
-                            fi
-                        done
-                        
-                        # Check codesigning tools
-                        for tool in codesign xcrun; do
-                            if command -v "$tool" >/dev/null 2>&1; then
-                                tool_path=$(command -v "$tool")
-                                echo "✅ $tool: available at $tool_path"
-                            else
-                                echo "❌ $tool: MISSING"
-                                missing_deps="$missing_deps $tool"
-                            fi
-                        done
-                        
-                        if [ -n "$missing_deps" ]; then
-                            echo "VALIDATION_FAILED: Missing dependencies:$missing_deps"
-                            exit 1
-                        else
-                            echo "VALIDATION_PASSED: All dependencies available"
-                            exit 0
-                        fi
-                    '
-                    
-                    local validation_result
-                    local validation_success=false
-                    if validation_result=$(sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$validation_cmd" 2>&1); then
-                        validation_success=true
-                    fi
-                    
-                    # Log validation output
-                    echo "$validation_result" | while read -r line; do
-                        log "   $line"
-                    done
-                    
-                    # Cleanup VM
-                    log "   Shutting down validation VM..."
-                    sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
-                    sleep 5
-                    kill $vm_pid >/dev/null 2>&1 || true
-                    sleep 3
-                    
-                    if [ "$validation_success" = true ]; then
-                        log "✅ VM validation passed - dependencies are ready"
-                        log "🎯 Base VM ready for cloning: $LOCAL_IMAGE_NAME"
-                        exit 0
+                # Test CMake
+                if ! command -v cmake >/dev/null 2>&1; then
+                    echo "❌ cmake: NOT FOUND"
+                    missing_tools="$missing_tools cmake"
+                else
+                    echo "🔍 cmake: found at $(command -v cmake)"
+                    if cmake_output=$(cmake --version 2>&1) && echo "$cmake_output" | grep -q "cmake version"; then
+                        echo "   ✅ cmake: functional test passed"
                     else
-                        log "❌ VM validation failed - dependencies missing"
-                        log "🔧 Attempting to fix by re-bootstrapping existing VM..."
-                        
-                        # Try bootstrapping the existing VM to fix dependency issues
-                        log "   Copying bootstrap script to VM..."
-                        if sshpass -p "admin" scp $SSH_OPTS scripts/bootstrap-macos.sh admin@"$vm_ip":/tmp/; then
-                            # Run bootstrap script inside existing VM
-                            log "   Re-executing bootstrap script to fix dependencies..."
-                            local bootstrap_cmd='
-                                cd /tmp && \
-                                chmod +x bootstrap-macos.sh && \
-                                ./bootstrap-macos.sh
-                            '
-                            
-                            if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$bootstrap_cmd"; then
-                                log "✅ Re-bootstrap completed - validating again..."
-                                
-                                # Re-validate after bootstrap
-                                local revalidation_result
-                                local revalidation_success=false
-                                if revalidation_result=$(sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$validation_cmd" 2>&1); then
-                                    revalidation_success=true
-                                fi
-                                
-                                # Log re-validation output
-                                echo "$revalidation_result" | while read -r line; do
-                                    log "   $line"
-                                done
-                                
-                                if [ "$revalidation_success" = true ]; then
-                                    log "✅ Re-validation passed - VM fixed and ready!"
-                                    # Cleanup and exit successfully
-                                    sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
-                                    sleep 5
-                                    kill $vm_pid >/dev/null 2>&1 || true
-                                    log "🎯 Base VM ready for cloning: $LOCAL_IMAGE_NAME"
-                                    exit 0
-                                else
-                                    log "❌ Re-validation still failed - VM cannot be fixed"
-                                fi
+                        echo "   ❌ cmake: functional test failed"
+                        failed_tests="$failed_tests cmake"
+                    fi
+                fi
+                
+                # Test Ninja with special diagnostics
+                if ! command -v ninja >/dev/null 2>&1; then
+                    echo "❌ ninja: NOT FOUND"
+                    echo "   🔍 Ninja diagnostics:"
+                    for ninja_path in /opt/homebrew/bin/ninja /usr/local/bin/ninja /usr/bin/ninja; do
+                        if [ -f "$ninja_path" ]; then
+                            echo "   ✅ Found ninja file at: $ninja_path"
+                            if [ -x "$ninja_path" ]; then
+                                version=$("$ninja_path" --version 2>/dev/null || echo "version check failed")
+                                echo "   ✅ Ninja is executable (version: $version)"
+                                echo "   ⚠️  PATH issue - ninja exists but not in PATH"
                             else
-                                log "❌ Re-bootstrap failed"
+                                echo "   ❌ Ninja exists but is not executable"
                             fi
                         else
-                            log "❌ Failed to copy bootstrap script for re-bootstrap"
+                            echo "   ❌ Not found: $ninja_path"
                         fi
-                        
-                        log "🔧 Re-bootstrap attempt failed - will delete VM and rebuild from scratch..."
-                        # Cleanup before deletion
-                        sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
-                        sleep 5
-                        kill $vm_pid >/dev/null 2>&1 || true
-                        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+                    done
+                    missing_tools="$missing_tools ninja"
+                else
+                    echo "🔍 ninja: found at $(command -v ninja)"
+                    if ninja_output=$(ninja --version 2>&1) && echo "$ninja_output" | grep -q "[0-9]"; then
+                        echo "   ✅ ninja: functional test passed (version: $ninja_output)"
+                    else
+                        echo "   ❌ ninja: functional test failed"
+                        failed_tests="$failed_tests ninja"
+                    fi
+                fi
+                
+                # Test C/C++ compilers
+                for tool in clang clang++; do
+                    if ! command -v "$tool" >/dev/null 2>&1; then
+                        echo "❌ $tool: NOT FOUND"
+                        missing_tools="$missing_tools $tool"
+                    else
+                        echo "🔍 $tool: found at $(command -v $tool)"
+                        if output=$($tool --version 2>&1) && echo "$output" | grep -q "clang version"; then
+                            echo "   ✅ $tool: functional test passed"
+                        else
+                            echo "   ❌ $tool: functional test failed"
+                            failed_tests="$failed_tests $tool"
+                        fi
+                    fi
+                done
+                
+                # Test codesigning tools (critical for Bun builds)
+                for tool in codesign xcrun; do
+                    if ! command -v "$tool" >/dev/null 2>&1; then
+                        echo "❌ $tool: NOT FOUND"
+                        missing_tools="$missing_tools $tool"
+                    else
+                        echo "✅ $tool: available at $(command -v $tool)"
+                    fi
+                done
+                
+                # Test SDK availability
+                echo ""
+                echo "🛠️  Testing SDK and development environment..."
+                if command -v xcrun >/dev/null 2>&1; then
+                    sdk_path=$(xcrun --show-sdk-path 2>/dev/null || echo "FAILED")
+                    if [ "$sdk_path" != "FAILED" ] && [ -d "$sdk_path" ]; then
+                        echo "✅ SDK available: $sdk_path"
+                        if [ -d "$sdk_path/usr/include" ] && [ -d "$sdk_path/usr/lib" ]; then
+                            echo "✅ SDK components: headers and libraries present"
+                        else
+                            echo "❌ SDK components: missing headers or libraries"
+                            failed_tests="$failed_tests SDK"
+                        fi
+                    else
+                        echo "❌ SDK not accessible: $sdk_path"
+                        failed_tests="$failed_tests SDK"
+                    fi
+                fi
+                
+                # Test basic compilation (critical test)
+                echo ""
+                echo "🏗️  Testing basic C++ compilation..."
+                cat > /tmp/test_compile.cpp << "EOF"
+#include <iostream>
+int main() {
+    std::cout << "Hello World" << std::endl;
+    return 0;
+}
+EOF
+                
+                if clang++ -o /tmp/test_compile /tmp/test_compile.cpp 2>/dev/null; then
+                    if /tmp/test_compile 2>/dev/null | grep -q "Hello World"; then
+                        echo "✅ C++ compilation test: PASSED"
+                        rm -f /tmp/test_compile /tmp/test_compile.cpp
+                    else
+                        echo "❌ C++ compilation test: executable failed to run correctly"
+                        failed_tests="$failed_tests compilation"
                     fi
                 else
-                    log "   ❌ SSH not available - VM may be corrupted"
-                    kill $vm_pid >/dev/null 2>&1 || true
-                    tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
-                    log "🔧 Deleted non-responsive VM, will rebuild"
+                    echo "❌ C++ compilation test: FAILED to compile"
+                    failed_tests="$failed_tests compilation"
                 fi
-            else
-                log "   ❌ Could not get VM IP - VM may be corrupted"
-                kill $vm_pid >/dev/null 2>&1 || true
-                tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
-                log "🔧 Deleted non-booting VM, will rebuild"
+                
+                # Test Bun compilation capability (most critical test)
+                echo ""
+                echo "🎯 Testing Bun build capability..."
+                cat > /tmp/test_bun.js << "EOF"
+console.log("Hello from Bun!");
+EOF
+                
+                if bun build /tmp/test_bun.js --outfile /tmp/test_bun_built.js 2>/dev/null; then
+                    if [ -f /tmp/test_bun_built.js ]; then
+                        echo "✅ Bun build test: PASSED"
+                        rm -f /tmp/test_bun.js /tmp/test_bun_built.js
+                    else
+                        echo "❌ Bun build test: output file not created"
+                        failed_tests="$failed_tests bun-build"
+                    fi
+                else
+                    echo "❌ Bun build test: FAILED"
+                    failed_tests="$failed_tests bun-build"
+                fi
+                
+                echo ""
+                echo "=== VALIDATION SUMMARY ==="
+                if [ -n "$missing_tools" ]; then
+                    echo "❌ MISSING TOOLS:$missing_tools"
+                fi
+                if [ -n "$failed_tests" ]; then
+                    echo "❌ FAILED TESTS:$failed_tests"
+                fi
+                
+                if [ -n "$missing_tools" ] || [ -n "$failed_tests" ]; then
+                    echo "VALIDATION_FAILED: VM not ready for building"
+                    exit 1
+                else
+                    echo "VALIDATION_PASSED: VM ready for production builds"
+                    exit 0
+                fi
+            '
+            
+            local validation_result
+            local validation_success=false
+            if validation_result=$(sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$validation_cmd" 2>&1); then
+                validation_success=true
             fi
+            
+            # Log validation output
+            echo "$validation_result" | while read -r line; do
+                log "   $line"
+            done
+            
+            # Cleanup VM
+            log "   🛑 Shutting down validation VM..."
+            sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
+            sleep 10
+            kill $vm_pid >/dev/null 2>&1 || true
+            sleep 5
+            
+            if [ "$validation_success" = true ]; then
+                log "✅ VM passed comprehensive validation - ready for building"
+                log "🎯 Base VM is ready for cloning: $LOCAL_IMAGE_NAME"
+                exit 0
+            else
+                log "❌ VM failed comprehensive validation - not ready for building"
+                log "🔧 VM exists but is missing tools or has broken dependencies"
+                log "   Run without --check-only to rebuild and fix the VM"
+                exit 1
+            fi
+        else
+            log "❌ Base VM does not exist: $LOCAL_IMAGE_NAME"
+            log "   Available VMs:"
+            tart list | grep -E "bun-build-macos" || log "   (no bun-build-macos VMs found)"
+            log "   Run without --check-only to build the VM"
+            exit 1
         fi
     fi
-
+    
     # If we reach here, VM doesn't exist or failed validation - need to build
     
     # Step 2: Check remote registry (skip if force OCI rebuild requested)
@@ -2002,207 +1677,6 @@ main() {
             tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
             tart clone "$REMOTE_IMAGE_URL" "$LOCAL_IMAGE_NAME"
             log "✅ Remote image cloned as: $LOCAL_IMAGE_NAME"
-            
-            # Validate the pulled remote image has working dependencies
-            log "🔬 Validating remote image dependencies..."
-            tart run "$LOCAL_IMAGE_NAME" --no-graphics >/dev/null 2>&1 &
-            local vm_pid=$!
-            
-            # Wait for VM to boot
-            sleep 15
-            
-            # Get VM IP
-            local vm_ip=""
-            for i in {1..20}; do
-                vm_ip=$(tart ip "$LOCAL_IMAGE_NAME" 2>/dev/null || echo "")
-                if [ -n "$vm_ip" ]; then
-                    break
-                fi
-                sleep 3
-            done
-            
-            if [ -n "$vm_ip" ]; then
-                # Wait for SSH to be available
-                local ssh_ready=false
-                for i in {1..20}; do
-                    if sshpass -p "admin" ssh $SSH_OPTS -o ConnectTimeout=3 admin@"$vm_ip" "echo 'ready'" >/dev/null 2>&1; then
-                        ssh_ready=true
-                        break
-                    fi
-                    sleep 3
-                done
-                
-                if [ "$ssh_ready" = true ]; then
-                    # Check critical dependencies
-                    local validation_cmd='
-                        # Comprehensive PATH setup for all common installation locations
-                        export PATH="/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
-                        
-                        # Also try to source common shell profiles that might set PATH
-                        [ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile" 2>/dev/null || true
-                        [ -f "$HOME/.bash_profile" ] && source "$HOME/.bash_profile" 2>/dev/null || true
-                        [ -f "$HOME/.profile" ] && source "$HOME/.profile" 2>/dev/null || true
-                        
-                        echo "=== REMOTE IMAGE VALIDATION ==="
-                        echo "Current PATH: $PATH"
-                        echo "Architecture: $(uname -m)"
-                        echo ""
-                        
-                        missing_deps=""
-                        
-                        # Check critical tools with detailed diagnostics
-                        for tool in bun cargo cmake clang ninja; do
-                            if command -v "$tool" >/dev/null 2>&1; then
-                                tool_path=$(command -v "$tool")
-                                echo "✅ $tool: available at $tool_path"
-                            else
-                                echo "❌ $tool: MISSING"
-                                
-                                # Special diagnostics for ninja
-                                if [ "$tool" = "ninja" ]; then
-                                    echo "   🔍 Ninja diagnostics:"
-                                    echo "   Checking common ninja locations..."
-                                    for ninja_path in /opt/homebrew/bin/ninja /usr/local/bin/ninja /usr/bin/ninja; do
-                                        if [ -f "$ninja_path" ]; then
-                                            echo "   ✅ Found ninja at: $ninja_path"
-                                            if [ -x "$ninja_path" ]; then
-                                                echo "   ✅ Ninja is executable"
-                                                version=$("$ninja_path" --version 2>/dev/null || echo "version check failed")
-                                                echo "   ✅ Ninja version: $version"
-                                            else
-                                                echo "   ❌ Ninja exists but is not executable"
-                                            fi
-                                        else
-                                            echo "   ❌ Not found: $ninja_path"
-                                        fi
-                                    done
-                                    
-                                    # Check if ninja is installed via brew
-                                    if command -v brew >/dev/null 2>&1; then
-                                        echo "   🍺 Checking Homebrew ninja installation..."
-                                        brew_info=$(brew list ninja 2>/dev/null || echo "not installed")
-                                        echo "   Brew ninja status: $brew_info"
-                                        
-                                        if [ "$brew_info" != "not installed" ]; then
-                                            brew_prefix=$(brew --prefix 2>/dev/null || echo "unknown")
-                                            echo "   Brew prefix: $brew_prefix"
-                                            potential_ninja="$brew_prefix/bin/ninja"
-                                            if [ -f "$potential_ninja" ]; then
-                                                echo "   ✅ Found ninja via brew: $potential_ninja"
-                                            else
-                                                echo "   ❌ Expected ninja not found: $potential_ninja"
-                                            fi
-                                        fi
-                                    fi
-                                fi
-                                
-                                missing_deps="$missing_deps $tool"
-                            fi
-                        done
-                        
-                        # Check codesigning tools
-                        for tool in codesign xcrun; do
-                            if command -v "$tool" >/dev/null 2>&1; then
-                                tool_path=$(command -v "$tool")
-                                echo "✅ $tool: available at $tool_path"
-                            else
-                                echo "❌ $tool: MISSING"
-                                missing_deps="$missing_deps $tool"
-                            fi
-                        done
-                        
-                        if [ -n "$missing_deps" ]; then
-                            echo "VALIDATION_FAILED: Missing dependencies:$missing_deps"
-                            exit 1
-                        else
-                            echo "VALIDATION_PASSED: All dependencies available"
-                            exit 0
-                        fi
-                    '
-                    
-                    local validation_result
-                    local validation_success=false
-                    if validation_result=$(sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$validation_cmd" 2>&1); then
-                        validation_success=true
-                    fi
-                    
-                    # Log validation output
-                    echo "$validation_result" | while read -r line; do
-                        log "   $line"
-                    done
-                    
-                    if [ "$validation_success" = true ]; then
-                        log "✅ Remote image validation passed - ready to use"
-                        # Cleanup and exit successfully
-                        sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
-                        sleep 5
-                        kill $vm_pid >/dev/null 2>&1 || true
-                        exit 0
-                    else
-                        log "❌ Remote image validation failed - trying to bootstrap it..."
-                        
-                        # Try bootstrapping the remote image
-                        log "   Copying bootstrap script to remote VM..."
-                        if sshpass -p "admin" scp $SSH_OPTS scripts/bootstrap-macos.sh admin@"$vm_ip":/tmp/; then
-                            # Run bootstrap script
-                            log "   Bootstrapping remote image..."
-                            local bootstrap_cmd='
-                                cd /tmp && \
-                                chmod +x bootstrap-macos.sh && \
-                                ./bootstrap-macos.sh
-                            '
-                            
-                            if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$bootstrap_cmd"; then
-                                log "✅ Remote image bootstrap completed - validating again..."
-                                
-                                # Re-validate after bootstrap
-                                local revalidation_result
-                                local revalidation_success=false
-                                if revalidation_result=$(sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$validation_cmd" 2>&1); then
-                                    revalidation_success=true
-                                fi
-                                
-                                # Log re-validation output
-                                echo "$revalidation_result" | while read -r line; do
-                                    log "   $line"
-                                done
-                                
-                                if [ "$revalidation_success" = true ]; then
-                                    log "✅ Remote image fixed and ready!"
-                                    # Cleanup and exit successfully
-                                    sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
-                                    sleep 5
-                                    kill $vm_pid >/dev/null 2>&1 || true
-                                    exit 0
-                                else
-                                    log "❌ Remote image still broken after bootstrap"
-                                fi
-                            else
-                                log "❌ Remote image bootstrap failed"
-                            fi
-                        else
-                            log "❌ Failed to copy bootstrap script to remote VM"
-                        fi
-                        
-                        log "🔧 Remote image cannot be fixed - continuing to local build..."
-                        # Cleanup before continuing
-                        sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
-                        sleep 5
-                        kill $vm_pid >/dev/null 2>&1 || true
-                        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
-                    fi
-                else
-                    log "   ❌ SSH not available to remote image - may be corrupted"
-                    kill $vm_pid >/dev/null 2>&1 || true
-                    tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
-                    log "🔧 Remote image corrupted - continuing to local build..."
-                fi
-            else
-                log "   ❌ Could not get VM IP for remote image - may be corrupted"
-                kill $vm_pid >/dev/null 2>&1 || true
-                tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
-                log "🔧 Remote image corrupted - continuing to local build..."
-            fi
         exit 0
         else
             set -e  # Re-enable exit on error
@@ -2210,99 +1684,27 @@ main() {
         fi
     fi
     
-    # Step 3: Use most proximate available local VM as base and update it
-    log "🔍 Looking for most proximate local VM to use as base..."
-    local best_local=""
-    local best_score=0
+    # Step 3: Use latest available local VM as base and update it
+    log "🔍 Looking for latest local VM to use as base..."
+    local latest_local=""
     local tart_output=$(tart list 2>&1)
-    
-    # Parse target image details for proximity scoring
-    local target_info=$(parse_image_name "$LOCAL_IMAGE_NAME")
-    local target_macos_release="${target_info%%|*}"
-    local remaining="${target_info#*|}"
-    local target_arch="${remaining%%|*}"
-    remaining="${remaining#*|}"
-    local target_bun_version="${remaining%%|*}"
-    local target_bootstrap_version="${remaining#*|}"
-    
-    log "   Target: macOS $target_macos_release, Architecture: $target_arch, Bun: $target_bun_version, Bootstrap: $target_bootstrap_version"
     
     while IFS= read -r line; do
         if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+) ]]; then
             local vm_name="${BASH_REMATCH[1]}"
-            
-            # Only consider bun-build-macos images
-            if [[ "$vm_name" =~ ^bun-build-macos-[0-9]+-(arm64|x64)-[0-9]+\.[0-9]+\.[0-9]+-bootstrap-[0-9]+\.[0-9]+$ ]]; then
-                # Parse this VM's details
-                local vm_info=$(parse_image_name "$vm_name")
-                local vm_macos_release="${vm_info%%|*}"
-                local remaining="${vm_info#*|}"
-                local vm_arch="${remaining%%|*}"
-                remaining="${remaining#*|}"
-                local vm_bun_version="${remaining%%|*}"
-                local vm_bootstrap_version="${remaining#*|}"
-                
-                # Calculate proximity score (higher = better)
-                local score=0
-                
-                # Same architecture is essential (100 points)
-                if [ "$vm_arch" = "$target_arch" ]; then
-                    score=$((score + 100))
-                else
-                    continue  # Skip different architectures
-                fi
-                
-                # Same macOS release is important (50 points)
-                if [ "$vm_macos_release" = "$target_macos_release" ]; then
-                    score=$((score + 50))
-                elif [ "$((target_macos_release - vm_macos_release))" -eq 1 ]; then
-                    score=$((score + 25))  # One version different
-                elif [ "$((vm_macos_release - target_macos_release))" -eq 1 ]; then
-                    score=$((score + 25))  # One version different
-                fi
-                
-                # Same major.minor Bun version is valuable (30 points)
-                local vm_major_minor=$(get_minor_version "$vm_bun_version")
-                local target_major_minor=$(get_minor_version "$target_bun_version")
-                if [ "$vm_major_minor" = "$target_major_minor" ]; then
-                    score=$((score + 30))
-                elif [ "$(echo "$vm_bun_version" | cut -d. -f1)" = "$(echo "$target_bun_version" | cut -d. -f1)" ]; then
-                    score=$((score + 15))  # Same major version
-                fi
-                
-                # Same or newer bootstrap version is good (20 points)
-                if version_compare "$vm_bootstrap_version" "$target_bootstrap_version"; then
-                    score=$((score + 20))
-                elif [ "$vm_bootstrap_version" = "$target_bootstrap_version" ]; then
-                    score=$((score + 20))
-                else
-                    score=$((score + 5))  # Older bootstrap, but still usable
-                fi
-                
-                # Exact match gets bonus points (50 points)
-                if [ "$vm_name" = "$LOCAL_IMAGE_NAME" ]; then
-                    score=$((score + 50))
-                fi
-                
-                log "   Candidate: $vm_name (Score: $score)"
-                log "     macOS: $vm_macos_release, Arch: $vm_arch, Bun: $vm_bun_version, Bootstrap: $vm_bootstrap_version"
-                
-                # Keep track of the best candidate
-                if [ $score -gt $best_score ]; then
-                    best_local="$vm_name"
-                    best_score=$score
-                    log "     🎯 New best candidate (score: $score)"
-                fi
-            fi
+            if [[ "$vm_name" =~ ^bun-build-macos-${MACOS_RELEASE} ]]; then
+                latest_local="$vm_name"
+            break
+        fi
         fi
     done <<< "$tart_output"
     
-    if [ -n "$best_local" ]; then
-        log "🔄 Selected most proximate VM: $best_local (score: $best_score)"
+    if [ -n "$latest_local" ]; then
+        log "🔄 Found local VM to use as base: $latest_local"
         log "   Cloning and updating to target version: $LOCAL_IMAGE_NAME"
         
         # Clone the base VM to target name
-        if tart clone "$best_local" "$LOCAL_IMAGE_NAME"; then
+        if tart clone "$latest_local" "$LOCAL_IMAGE_NAME"; then
             log "✅ Base VM cloned to: $LOCAL_IMAGE_NAME"
             log "🔧 Running bootstrap script to update Bun version and configuration..."
     
@@ -2415,102 +1817,7 @@ main() {
     set +e  # Temporarily disable exit on error for better error messages
     if tart clone "$BASE_IMAGE" "$LOCAL_IMAGE_NAME" 2>&1; then
         set -e  # Re-enable exit on error
-        log "✅ VM cloned from OCI base: $LOCAL_IMAGE_NAME"
-        log "🔧 Running bootstrap script to install build tools (Bun, Rust, CMake, etc.)..."
-
-        # Start the VM for bootstrapping
-        log "   Starting VM for bootstrap..."
-        tart run "$LOCAL_IMAGE_NAME" --no-graphics >/dev/null 2>&1 &
-        local vm_pid=$!
-        
-        # Wait for VM to boot
-        sleep 15
-
-        # Get VM IP
-        local vm_ip=""
-        for i in {1..20}; do
-            vm_ip=$(tart ip "$LOCAL_IMAGE_NAME" 2>/dev/null || echo "")
-            if [ -n "$vm_ip" ]; then
-                break
-            fi
-            sleep 3
-        done
-
-        if [ -z "$vm_ip" ]; then
-            log "❌ Could not get VM IP for bootstrap"
-            kill $vm_pid >/dev/null 2>&1 || true
-            if [ "$ci_mode" = true ]; then
-                log "🚧 CI Mode: Bootstrap failed but continuing pipeline"
-                exit 0  # Non-fatal in CI mode
-            else
-                exit 1
-            fi
-        fi
-
-        # Wait for SSH to be available
-        local ssh_ready=false
-        for i in {1..30}; do
-            if sshpass -p "admin" ssh $SSH_OPTS -o ConnectTimeout=3 admin@"$vm_ip" "echo 'ready'" >/dev/null 2>&1; then
-                ssh_ready=true
-                break
-            fi
-            sleep 3
-        done
-    
-        if [ "$ssh_ready" != "true" ]; then
-            log "❌ SSH not available for bootstrap"
-            kill $vm_pid >/dev/null 2>&1 || true
-            if [ "$ci_mode" = true ]; then
-                log "🚧 CI Mode: SSH connection failed but continuing pipeline"
-                exit 0  # Non-fatal in CI mode
-            else
-                exit 1
-            fi
-        fi
-
-        log "✅ VM ready for bootstrap (IP: $vm_ip)"
-        
-        # Copy bootstrap script to VM
-        log "   Copying bootstrap script to VM..."
-        if ! sshpass -p "admin" scp $SSH_OPTS scripts/bootstrap-macos.sh admin@"$vm_ip":/tmp/; then
-            log "❌ Failed to copy bootstrap script"
-            kill $vm_pid >/dev/null 2>&1 || true
-            if [ "$ci_mode" = true ]; then
-                log "🚧 CI Mode: Bootstrap script copy failed but continuing pipeline"
-                exit 0  # Non-fatal in CI mode
-            else
-                exit 1
-            fi
-        fi
-        
-        # Run bootstrap script inside VM
-        log "   Executing bootstrap script inside VM..."
-        local bootstrap_cmd='
-            cd /tmp && \
-            chmod +x bootstrap-macos.sh && \
-            ./bootstrap-macos.sh
-        '
-        
-        if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$bootstrap_cmd"; then
-            log "✅ Bootstrap execution completed successfully"
-        else
-            log "⚠️  Bootstrap script had issues but continuing..."
-        fi
-        
-        # Shutdown VM gracefully
-        log "   Shutting down VM..."
-        sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
-        
-        # Wait for VM to stop
-        sleep 15
-        
-        # Force kill if still running
-        kill $vm_pid >/dev/null 2>&1 || true
-        
-        # Wait for complete cleanup
-        sleep 5
-        
-        log "✅ VM bootstrap process completed: $LOCAL_IMAGE_NAME"
+        log "✅ VM built from OCI base: $LOCAL_IMAGE_NAME"
     else
         local clone_exit_code=$?
         set -e  # Re-enable exit on error
@@ -2533,6 +1840,7 @@ main() {
         fi
     fi
     
+    log "✅ Bootstrap completed successfully"
 
     # Step 5: Try to push to registry (but don't fail if this doesn't work)
     log "=== REGISTRY PUSH ATTEMPT ==="
