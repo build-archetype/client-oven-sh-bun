@@ -188,32 +188,35 @@ cleanup_orphaned_vms() {
     log "🧹 Cleaning up orphaned VMs..."
     local orphaned_count=0
     
-    # Use a more specific pattern for our CI VM names
-    local vm_pattern="bun-build-"
+    # Use a more specific pattern for TEMPORARY CI VM names only (timestamp + UUID format)
+    # This matches: bun-build-1750316948-E694FB0B-BE9C-4EE9-B6D7-51ADCFE79A62
+    # But NOT: bun-build-macos-13-arm64-1.2.16-bootstrap-4.1 (base images)
+    local vm_pattern="bun-build-[0-9]\+-[A-F0-9]\{8\}-[A-F0-9]\{4\}-[A-F0-9]\{4\}-[A-F0-9]\{4\}-[A-F0-9]\{12\}"
     local vms_to_cleanup=()
     
-    # Get list of VMs that match our pattern
+    # Get list of VMs that match our TEMPORARY pattern only
     while read -r vm_name; do
-        if [[ "$vm_name" =~ $vm_pattern ]]; then
+        # Double-check the pattern matches temporary VM format (timestamp-UUID)
+        if [[ "$vm_name" =~ ^bun-build-[0-9]+-[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$ ]]; then
             vms_to_cleanup+=("$vm_name")
             orphaned_count=$((orphaned_count + 1))
         fi
-    done < <(tart list --quiet 2>/dev/null | grep "^$vm_pattern" | awk '{print $1}' || true)
+    done < <(tart list --quiet 2>/dev/null | grep "^bun-build-" | awk '{print $1}' || true)
     
     if [ ${#vms_to_cleanup[@]} -eq 0 ]; then
-        log "✅ No orphaned VMs found"
+        log "✅ No orphaned temporary VMs found"
         return 0
     fi
     
-    log "Found $orphaned_count orphaned VM(s) to clean up:"
+    log "Found $orphaned_count orphaned TEMPORARY VM(s) to clean up:"
     for vm_name in "${vms_to_cleanup[@]}"; do
-        log "  - $vm_name"
+        log "  - $vm_name (temporary build VM)"
     done
     
     # Clean up each orphaned VM
     local cleaned=0
     for vm_name in "${vms_to_cleanup[@]}"; do
-        log "🗑️  Cleaning up orphaned VM: $vm_name"
+        log "🗑️  Cleaning up orphaned temporary VM: $vm_name"
         
         # Use the robust cleanup_vm function for each orphaned VM
         if cleanup_vm_internal "$vm_name"; then
@@ -224,7 +227,8 @@ cleanup_orphaned_vms() {
         fi
     done
     
-    log "🧹 Orphaned VM cleanup complete: $cleaned/$orphaned_count VMs cleaned"
+    log "🧹 Orphaned temporary VM cleanup complete: $cleaned/$orphaned_count VMs cleaned"
+    log "📌 Base VMs (bun-build-macos-*) are preserved and not affected"
     return 0
 }
 
