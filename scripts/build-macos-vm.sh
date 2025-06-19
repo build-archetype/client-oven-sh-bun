@@ -690,25 +690,53 @@ check_remote_image() {
     # Not cached or force refresh - need to pull
     log "📥 Starting download of remote VM image (may be 5-15GB+, please wait)..." >&2
     
-    # Run tart pull directly to show native progress output (percentages, etc.)
-    # Redirect to stderr to prevent pollution of decision output
+    # Run tart pull with proper error handling for authentication failures
     local pull_result=0
-    if tart pull "$remote_url" > /dev/stderr 2>&1; then
+    local pull_output=""
+    local pull_exit_code=0
+    
+    # Capture both output and exit code
+    if pull_output=$(tart pull "$remote_url" 2>&1); then
         log "✅ Remote image found and downloaded successfully" >&2
         log "   Cached for future use - subsequent pulls will be instant" >&2
         pull_result=0
     else
-        log "❌ Remote image not found or download failed" >&2
-        if [ "$auth_setup" = false ]; then
-            log "   Possible causes:" >&2
-            log "   - Image doesn't exist in registry" >&2
-            log "   - Registry requires authentication (set GITHUB_TOKEN and GITHUB_USERNAME)" >&2
-        else
-            log "   Possible causes:" >&2
-            log "   - Image doesn't exist in registry" >&2
-            log "   - Authentication failed (check GITHUB_TOKEN permissions)" >&2
-            log "   - Network connectivity issues" >&2
+        pull_exit_code=$?
+        log "❌ Remote image download failed (exit code: $pull_exit_code)" >&2
+        
+        # Handle specific exit codes gracefully
+        case $pull_exit_code in
+            152)
+                log "   ⚠️  Authentication failed (exit 152) - this is expected without GitHub credentials" >&2
+                log "   Will fall back to building from OCI base images" >&2
+                ;;
+            125)
+                log "   ⚠️  Registry access denied (exit 125) - this is expected for private repositories" >&2
+                log "   Will fall back to building from OCI base images" >&2
+                ;;
+            *)
+                log "   ⚠️  Download failed with exit code $pull_exit_code" >&2
+                if [ "$auth_setup" = false ]; then
+                    log "   Possible causes:" >&2
+                    log "   - Image doesn't exist in registry" >&2
+                    log "   - Registry requires authentication (set GITHUB_TOKEN and GITHUB_USERNAME)" >&2
+                else
+                    log "   Possible causes:" >&2
+                    log "   - Image doesn't exist in registry" >&2
+                    log "   - Authentication failed (check GITHUB_TOKEN permissions)" >&2
+                    log "   - Network connectivity issues" >&2
+                fi
+                ;;
+        esac
+        
+        # Log the actual error output for debugging (only first few lines to avoid spam)
+        if [ -n "$pull_output" ]; then
+            log "   Error details:" >&2
+            echo "$pull_output" | head -3 | while read -r line; do
+                log "     $line" >&2
+            done
         fi
+        
         pull_result=1
     fi
     
