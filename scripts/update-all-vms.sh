@@ -2,7 +2,7 @@
 set -e
 
 # Universal VM Update Script
-# Automatically finds and updates ALL bun-build-macos VMs to Bun 1.2.16
+# Automatically finds and updates ALL VMs starting with "bun-build" to Bun 1.2.16
 # Also fixes lolhtml dependency issues
 
 TARGET_BUN_VERSION="1.2.16"
@@ -24,31 +24,18 @@ if [ ! -f "$TART_PATH" ]; then
     echo "✅ Found tart at: $TART_PATH"
 fi
 
-# Get all bun-build-macos VMs
-echo "🔍 Scanning for bun-build-macos VMs..."
+# Get all VMs starting with bun-build
+echo "🔍 Scanning for bun-build VMs..."
 VMS_TO_UPDATE=()
 
 while IFS= read -r line; do
     if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+) ]]; then
         vm_name="${BASH_REMATCH[1]}"
-        if [[ "$vm_name" =~ ^bun-build-macos-([0-9]+)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+)$ ]]; then
-            macos_release="${BASH_REMATCH[1]}"
-            current_bun_version="${BASH_REMATCH[2]}"
-            bootstrap_version="${BASH_REMATCH[3]}"
+        if [[ "$vm_name" =~ ^bun-build ]]; then
+            echo "  Found: $vm_name"
             
-            target_vm_name="bun-build-macos-${macos_release}-${TARGET_BUN_VERSION}-bootstrap-${bootstrap_version}"
-            
-            echo "  Found: $vm_name (macOS $macos_release, Bun $current_bun_version)"
-            
-            # Check if target already exists
-            if $TART_PATH list | grep -q "^local.*$target_vm_name"; then
-                echo "    ✅ Already updated: $target_vm_name exists"
-            elif [ "$current_bun_version" = "$TARGET_BUN_VERSION" ]; then
-                echo "    ✅ Already correct version: $current_bun_version"
-            else
-                echo "    🎯 Needs update: $current_bun_version → $TARGET_BUN_VERSION"
-                VMS_TO_UPDATE+=("$vm_name|$target_vm_name|$macos_release|$current_bun_version")
-            fi
+            # Always add to update list - we'll update them all
+            VMS_TO_UPDATE+=("$vm_name")
         fi
     fi
 done <<< "$($TART_PATH list 2>/dev/null)"
@@ -56,33 +43,26 @@ done <<< "$($TART_PATH list 2>/dev/null)"
 echo ""
 
 if [ ${#VMS_TO_UPDATE[@]} -eq 0 ]; then
-    echo "✅ All VMs are already up to date!"
+    echo "❌ No bun-build VMs found!"
     echo ""
     echo "Current VMs:"
-    $TART_PATH list | grep bun-build-macos || echo "  No bun-build-macos VMs found"
-    exit 0
+    $TART_PATH list
+    exit 1
 fi
 
 echo "📋 VMs to update: ${#VMS_TO_UPDATE[@]}"
-for vm_info in "${VMS_TO_UPDATE[@]}"; do
-    IFS='|' read -r source target macos current <<< "$vm_info"
-    echo "  $source → $target"
+for vm_name in "${VMS_TO_UPDATE[@]}"; do
+    echo "  $vm_name"
 done
 echo ""
 
 # Update each VM
-for vm_info in "${VMS_TO_UPDATE[@]}"; do
-    IFS='|' read -r source_vm target_vm macos_release current_version <<< "$vm_info"
-    
-    echo "🔄 Updating: $source_vm → $target_vm"
-    
-    # Clone the VM
-    echo "  📋 Cloning VM..."
-    $TART_PATH clone "$source_vm" "$target_vm"
+for vm_name in "${VMS_TO_UPDATE[@]}"; do
+    echo "🔄 Updating VM: $vm_name"
     
     # Start VM
     echo "  🚀 Starting VM..."
-    $TART_PATH run "$target_vm" --no-graphics &
+    $TART_PATH run "$vm_name" --no-graphics &
     VM_PID=$!
     sleep 5
     
@@ -90,7 +70,7 @@ for vm_info in "${VMS_TO_UPDATE[@]}"; do
     echo "  🌐 Getting VM IP..."
     VM_IP=""
     for i in {1..15}; do
-        VM_IP=$($TART_PATH ip "$target_vm" 2>/dev/null || echo "")
+        VM_IP=$($TART_PATH ip "$vm_name" 2>/dev/null || echo "")
         if [ -n "$VM_IP" ]; then
             echo "  VM IP: $VM_IP"
             break
@@ -102,8 +82,7 @@ for vm_info in "${VMS_TO_UPDATE[@]}"; do
     if [ -z "$VM_IP" ]; then
         echo "  ❌ Could not get VM IP"
         kill $VM_PID 2>/dev/null || true
-        $TART_PATH delete "$target_vm"
-        echo "  🧹 Cleaned up failed VM"
+        echo "  🧹 Stopped VM"
         continue
     fi
     
@@ -121,8 +100,7 @@ for vm_info in "${VMS_TO_UPDATE[@]}"; do
     if [ "$SSH_READY" != "true" ]; then
         echo "  ❌ SSH not ready"
         kill $VM_PID 2>/dev/null || true
-        $TART_PATH delete "$target_vm"
-        echo "  🧹 Cleaned up failed VM"
+        echo "  🧹 Stopped VM"
         continue
     fi
     
@@ -151,20 +129,20 @@ for vm_info in "${VMS_TO_UPDATE[@]}"; do
                 echo 'Fixing lolhtml dependencies...'
                 
                 # Check if workspace directory exists (try multiple possible locations)
-                WORKSPACE_DIR=""
+                WORKSPACE_DIR=\"\"
                 if [ -d '/Users/mac-ci/workspace' ]; then
                     WORKSPACE_DIR='/Users/mac-ci/workspace'
                 elif [ -d '/Users/admin/workspace' ]; then
                     WORKSPACE_DIR='/Users/admin/workspace'
-                elif [ -d "\$HOME/workspace" ]; then
-                    WORKSPACE_DIR="\$HOME/workspace"
+                elif [ -d \"\$HOME/workspace\" ]; then
+                    WORKSPACE_DIR=\"\$HOME/workspace\"
                 elif [ -d '/Users/runner/workspace' ]; then
                     WORKSPACE_DIR='/Users/runner/workspace'
                 fi
                 
-                if [ -n "\$WORKSPACE_DIR" ]; then
-                    cd "\$WORKSPACE_DIR"
-                    echo "Found workspace directory: \$WORKSPACE_DIR"
+                if [ -n \"\$WORKSPACE_DIR\" ]; then
+                    cd \"\$WORKSPACE_DIR\"
+                    echo \"Found workspace directory: \$WORKSPACE_DIR\"
                     
                     # Update git submodules if we are in a git repo
                     if [ -d '.git' ]; then
@@ -220,24 +198,9 @@ for vm_info in "${VMS_TO_UPDATE[@]}"; do
     kill $VM_PID >/dev/null 2>&1 || true
     
     if [ $UPDATE_RESULT -eq 0 ]; then
-        echo "  ✅ Successfully updated: $target_vm"
-        
-        # Ask about deleting old VM
-        echo ""
-        echo "  🗑️  Delete old VM ($source_vm) to save ~70GB? [y/N]"
-        read -r -n 1 REPLY
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            echo "  Deleting $source_vm..."
-            $TART_PATH delete "$source_vm"
-            echo "  ✅ Old VM deleted"
-        else
-            echo "  ⚠️  Keeping old VM (delete manually later)"
-        fi
+        echo "  ✅ Successfully updated: $vm_name"
     else
-        echo "  ❌ Update failed, cleaning up..."
-        $TART_PATH delete "$target_vm"
-        echo "  🧹 Cleaned up failed VM"
+        echo "  ❌ Update failed for: $vm_name"
     fi
     
     echo ""
@@ -245,5 +208,5 @@ done
 
 echo "🎉 VM update process complete!"
 echo ""
-echo "Current VMs:"
-$TART_PATH list | grep bun-build-macos || echo "No bun-build-macos VMs found" 
+echo "Updated VMs:"
+$TART_PATH list | grep bun-build || echo "No bun-build VMs found" 
