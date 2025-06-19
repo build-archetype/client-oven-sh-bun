@@ -2,9 +2,9 @@
 set -e
 
 # Universal VM Update Script
-# Automatically finds and updates ALL bun-build-macos VMs to Bun 1.2.17
+# Automatically finds and updates ALL bun-build-macos VMs to Bun 1.2.16
 
-TARGET_BUN_VERSION="1.2.17"
+TARGET_BUN_VERSION="1.2.16"
 TART_PATH="/opt/homebrew/bin/tart"
 
 echo "🚀 Universal Bun VM Updater"
