@@ -17,7 +17,18 @@ get_base_vm_image() {
     local bun_version="${2:-$(detect_bun_version)}"
     # Auto-detect bootstrap version from script (single source of truth)
     local bootstrap_version="${3:-$(get_bootstrap_version)}"
-    echo "bun-build-macos-${release}-${bun_version}-bootstrap-${bootstrap_version}"
+    # Auto-detect architecture
+    local arch="${4:-$(get_arch)}"
+    echo "bun-build-macos-${release}-${arch}-${bun_version}-bootstrap-${bootstrap_version}"
+}
+
+# Function to detect current architecture
+get_arch() {
+    case "$(uname -m)" in
+        arm64) echo "arm64" ;;
+        x86_64) echo "x64" ;;
+        *) echo "arm64" ;;  # Default to arm64 for Apple Silicon CI machines
+    esac
 }
 
 # Function to detect current Bun version from package.json
@@ -70,15 +81,17 @@ ensure_vm_image_available() {
     log "🔍 Base image '$base_vm_image' not found locally"
     
     # Try to pull from registry (registry-first approach for distributed CI)
-    # Extract version info from image name: bun-build-macos-13-1.2.16-bootstrap-4.1
-    if [[ "$base_vm_image" =~ bun-build-macos-([0-9]+)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
+    # Extract version info from image name: bun-build-macos-13-arm64-1.2.16-bootstrap-4.1
+    if [[ "$base_vm_image" =~ bun-build-macos-([0-9]+)-(arm64|x64)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
         local macos_release="${BASH_REMATCH[1]}"
-        local bun_version="${BASH_REMATCH[2]}"
-        local bootstrap_version="${BASH_REMATCH[3]}"
-        local registry_url="ghcr.io/build-archetype/client-oven-sh-bun/bun-build-macos-${macos_release}:${bun_version}-bootstrap-${bootstrap_version}"
+        local arch="${BASH_REMATCH[2]}"
+        local bun_version="${BASH_REMATCH[3]}"
+        local bootstrap_version="${BASH_REMATCH[4]}"
+        local registry_url="ghcr.io/build-archetype/client-oven-sh-bun/bun-build-macos-${macos_release}-${arch}:${bun_version}-bootstrap-${bootstrap_version}"
     else
-        # Fallback to latest if we can't parse the version
-        local registry_url="ghcr.io/build-archetype/client-oven-sh-bun/bun-build-macos-${release}:latest"
+        # Fallback to latest if we can't parse the version (auto-detect arch)
+        local arch=$(get_arch)
+        local registry_url="ghcr.io/build-archetype/client-oven-sh-bun/bun-build-macos-${release}-${arch}:latest"
     fi
     
     log "📥 Attempting to pull from registry: $registry_url"
