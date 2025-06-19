@@ -1956,8 +1956,20 @@ EOF
             log "📥 Using remote image: $REMOTE_IMAGE_URL"
             tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
             tart clone "$REMOTE_IMAGE_URL" "$LOCAL_IMAGE_NAME"
-            log "✅ Remote image cloned as: $LOCAL_IMAGE_NAME"
-        exit 0
+            log "✅ Remote image cloned locally as: $LOCAL_IMAGE_NAME"
+            
+            # CRITICAL: Validate remote image after cloning to ensure it's ready
+            log "🔬 CRITICAL: Validating remote image to ensure it's ready for building..."
+            if comprehensive_vm_validation "$LOCAL_IMAGE_NAME" "remote-image"; then
+                log "✅ Remote image passed validation - ready for building"
+                exit 0
+            else
+                log "❌ Remote image failed validation - not ready for building"
+                log "🔧 Remote image may be corrupted or missing dependencies"
+                log "   Will fall back to building locally"
+                tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+                # Continue to next step instead of exiting
+            fi
         else
             set -e  # Re-enable exit on error
             log "⚠️  Remote registry check failed - will build locally"
@@ -2080,8 +2092,18 @@ EOF
             # Wait for complete cleanup
             sleep 5
             
-            log "✅ VM updated and ready: $LOCAL_IMAGE_NAME"
-            exit 0
+            # CRITICAL: Validate the VM after bootstrap to ensure it's ready
+            log "🔬 CRITICAL: Validating VM after bootstrap to ensure it's ready for building..."
+            if comprehensive_vm_validation "$LOCAL_IMAGE_NAME" "post-bootstrap"; then
+                log "✅ VM passed post-bootstrap validation - ready for building"
+                log "🎯 Base VM ready for cloning: $LOCAL_IMAGE_NAME"
+                exit 0
+            else
+                log "❌ VM failed post-bootstrap validation - bootstrap did not work properly"
+                log "🔧 Will delete failed VM and try building from OCI base instead"
+                tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+                # Continue to step 4 (OCI build) instead of exiting
+            fi
         else
             log "❌ Failed to clone base VM"
             # Continue to step 4 (OCI build)
