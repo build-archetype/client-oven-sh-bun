@@ -1867,7 +1867,57 @@ main() {
                         exit 0
                     else
                         log "❌ VM validation failed - dependencies missing"
-                        log "🔧 Will rebuild VM to fix dependencies..."
+                        log "🔧 Attempting to fix by re-bootstrapping existing VM..."
+                        
+                        # Try bootstrapping the existing VM to fix dependency issues
+                        log "   Copying bootstrap script to VM..."
+                        if sshpass -p "admin" scp $SSH_OPTS scripts/bootstrap-macos.sh admin@"$vm_ip":/tmp/; then
+                            # Run bootstrap script inside existing VM
+                            log "   Re-executing bootstrap script to fix dependencies..."
+                            local bootstrap_cmd='
+                                cd /tmp && \
+                                chmod +x bootstrap-macos.sh && \
+                                ./bootstrap-macos.sh
+                            '
+                            
+                            if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$bootstrap_cmd"; then
+                                log "✅ Re-bootstrap completed - validating again..."
+                                
+                                # Re-validate after bootstrap
+                                local revalidation_result
+                                local revalidation_success=false
+                                if revalidation_result=$(sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$validation_cmd" 2>&1); then
+                                    revalidation_success=true
+                                fi
+                                
+                                # Log re-validation output
+                                echo "$revalidation_result" | while read -r line; do
+                                    log "   $line"
+                                done
+                                
+                                if [ "$revalidation_success" = true ]; then
+                                    log "✅ Re-validation passed - VM fixed and ready!"
+                                    # Cleanup and exit successfully
+                                    sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
+                                    sleep 5
+                                    kill $vm_pid >/dev/null 2>&1 || true
+                                    log "🎯 Base VM ready for cloning: $LOCAL_IMAGE_NAME"
+                                    exit 0
+                                else
+                                    log "❌ Re-validation still failed - VM cannot be fixed"
+                                fi
+                            else
+                                log "❌ Re-bootstrap failed"
+                            fi
+                        else
+                            log "❌ Failed to copy bootstrap script for re-bootstrap"
+                        fi
+                        
+                        log "🔧 Re-bootstrap attempt failed - will delete VM and rebuild from scratch..."
+                        # Cleanup before deletion
+                        sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
+                        sleep 5
+                        kill $vm_pid >/dev/null 2>&1 || true
                         tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
                     fi
                 else
@@ -1901,6 +1951,156 @@ main() {
             tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
             tart clone "$REMOTE_IMAGE_URL" "$LOCAL_IMAGE_NAME"
             log "✅ Remote image cloned as: $LOCAL_IMAGE_NAME"
+            
+            # Validate the pulled remote image has working dependencies
+            log "🔬 Validating remote image dependencies..."
+            tart run "$LOCAL_IMAGE_NAME" --no-graphics >/dev/null 2>&1 &
+            local vm_pid=$!
+            
+            # Wait for VM to boot
+            sleep 15
+            
+            # Get VM IP
+            local vm_ip=""
+            for i in {1..20}; do
+                vm_ip=$(tart ip "$LOCAL_IMAGE_NAME" 2>/dev/null || echo "")
+                if [ -n "$vm_ip" ]; then
+                    break
+                fi
+                sleep 3
+            done
+            
+            if [ -n "$vm_ip" ]; then
+                # Wait for SSH to be available
+                local ssh_ready=false
+                for i in {1..20}; do
+                    if sshpass -p "admin" ssh $SSH_OPTS -o ConnectTimeout=3 admin@"$vm_ip" "echo 'ready'" >/dev/null 2>&1; then
+                        ssh_ready=true
+                        break
+                    fi
+                    sleep 3
+                done
+                
+                if [ "$ssh_ready" = true ]; then
+                    # Check critical dependencies
+                    local validation_cmd='
+                        export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+                        
+                        echo "=== REMOTE IMAGE VALIDATION ==="
+                        missing_deps=""
+                        
+                        # Check critical tools
+                        for tool in bun cargo cmake clang ninja; do
+                            if command -v "$tool" >/dev/null 2>&1; then
+                                echo "✅ $tool: available"
+                            else
+                                echo "❌ $tool: MISSING"
+                                missing_deps="$missing_deps $tool"
+                            fi
+                        done
+                        
+                        # Check codesigning tools
+                        for tool in codesign xcrun; do
+                            if command -v "$tool" >/dev/null 2>&1; then
+                                echo "✅ $tool: available"
+                            else
+                                echo "❌ $tool: MISSING"
+                                missing_deps="$missing_deps $tool"
+                            fi
+                        done
+                        
+                        if [ -n "$missing_deps" ]; then
+                            echo "VALIDATION_FAILED: Missing dependencies:$missing_deps"
+                            exit 1
+                        else
+                            echo "VALIDATION_PASSED: All dependencies available"
+                            exit 0
+                        fi
+                    '
+                    
+                    local validation_result
+                    local validation_success=false
+                    if validation_result=$(sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$validation_cmd" 2>&1); then
+                        validation_success=true
+                    fi
+                    
+                    # Log validation output
+                    echo "$validation_result" | while read -r line; do
+                        log "   $line"
+                    done
+                    
+                    if [ "$validation_success" = true ]; then
+                        log "✅ Remote image validation passed - ready to use"
+                        # Cleanup and exit successfully
+                        sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
+                        sleep 5
+                        kill $vm_pid >/dev/null 2>&1 || true
+                        exit 0
+                    else
+                        log "❌ Remote image validation failed - trying to bootstrap it..."
+                        
+                        # Try bootstrapping the remote image
+                        log "   Copying bootstrap script to remote VM..."
+                        if sshpass -p "admin" scp $SSH_OPTS scripts/bootstrap-macos.sh admin@"$vm_ip":/tmp/; then
+                            # Run bootstrap script
+                            log "   Bootstrapping remote image..."
+                            local bootstrap_cmd='
+                                cd /tmp && \
+                                chmod +x bootstrap-macos.sh && \
+                                ./bootstrap-macos.sh
+                            '
+                            
+                            if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$bootstrap_cmd"; then
+                                log "✅ Remote image bootstrap completed - validating again..."
+                                
+                                # Re-validate after bootstrap
+                                local revalidation_result
+                                local revalidation_success=false
+                                if revalidation_result=$(sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$validation_cmd" 2>&1); then
+                                    revalidation_success=true
+                                fi
+                                
+                                # Log re-validation output
+                                echo "$revalidation_result" | while read -r line; do
+                                    log "   $line"
+                                done
+                                
+                                if [ "$revalidation_success" = true ]; then
+                                    log "✅ Remote image fixed and ready!"
+                                    # Cleanup and exit successfully
+                                    sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
+                                    sleep 5
+                                    kill $vm_pid >/dev/null 2>&1 || true
+                                    exit 0
+                                else
+                                    log "❌ Remote image still broken after bootstrap"
+                                fi
+                            else
+                                log "❌ Remote image bootstrap failed"
+                            fi
+                        else
+                            log "❌ Failed to copy bootstrap script to remote VM"
+                        fi
+                        
+                        log "🔧 Remote image cannot be fixed - continuing to local build..."
+                        # Cleanup before continuing
+                        sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
+                        sleep 5
+                        kill $vm_pid >/dev/null 2>&1 || true
+                        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+                    fi
+                else
+                    log "   ❌ SSH not available to remote image - may be corrupted"
+                    kill $vm_pid >/dev/null 2>&1 || true
+                    tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+                    log "🔧 Remote image corrupted - continuing to local build..."
+                fi
+            else
+                log "   ❌ Could not get VM IP for remote image - may be corrupted"
+                kill $vm_pid >/dev/null 2>&1 || true
+                tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+                log "🔧 Remote image corrupted - continuing to local build..."
+            fi
         exit 0
         else
             set -e  # Re-enable exit on error
@@ -1908,27 +2108,99 @@ main() {
         fi
     fi
     
-    # Step 3: Use latest available local VM as base and update it
-    log "🔍 Looking for latest local VM to use as base..."
-    local latest_local=""
+    # Step 3: Use most proximate available local VM as base and update it
+    log "🔍 Looking for most proximate local VM to use as base..."
+    local best_local=""
+    local best_score=0
     local tart_output=$(tart list 2>&1)
+    
+    # Parse target image details for proximity scoring
+    local target_info=$(parse_image_name "$LOCAL_IMAGE_NAME")
+    local target_macos_release="${target_info%%|*}"
+    local remaining="${target_info#*|}"
+    local target_arch="${remaining%%|*}"
+    remaining="${remaining#*|}"
+    local target_bun_version="${remaining%%|*}"
+    local target_bootstrap_version="${remaining#*|}"
+    
+    log "   Target: macOS $target_macos_release, Architecture: $target_arch, Bun: $target_bun_version, Bootstrap: $target_bootstrap_version"
     
     while IFS= read -r line; do
         if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+) ]]; then
             local vm_name="${BASH_REMATCH[1]}"
-            if [[ "$vm_name" =~ ^bun-build-macos-${MACOS_RELEASE} ]]; then
-                latest_local="$vm_name"
-            break
-        fi
+            
+            # Only consider bun-build-macos images
+            if [[ "$vm_name" =~ ^bun-build-macos-[0-9]+-(arm64|x64)-[0-9]+\.[0-9]+\.[0-9]+-bootstrap-[0-9]+\.[0-9]+$ ]]; then
+                # Parse this VM's details
+                local vm_info=$(parse_image_name "$vm_name")
+                local vm_macos_release="${vm_info%%|*}"
+                local remaining="${vm_info#*|}"
+                local vm_arch="${remaining%%|*}"
+                remaining="${remaining#*|}"
+                local vm_bun_version="${remaining%%|*}"
+                local vm_bootstrap_version="${remaining#*|}"
+                
+                # Calculate proximity score (higher = better)
+                local score=0
+                
+                # Same architecture is essential (100 points)
+                if [ "$vm_arch" = "$target_arch" ]; then
+                    score=$((score + 100))
+                else
+                    continue  # Skip different architectures
+                fi
+                
+                # Same macOS release is important (50 points)
+                if [ "$vm_macos_release" = "$target_macos_release" ]; then
+                    score=$((score + 50))
+                elif [ "$((target_macos_release - vm_macos_release))" -eq 1 ]; then
+                    score=$((score + 25))  # One version different
+                elif [ "$((vm_macos_release - target_macos_release))" -eq 1 ]; then
+                    score=$((score + 25))  # One version different
+                fi
+                
+                # Same major.minor Bun version is valuable (30 points)
+                local vm_major_minor=$(get_minor_version "$vm_bun_version")
+                local target_major_minor=$(get_minor_version "$target_bun_version")
+                if [ "$vm_major_minor" = "$target_major_minor" ]; then
+                    score=$((score + 30))
+                elif [ "$(echo "$vm_bun_version" | cut -d. -f1)" = "$(echo "$target_bun_version" | cut -d. -f1)" ]; then
+                    score=$((score + 15))  # Same major version
+                fi
+                
+                # Same or newer bootstrap version is good (20 points)
+                if version_compare "$vm_bootstrap_version" "$target_bootstrap_version"; then
+                    score=$((score + 20))
+                elif [ "$vm_bootstrap_version" = "$target_bootstrap_version" ]; then
+                    score=$((score + 20))
+                else
+                    score=$((score + 5))  # Older bootstrap, but still usable
+                fi
+                
+                # Exact match gets bonus points (50 points)
+                if [ "$vm_name" = "$LOCAL_IMAGE_NAME" ]; then
+                    score=$((score + 50))
+                fi
+                
+                log "   Candidate: $vm_name (Score: $score)"
+                log "     macOS: $vm_macos_release, Arch: $vm_arch, Bun: $vm_bun_version, Bootstrap: $vm_bootstrap_version"
+                
+                # Keep track of the best candidate
+                if [ $score -gt $best_score ]; then
+                    best_local="$vm_name"
+                    best_score=$score
+                    log "     🎯 New best candidate (score: $score)"
+                fi
+            fi
         fi
     done <<< "$tart_output"
     
-    if [ -n "$latest_local" ]; then
-        log "🔄 Found local VM to use as base: $latest_local"
+    if [ -n "$best_local" ]; then
+        log "🔄 Selected most proximate VM: $best_local (score: $best_score)"
         log "   Cloning and updating to target version: $LOCAL_IMAGE_NAME"
         
         # Clone the base VM to target name
-        if tart clone "$latest_local" "$LOCAL_IMAGE_NAME"; then
+        if tart clone "$best_local" "$LOCAL_IMAGE_NAME"; then
             log "✅ Base VM cloned to: $LOCAL_IMAGE_NAME"
             log "🔧 Running bootstrap script to update Bun version and configuration..."
     
