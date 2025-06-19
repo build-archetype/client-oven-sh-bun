@@ -1955,6 +1955,15 @@ EOF
             set -e  # Re-enable exit on error
             log "📥 Using remote image: $REMOTE_IMAGE_URL"
             tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+            
+            # SAFETY: Ensure we're in a valid directory before tart clone operations
+            # Fix for: "shell-init: error retrieving current directory: getcwd: cannot access parent directories"
+            if ! pwd >/dev/null 2>&1; then
+                log "⚠️  Current directory is invalid - switching to HOME for tart operations"
+                cd "$HOME"
+                log "   Switched to: $(pwd)"
+            fi
+            
             tart clone "$REMOTE_IMAGE_URL" "$LOCAL_IMAGE_NAME"
             log "✅ Remote image cloned locally as: $LOCAL_IMAGE_NAME"
             
@@ -2012,6 +2021,14 @@ EOF
         else
             log "🔄 Found local VM to use as base: $latest_local"
             log "   Cloning and updating to target version: $LOCAL_IMAGE_NAME"
+            
+            # SAFETY: Ensure we're in a valid directory before tart clone operations
+            # Fix for: "shell-init: error retrieving current directory: getcwd: cannot access parent directories"
+            if ! pwd >/dev/null 2>&1; then
+                log "⚠️  Current directory is invalid - switching to HOME for tart operations"
+                cd "$HOME"
+                log "   Switched to: $(pwd)"
+            fi
             
             # Clone the base VM to target name
             if tart clone "$latest_local" "$LOCAL_IMAGE_NAME"; then
@@ -2136,6 +2153,15 @@ EOF
     
     # Clone from OCI base with error handling
     set +e  # Temporarily disable exit on error for better error messages
+    
+    # SAFETY: Ensure we're in a valid directory before tart clone operations
+    # Fix for: "shell-init: error retrieving current directory: getcwd: cannot access parent directories"
+    if ! pwd >/dev/null 2>&1; then
+        log "⚠️  Current directory is invalid - switching to HOME for tart operations"
+        cd "$HOME"
+        log "   Switched to: $(pwd)"
+    fi
+    
     if tart clone "$BASE_IMAGE" "$LOCAL_IMAGE_NAME" 2>&1; then
         set -e  # Re-enable exit on error
         log "✅ VM cloned from OCI base: $LOCAL_IMAGE_NAME"

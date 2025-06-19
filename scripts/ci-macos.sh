@@ -98,6 +98,15 @@ ensure_vm_image_available() {
     if tart pull "$registry_url" 2>&1; then
         log "✅ Successfully pulled from registry"
         # Clone to expected local name
+        
+        # SAFETY: Ensure we're in a valid directory before tart clone operations
+        # Fix for: "shell-init: error retrieving current directory: getcwd: cannot access parent directories"
+        if ! pwd >/dev/null 2>&1; then
+            log "⚠️  Current directory is invalid - switching to HOME for tart operations"
+            cd "$HOME"
+            log "   Switched to: $(pwd)"
+        fi
+        
         if tart clone "$registry_url" "$base_vm_image" 2>&1; then
             log "✅ Successfully cloned to local name: $base_vm_image"
             return 0
@@ -356,6 +365,15 @@ create_and_run_vm() {
     fi
     
     log "✅ Base image found - cloning VM"
+    
+    # SAFETY: Ensure we're in a valid directory before tart clone operations
+    # Fix for: "shell-init: error retrieving current directory: getcwd: cannot access parent directories"
+    if ! pwd >/dev/null 2>&1; then
+        log "⚠️  Current directory is invalid - switching to HOME for tart operations"
+        cd "$HOME"
+        log "   Switched to: $(pwd)"
+    fi
+    
     if ! tart clone "$base_vm_image" "$vm_name"; then
         log "❌ Failed to clone VM from base image: $base_vm_image"
         log "   This could indicate disk space issues or corrupted base image"
