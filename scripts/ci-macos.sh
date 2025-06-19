@@ -120,6 +120,69 @@ get_disk_usage() {
     df -h . | tail -1 | awk '{print $5}' | sed 's/%//'
 }
 
+# Internal function for robust VM cleanup (shared logic)
+cleanup_vm_internal() {
+    local vm_name="$1"
+    
+    # Check if VM exists first with fresh state
+    if ! tart list 2>/dev/null | grep -q "^local.*$vm_name"; then
+        # VM doesn't exist, consider it cleaned
+        return 0
+    fi
+    
+    # Try to stop VM first if it's running (with timeout)
+    if tart list 2>/dev/null | grep "$vm_name" | grep -q "running"; then
+        log "   🛑 Stopping running VM: $vm_name"
+        tart stop "$vm_name" 2>/dev/null || log "     ⚠️ Failed to stop VM (may already be stopped)"
+        sleep 2
+        
+        # Wait for VM to actually stop with timeout
+        local stop_attempts=0
+        while tart list 2>/dev/null | grep "$vm_name" | grep -q "running" && [ $stop_attempts -lt 5 ]; do
+            log "     Waiting for VM to stop... (attempt $((stop_attempts + 1))/5)"
+            sleep 2
+            stop_attempts=$((stop_attempts + 1))
+        done
+        
+        # Check if still running after timeout
+        if tart list 2>/dev/null | grep "$vm_name" | grep -q "running"; then
+            log "     ⚠️ VM still running after stop attempts, proceeding with delete anyway"
+        fi
+    fi
+    
+    # Delete the VM with retry logic
+    local delete_attempts=0
+    local max_delete_attempts=3
+    
+    while [ $delete_attempts -lt $max_delete_attempts ]; do
+        delete_attempts=$((delete_attempts + 1))
+        
+        # Check again if VM still exists (state might have changed)
+        if ! tart list 2>/dev/null | grep -q "^local.*$vm_name"; then
+            # VM no longer exists, consider success
+            return 0
+        fi
+        
+        log "     🗑️  Deleting VM: $vm_name (attempt $delete_attempts/$max_delete_attempts)"
+        
+        if tart delete "$vm_name" 2>/dev/null; then
+            # Verify deletion worked
+            if ! tart list 2>/dev/null | grep -q "^local.*$vm_name"; then
+                return 0
+            fi
+        fi
+        
+        # If we get here, deletion failed
+        if [ $delete_attempts -lt $max_delete_attempts ]; then
+            log "     ⚠️ Delete attempt failed, retrying in 3 seconds..."
+            sleep 3
+        fi
+    done
+    
+    log "     ❌ All delete attempts failed for $vm_name"
+    return 1
+}
+
 # Function to cleanup orphaned VMs
 cleanup_orphaned_vms() {
     log "🧹 Cleaning up orphaned VMs..."
@@ -922,67 +985,4 @@ EOF
 # Run main if script is executed directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
-fi
-
-# Internal function for robust VM cleanup (shared logic)
-cleanup_vm_internal() {
-    local vm_name="$1"
-    
-    # Check if VM exists first with fresh state
-    if ! tart list 2>/dev/null | grep -q "^local.*$vm_name"; then
-        # VM doesn't exist, consider it cleaned
-        return 0
-    fi
-    
-    # Try to stop VM first if it's running (with timeout)
-    if tart list 2>/dev/null | grep "$vm_name" | grep -q "running"; then
-        log "   🛑 Stopping running VM: $vm_name"
-        tart stop "$vm_name" 2>/dev/null || log "     ⚠️ Failed to stop VM (may already be stopped)"
-        sleep 2
-        
-        # Wait for VM to actually stop with timeout
-        local stop_attempts=0
-        while tart list 2>/dev/null | grep "$vm_name" | grep -q "running" && [ $stop_attempts -lt 5 ]; do
-            log "     Waiting for VM to stop... (attempt $((stop_attempts + 1))/5)"
-            sleep 2
-            stop_attempts=$((stop_attempts + 1))
-        done
-        
-        # Check if still running after timeout
-        if tart list 2>/dev/null | grep "$vm_name" | grep -q "running"; then
-            log "     ⚠️ VM still running after stop attempts, proceeding with delete anyway"
-        fi
-    fi
-    
-    # Delete the VM with retry logic
-    local delete_attempts=0
-    local max_delete_attempts=3
-    
-    while [ $delete_attempts -lt $max_delete_attempts ]; do
-        delete_attempts=$((delete_attempts + 1))
-        
-        # Check again if VM still exists (state might have changed)
-        if ! tart list 2>/dev/null | grep -q "^local.*$vm_name"; then
-            # VM no longer exists, consider success
-            return 0
-        fi
-        
-        log "     🗑️  Deleting VM: $vm_name (attempt $delete_attempts/$max_delete_attempts)"
-        
-        if tart delete "$vm_name" 2>/dev/null; then
-            # Verify deletion worked
-            if ! tart list 2>/dev/null | grep -q "^local.*$vm_name"; then
-                return 0
-            fi
-        fi
-        
-        # If we get here, deletion failed
-        if [ $delete_attempts -lt $max_delete_attempts ]; then
-            log "     ⚠️ Delete attempt failed, retrying in 3 seconds..."
-            sleep 3
-        fi
-    done
-    
-    log "     ❌ All delete attempts failed for $vm_name"
-    return 1
-} 
+fi 
