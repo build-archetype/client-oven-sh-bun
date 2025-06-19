@@ -150,10 +150,21 @@ for vm_info in "${VMS_TO_UPDATE[@]}"; do
                 # Fix lolhtml dependency issues
                 echo 'Fixing lolhtml dependencies...'
                 
-                # Check if workspace directory exists
-                if [ -d '/Users/admin/workspace' ]; then
-                    cd /Users/admin/workspace
-                    echo 'Found workspace directory'
+                # Check if workspace directory exists (try multiple possible locations)
+                WORKSPACE_DIR=""
+                if [ -d '/Users/mac-ci/workspace' ]; then
+                    WORKSPACE_DIR='/Users/mac-ci/workspace'
+                elif [ -d '/Users/admin/workspace' ]; then
+                    WORKSPACE_DIR='/Users/admin/workspace'
+                elif [ -d "\$HOME/workspace" ]; then
+                    WORKSPACE_DIR="\$HOME/workspace"
+                elif [ -d '/Users/runner/workspace' ]; then
+                    WORKSPACE_DIR='/Users/runner/workspace'
+                fi
+                
+                if [ -n "\$WORKSPACE_DIR" ]; then
+                    cd "\$WORKSPACE_DIR"
+                    echo "Found workspace directory: \$WORKSPACE_DIR"
                     
                     # Update git submodules if we are in a git repo
                     if [ -d '.git' ]; then
@@ -187,6 +198,7 @@ for vm_info in "${VMS_TO_UPDATE[@]}"; do
                     fi
                 else
                     echo 'Workspace directory not found, skipping lolhtml fixes'
+                    echo 'Checked: /Users/mac-ci/workspace, /Users/admin/workspace, \$HOME/workspace, /Users/runner/workspace'
                 fi
                 
                 echo 'lolhtml fixes complete!'
