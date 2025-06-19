@@ -476,72 +476,44 @@ create_and_run_vm() {
         # Don't create cache directory for linking steps (no cache needed)
         log "   Skipping cache setup for fresh linking environment"
     else
-        # Create cache directory inside workspace for compilation steps only
-        if [ "${BUILDKITE_CACHE_TYPE:-}" = "persistent" ]; then
-            local cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}"
-            log "🔧 Setting up persistent cache directory inside workspace: $cache_dir"
-            
-            # Only create cache structure if it doesn't already exist (preserve restored cache)
-            if [ ! -d "$cache_dir" ]; then
-                log "   Creating fresh cache directory structure"
-                mkdir -p "$cache_dir"/{zig/global,zig/local,ccache,npm}
-                log "   Fresh cache structure created"
-            else
-                log "   Cache directory already exists - preserving existing cache"
-                # Ensure subdirectories exist but don't overwrite them
-                [ ! -d "$cache_dir/zig" ] && mkdir -p "$cache_dir/zig"/{global,local}
-                [ ! -d "$cache_dir/ccache" ] && mkdir -p "$cache_dir/ccache"
-                [ ! -d "$cache_dir/npm" ] && mkdir -p "$cache_dir/npm"
-                log "   Verified cache subdirectories exist (preserved existing content)"
-            fi
-            
-            log "✅ Cache directory ready inside workspace (mounted with workspace)"
-            log "   Cache path in VM: /Volumes/My Shared Files/workspace/buildkite-cache"
-        fi
+        # For compilation steps, the build system manages all caches in build/release/cache/
+        log "🔧 Cache management: Build tools will handle all caches automatically"
+        log "   ccache: build/release/cache/ccache/ (managed by CMake)"
+        log "   zig-cache: build/release/zig-cache/ (managed by Zig)"
+        log "   npm cache: ~/.npm (managed by npm)"
     fi
     
-    # TEMPORARY DEBUG: Verify cache state after cleanup/setup (for C++ and Zig builds)
+    # TEMPORARY DEBUG: Verify cache state after build completion (for C++ and Zig builds)
     if [ "${BUN_CPP_ONLY:-}" = "ON" ] || [ "${BUN_ZIG_ONLY:-}" = "ON" ] || [[ "$command" == *"--target bun-zig"* ]] || [[ "$command" == *"--target bun"* ]]; then
-        log "🔍 TEMPORARY DEBUG: Verifying cache state after workspace setup..."
-        local cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}"
+        log "🔍 TEMPORARY DEBUG: Verifying build cache state AFTER build completion..."
         
-        if [ -d "$cache_dir" ]; then
-            local cache_size=$(du -sh "$cache_dir" 2>/dev/null | cut -f1 || echo "unknown")
-            log "   ✅ Cache directory exists: $cache_dir"
-            log "   📊 Cache size: $cache_size"
+        # Check the real cache locations managed by build tools
+        if [ -d "build/release/cache" ]; then
+            local build_cache_size=$(du -sh "build/release/cache" 2>/dev/null | cut -f1 || echo "unknown")
+            log "   🔧 Build cache directory: build/release/cache ($build_cache_size)"
             
-            # Check each cache subdirectory
-            for subdir in "zig/global" "zig/local" "ccache" "npm" "build-results"; do
-                if [ -d "$cache_dir/$subdir" ]; then
-                    local subdir_size=$(du -sh "$cache_dir/$subdir" 2>/dev/null | cut -f1 || echo "unknown")
-                    local item_count=$(find "$cache_dir/$subdir" -type f 2>/dev/null | wc -l | tr -d ' ')
-                    log "   📁 $subdir: $subdir_size ($item_count files)"
-                    
-                    # Show a few sample files for non-empty directories
-                    if [ "$item_count" -gt 0 ]; then
-                        log "      Sample files:"
-                        find "$cache_dir/$subdir" -type f 2>/dev/null | head -3 | while read -r file; do
-                            local rel_file=${file#$cache_dir/}
-                            log "        $rel_file"
-                        done
-                        [ "$item_count" -gt 3 ] && log "        ... and $((item_count - 3)) more files"
-                    fi
+            # Check ccache specifically since it's the most important for incremental builds
+            if [ -d "build/release/cache/ccache" ]; then
+                local ccache_size=$(du -sh "build/release/cache/ccache" 2>/dev/null | cut -f1 || echo "unknown")
+                local ccache_files=$(find "build/release/cache/ccache" -type f 2>/dev/null | wc -l | tr -d ' ')
+                log "   📁 ccache: $ccache_size ($ccache_files files) - C++ INCREMENTAL CACHE"
+                if [ "$ccache_files" -gt 0 ]; then
+                    log "   🎉 SUCCESS: ccache populated - future C++ builds will be much faster!"
                 else
-                    log "   📋 $subdir: not found"
+                    log "   ⚠️  WARNING: ccache appears empty after build"
                 fi
-            done
+            fi
             
-            # Overall assessment
-            if [ "$cache_size" = "0B" ] || [ "$cache_size" = "unknown" ]; then
-                log "   ⚠️  WARNING: Cache appears to be empty - expecting incremental build benefits may not materialize"
-            else
-                log "   🎉 Cache contains data - incremental build should be faster!"
+            # Check if zig-cache was created for Zig builds
+            if [ -d "build/release/zig-cache" ]; then
+                local zig_cache_size=$(du -sh "build/release/zig-cache" 2>/dev/null | cut -f1 || echo "unknown")
+                log "   📁 zig-cache: $zig_cache_size - ZIG INCREMENTAL CACHE"
             fi
         else
-            log "   ❌ Cache directory not found: $cache_dir"
-            log "   This indicates the cache preservation/setup logic may have failed"
+            log "   ❌ Build cache directory not found: build/release/cache"
         fi
-        log "🔍 END TEMPORARY DEBUG: Cache state verification complete"
+        
+        log "🔍 END TEMPORARY DEBUG: Build cache verification complete"
     fi
     
     log "✅ Workspace cleaned and prepared for fresh build"
@@ -724,50 +696,6 @@ create_and_run_vm() {
         else
             log "❌ Zig artifact not found: ./build/release/bun-zig.o"
         fi
-    fi
-
-    # TEMPORARY DEBUG: Verify cache state after build completion (for C++ and Zig builds)
-    if [ "${BUN_CPP_ONLY:-}" = "ON" ] || [ "${BUN_ZIG_ONLY:-}" = "ON" ] || [[ "$command" == *"--target bun-zig"* ]] || [[ "$command" == *"--target bun"* ]]; then
-        log "🔍 TEMPORARY DEBUG: Verifying cache state AFTER build completion..."
-        local cache_dir="${BUILDKITE_CACHE_BASE:-./buildkite-cache}"
-        
-        if [ -d "$cache_dir" ]; then
-            local cache_size=$(du -sh "$cache_dir" 2>/dev/null | cut -f1 || echo "unknown")
-            log "   ✅ Cache directory exists: $cache_dir"
-            log "   📊 Cache size AFTER build: $cache_size"
-            
-            # Check each cache subdirectory
-            for subdir in "zig/global" "zig/local" "ccache" "npm" "build-results"; do
-                if [ -d "$cache_dir/$subdir" ]; then
-                    local subdir_size=$(du -sh "$cache_dir/$subdir" 2>/dev/null | cut -f1 || echo "unknown")
-                    local item_count=$(find "$cache_dir/$subdir" -type f 2>/dev/null | wc -l | tr -d ' ')
-                    log "   📁 $subdir: $subdir_size ($item_count files)"
-                    
-                    # Show a few sample files for populated directories
-                    if [ "$item_count" -gt 0 ]; then
-                        log "      Sample files:"
-                        find "$cache_dir/$subdir" -type f 2>/dev/null | head -2 | while read -r file; do
-                            local rel_file=${file#$cache_dir/}
-                            log "        $rel_file"
-                        done
-                        [ "$item_count" -gt 2 ] && log "        ... and $((item_count - 2)) more files"
-                    fi
-                else
-                    log "   📋 $subdir: not found"
-                fi
-            done
-            
-            # Post-build assessment
-            if [ "$cache_size" = "0B" ] || [ "$cache_size" = "unknown" ]; then
-                log "   ⚠️  WARNING: Cache is still empty after build - cache save may have failed"
-            else
-                log "   🎉 SUCCESS: Cache populated after build - ready for next incremental build!"
-            fi
-        else
-            log "   ❌ Cache directory not found after build: $cache_dir"
-            log "   This indicates the cache copy-back from VM may have failed"
-        fi
-        log "🔍 END TEMPORARY DEBUG: Post-build cache state verification complete"
     fi
 
     # Upload logs and timing data
