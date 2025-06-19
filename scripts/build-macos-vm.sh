@@ -84,7 +84,7 @@ assoc_set() {
     local i
     
     # Check if key already exists
-    for i in "${!_assoc_keys[@]}"; do
+    for i in "${!_assoc_keys[@]:-}"; do
         if [ "${_assoc_keys[i]}" = "$key" ]; then
             _assoc_values[i]="$value"
             return 0
@@ -101,7 +101,7 @@ assoc_get() {
     local key="$1"
     local i
     
-    for i in "${!_assoc_keys[@]}"; do
+    for i in "${!_assoc_keys[@]:-}"; do
         if [ "${_assoc_keys[i]}" = "$key" ]; then
             echo "${_assoc_values[i]}"
             return 0
@@ -114,7 +114,7 @@ assoc_get() {
 
 # Get all keys
 assoc_keys() {
-    printf '%s\n' "${_assoc_keys[@]}"
+    printf '%s\n' "${_assoc_keys[@]:-}"
 }
 
 # Clear the associative array simulation
