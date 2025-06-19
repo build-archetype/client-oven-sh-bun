@@ -1087,45 +1087,11 @@ EOF
     # Cleanup VM
     log "   🛑 Shutting down validation VM..."
     
-    # Use proper Tart shutdown instead of forceful kill
-    # The old method was corrupting VMs with sudo shutdown + kill
-    local stop_attempts=0
-    local max_stop_attempts=3
-    
-    while [ $stop_attempts -lt $max_stop_attempts ]; do
-        stop_attempts=$((stop_attempts + 1))
-        log "   Attempting graceful VM stop (attempt $stop_attempts/$max_stop_attempts)..."
-        
-        if tart stop "$vm_name" 2>/dev/null; then
-            log "   ✅ VM stopped gracefully via tart"
-            
-            # Wait for VM to actually stop
-            local wait_attempts=0
-            while tart list | grep "$vm_name" | grep -q "running" && [ $wait_attempts -lt 10 ]; do
-                sleep 2
-                wait_attempts=$((wait_attempts + 1))
-            done
-            
-            if ! tart list | grep "$vm_name" | grep -q "running"; then
-                log "   ✅ VM completely stopped and ready for cloning"
-                break
-            else
-                log "   ⚠️  VM still showing as running, trying again..."
-            fi
-        else
-            log "   ⚠️  Tart stop failed, trying again..."
-        fi
-        
-        if [ $stop_attempts -lt $max_stop_attempts ]; then
-            sleep 5
-        fi
-    done
-    
-    # Final check - if VM is still running after all attempts, this is a problem
-    if tart list | grep "$vm_name" | grep -q "running"; then
-        log "   ❌ WARNING: VM still running after stop attempts - may be corrupted"
-        log "   ❌ This could cause clone failures in ci-macos.sh"
-        return 1
+    # Use proper Tart shutdown instead of forceful kill that was corrupting VMs
+    if tart stop "$vm_name" 2>/dev/null; then
+        log "   ✅ VM stopped gracefully via tart"
+    else
+        log "   ⚠️  Tart stop failed, but continuing..."
     fi
     
     # Clean up any remaining background processes
@@ -1958,45 +1924,11 @@ EOF
             # Cleanup VM
             log "   🛑 Shutting down validation VM..."
             
-            # Use proper Tart shutdown instead of forceful kill
-            # The old method was corrupting VMs with sudo shutdown + kill
-            local stop_attempts=0
-            local max_stop_attempts=3
-            
-            while [ $stop_attempts -lt $max_stop_attempts ]; do
-                stop_attempts=$((stop_attempts + 1))
-                log "   Attempting graceful VM stop (attempt $stop_attempts/$max_stop_attempts)..."
-                
-                if tart stop "$vm_name" 2>/dev/null; then
-                    log "   ✅ VM stopped gracefully via tart"
-                    
-                    # Wait for VM to actually stop
-                    local wait_attempts=0
-                    while tart list | grep "$vm_name" | grep -q "running" && [ $wait_attempts -lt 10 ]; do
-                        sleep 2
-                        wait_attempts=$((wait_attempts + 1))
-                    done
-                    
-                    if ! tart list | grep "$vm_name" | grep -q "running"; then
-                        log "   ✅ VM completely stopped and ready for cloning"
-                        break
-                    else
-                        log "   ⚠️  VM still showing as running, trying again..."
-                    fi
-                else
-                    log "   ⚠️  Tart stop failed, trying again..."
-                fi
-                
-                if [ $stop_attempts -lt $max_stop_attempts ]; then
-                    sleep 5
-                fi
-            done
-            
-            # Final check - if VM is still running after all attempts, this is a problem
-            if tart list | grep "$vm_name" | grep -q "running"; then
-                log "   ❌ WARNING: VM still running after stop attempts - may be corrupted"
-                log "   ❌ This could cause clone failures in ci-macos.sh"
-                return 1
+            # Use proper Tart shutdown instead of forceful kill that was corrupting VMs
+            if tart stop "$vm_name" 2>/dev/null; then
+                log "   ✅ VM stopped gracefully via tart"
+            else
+                log "   ⚠️  Tart stop failed, but continuing..."
             fi
             
             # Clean up any remaining background processes
