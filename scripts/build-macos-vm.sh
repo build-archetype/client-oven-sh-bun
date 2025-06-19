@@ -956,9 +956,9 @@ comprehensive_vm_validation() {
                     fi
                 else
                     echo "   ❌ Not found: $ninja_path"
-                fi
-            done
-            
+            fi
+        done
+        
             # Check Homebrew ninja installation
             if command -v brew >/dev/null 2>&1; then
                 echo "   🍺 Checking Homebrew ninja installation..."
@@ -1029,8 +1029,8 @@ EOF
             else
                 echo "❌ C++ compilation test: executable failed to run correctly"
                 failed_tests="$failed_tests compilation"
-        fi
-    else
+            fi
+        else
             echo "❌ C++ compilation test: FAILED to compile"
             failed_tests="$failed_tests compilation"
         fi
@@ -1093,10 +1093,10 @@ EOF
     
     if [ "$validation_success" = true ]; then
         log "   ✅ VM passed comprehensive validation - ready for building"
-    return 0
-else
+        return 0
+    else
         log "   ❌ VM failed comprehensive validation - not ready for building"
-    return 1
+        return 1
     fi
 }
 
@@ -1941,6 +1941,27 @@ EOF
         fi
     fi
     
+    # CRITICAL FIX: Check if target VM already exists and is ready BEFORE trying to build it
+    # This prevents unnecessary rebuilds when the VM is already available
+    log "🔍 Checking if target VM already exists and is ready: $LOCAL_IMAGE_NAME"
+    if tart list | grep -q "$LOCAL_IMAGE_NAME"; then
+        log "✅ Target VM already exists - validating to ensure it's ready..."
+        
+        if comprehensive_vm_validation "$LOCAL_IMAGE_NAME" "existing-target"; then
+            log "✅ Target VM passed validation - already ready for building!"
+            log "🎯 Using existing VM: $LOCAL_IMAGE_NAME"
+            log "   No rebuild necessary - VM is fully prepared and validated"
+            exit 0
+        else
+            log "❌ Target VM exists but failed validation - will rebuild"
+            log "🔧 Deleting corrupted target VM and rebuilding from scratch"
+            tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+            log "   Proceeding to rebuild..."
+        fi
+    else
+        log "📋 Target VM does not exist - proceeding to build: $LOCAL_IMAGE_NAME"
+    fi
+    
     # If we reach here, VM doesn't exist or failed validation - need to build
     
     # Step 2: Check remote registry (skip if force OCI rebuild requested)
@@ -1971,7 +1992,7 @@ EOF
             log "🔬 CRITICAL: Validating remote image to ensure it's ready for building..."
             if comprehensive_vm_validation "$LOCAL_IMAGE_NAME" "remote-image"; then
                 log "✅ Remote image passed validation - ready for building"
-                exit 0
+        exit 0
             else
                 log "❌ Remote image failed validation - not ready for building"
                 log "🔧 Remote image may be corrupted or missing dependencies"
@@ -2019,8 +2040,8 @@ EOF
                 # Continue to step 4 (OCI build)
             fi
         else
-            log "🔄 Found local VM to use as base: $latest_local"
-            log "   Cloning and updating to target version: $LOCAL_IMAGE_NAME"
+        log "🔄 Found local VM to use as base: $latest_local"
+        log "   Cloning and updating to target version: $LOCAL_IMAGE_NAME"
             
             # SAFETY: Ensure we're in a valid directory before tart clone operations
             # Fix for: "shell-init: error retrieving current directory: getcwd: cannot access parent directories"
@@ -2029,119 +2050,119 @@ EOF
                 cd "$HOME"
                 log "   Switched to: $(pwd)"
             fi
+        
+        # Clone the base VM to target name
+        if tart clone "$latest_local" "$LOCAL_IMAGE_NAME"; then
+            log "✅ Base VM cloned to: $LOCAL_IMAGE_NAME"
+            log "🔧 Running bootstrap script to update Bun version and configuration..."
+    
+            # Start the VM for bootstrapping
+            log "   Starting VM for bootstrap..."
+            tart run "$LOCAL_IMAGE_NAME" --no-graphics >/dev/null 2>&1 &
+            local vm_pid=$!
             
-            # Clone the base VM to target name
-            if tart clone "$latest_local" "$LOCAL_IMAGE_NAME"; then
-                log "✅ Base VM cloned to: $LOCAL_IMAGE_NAME"
-                log "🔧 Running bootstrap script to update Bun version and configuration..."
-        
-                # Start the VM for bootstrapping
-                log "   Starting VM for bootstrap..."
-                tart run "$LOCAL_IMAGE_NAME" --no-graphics >/dev/null 2>&1 &
-                local vm_pid=$!
-                
-                # Wait for VM to boot
-                sleep 10
-        
-                # Get VM IP
-                local vm_ip=""
-                for i in {1..20}; do
-                    vm_ip=$(tart ip "$LOCAL_IMAGE_NAME" 2>/dev/null || echo "")
-                    if [ -n "$vm_ip" ]; then
-                        break
-                    fi
-                    sleep 3
-                done
-        
-                if [ -z "$vm_ip" ]; then
-                    log "❌ Could not get VM IP for bootstrap"
-                    kill $vm_pid >/dev/null 2>&1 || true
-                    if [ "$ci_mode" = true ]; then
-                        log "🚧 CI Mode: Bootstrap failed but continuing pipeline"
-                        exit 0  # Non-fatal in CI mode
-                    else
-                        exit 1
-                    fi
-        fi
-
-                # Wait for SSH to be available
-                local ssh_ready=false
-                for i in {1..20}; do
-                    if sshpass -p "admin" ssh $SSH_OPTS -o ConnectTimeout=3 admin@"$vm_ip" "echo 'ready'" >/dev/null 2>&1; then
-                        ssh_ready=true
-                        break
-                    fi
-                    sleep 3
-                done
-            
-                if [ "$ssh_ready" != "true" ]; then
-                    log "❌ SSH not available for bootstrap"
-                    kill $vm_pid >/dev/null 2>&1 || true
-                    if [ "$ci_mode" = true ]; then
-                        log "🚧 CI Mode: SSH connection failed but continuing pipeline"
-                        exit 0  # Non-fatal in CI mode
-                    else
-                        exit 1
-                    fi
+            # Wait for VM to boot
+            sleep 10
+    
+            # Get VM IP
+            local vm_ip=""
+            for i in {1..20}; do
+                vm_ip=$(tart ip "$LOCAL_IMAGE_NAME" 2>/dev/null || echo "")
+                if [ -n "$vm_ip" ]; then
+                    break
                 fi
+                sleep 3
+            done
+    
+            if [ -z "$vm_ip" ]; then
+                log "❌ Could not get VM IP for bootstrap"
+                kill $vm_pid >/dev/null 2>&1 || true
+                if [ "$ci_mode" = true ]; then
+                    log "🚧 CI Mode: Bootstrap failed but continuing pipeline"
+                    exit 0  # Non-fatal in CI mode
+                else
+                    exit 1
+                fi
+    fi
 
-                log "✅ VM ready for bootstrap (IP: $vm_ip)"
-                
-                # Copy bootstrap script to VM
-                log "   Copying bootstrap script to VM..."
+            # Wait for SSH to be available
+            local ssh_ready=false
+            for i in {1..20}; do
+                if sshpass -p "admin" ssh $SSH_OPTS -o ConnectTimeout=3 admin@"$vm_ip" "echo 'ready'" >/dev/null 2>&1; then
+                    ssh_ready=true
+                    break
+                fi
+                sleep 3
+            done
+        
+            if [ "$ssh_ready" != "true" ]; then
+                log "❌ SSH not available for bootstrap"
+                kill $vm_pid >/dev/null 2>&1 || true
+                if [ "$ci_mode" = true ]; then
+                    log "🚧 CI Mode: SSH connection failed but continuing pipeline"
+                    exit 0  # Non-fatal in CI mode
+                else
+                    exit 1
+                fi
+            fi
+
+            log "✅ VM ready for bootstrap (IP: $vm_ip)"
+            
+            # Copy bootstrap script to VM
+            log "   Copying bootstrap script to VM..."
                 if ! sshpass -p "admin" scp $SSH_OPTS scripts/bootstrap_new.sh admin@"$vm_ip":/tmp/; then
-                    log "❌ Failed to copy bootstrap script"
-                    kill $vm_pid >/dev/null 2>&1 || true
-                    if [ "$ci_mode" = true ]; then
-                        log "🚧 CI Mode: Bootstrap script copy failed but continuing pipeline"
-                        exit 0  # Non-fatal in CI mode
-                    else
-                        exit 1
-                    fi
+                log "❌ Failed to copy bootstrap script"
+                kill $vm_pid >/dev/null 2>&1 || true
+                if [ "$ci_mode" = true ]; then
+                    log "🚧 CI Mode: Bootstrap script copy failed but continuing pipeline"
+                    exit 0  # Non-fatal in CI mode
+                else
+                    exit 1
                 fi
-                
-                # Run bootstrap script inside VM
-                log "   Executing bootstrap script inside VM..."
-                local bootstrap_cmd='
-                    cd /tmp && \
+            fi
+            
+            # Run bootstrap script inside VM
+            log "   Executing bootstrap script inside VM..."
+            local bootstrap_cmd='
+                cd /tmp && \
                     chmod +x bootstrap_new.sh && \
                     ./bootstrap_new.sh
-                '
-                
-                if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$bootstrap_cmd"; then
-                    log "✅ Bootstrap completed successfully"
-                else
-                    log "⚠️  Bootstrap script had issues but continuing..."
-                fi
-                
-                # Shutdown VM gracefully
-                log "   Shutting down VM..."
-                sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
-                
-                # Wait for VM to stop
-                sleep 10
-                
-                # Force kill if still running
-                kill $vm_pid >/dev/null 2>&1 || true
-                
-                # Wait for complete cleanup
-                sleep 5
-                
+            '
+            
+            if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$bootstrap_cmd"; then
+                log "✅ Bootstrap completed successfully"
+            else
+                log "⚠️  Bootstrap script had issues but continuing..."
+            fi
+            
+            # Shutdown VM gracefully
+            log "   Shutting down VM..."
+            sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
+            
+            # Wait for VM to stop
+            sleep 10
+            
+            # Force kill if still running
+            kill $vm_pid >/dev/null 2>&1 || true
+            
+            # Wait for complete cleanup
+            sleep 5
+            
                 # CRITICAL: Validate the VM after bootstrap to ensure it's ready
                 log "🔬 CRITICAL: Validating VM after bootstrap to ensure it's ready for building..."
                 if comprehensive_vm_validation "$LOCAL_IMAGE_NAME" "post-bootstrap"; then
                     log "✅ VM passed post-bootstrap validation - ready for building"
                     log "🎯 Base VM ready for cloning: $LOCAL_IMAGE_NAME"
-                    exit 0
+            exit 0
                 else
                     log "❌ VM failed post-bootstrap validation - bootstrap did not work properly"
                     log "🔧 Will delete failed VM and try building from OCI base instead"
                     tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
                     # Continue to step 4 (OCI build) instead of exiting
                 fi
-            else
-                log "❌ Failed to clone base VM"
-                # Continue to step 4 (OCI build)
+        else
+            log "❌ Failed to clone base VM"
+            # Continue to step 4 (OCI build)
             fi
         fi
     fi
@@ -2389,4 +2410,4 @@ ARCH="$(get_architecture)"
 # Base image to clone for new VM images
 BASE_IMAGE="${BASE_IMAGE:-ghcr.io/cirruslabs/macos-sonoma-xcode:latest}"
 
-main "$@"
+main "$@" 
