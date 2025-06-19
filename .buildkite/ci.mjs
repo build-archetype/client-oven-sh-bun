@@ -1154,16 +1154,18 @@ function getMacOSVMEnsureStep(platform, options) {
     },
     // Run on ALL hosts in the darwin queue simultaneously
     parallelism: 10, // Should cover all our CI hosts
-    command: `echo "🔍 Host \\$(hostname): Checking if macOS ${release} base VM exists..."
-echo "🖥️  Running on host: \\$(hostname) (\\$(whoami))"
-if ! ./scripts/build-macos-vm.sh --release=${release} --check-only; then
-  echo "❌ Host \\$(hostname): Base VM missing - rebuilding from OCI base image..."
-  # Use force-oci-rebuild to skip private registry and build directly from OCI
-  echo "📥 Building from OCI base images (faster than registry check)..."
-  ./scripts/build-macos-vm.sh --release=${release} --force-oci-rebuild
-else
-  echo "✅ Host \\$(hostname): Base VM already exists"
-fi`,
+    command: [
+      "bash", "-c", 
+      `echo "🔍 Host $(hostname): Checking if macOS ${release} base VM exists..." && ` +
+      `echo "🖥️  Running on host: $(hostname) ($(whoami))" && ` +
+      `if ! ./scripts/build-macos-vm.sh --release=${release} --check-only; then ` +
+        `echo "❌ Host $(hostname): Base VM missing - rebuilding from OCI base image..." && ` +
+        `echo "📥 Building from OCI base images (faster than registry check)..." && ` +
+        `./scripts/build-macos-vm.sh --release=${release} --force-oci-rebuild; ` +
+      `else ` +
+        `echo "✅ Host $(hostname): Base VM already exists"; ` +
+      `fi`
+    ],
     timeout_in_minutes: 60, // Shorter timeout since rebuild should be faster with OCI
     retry: {
       automatic: [
