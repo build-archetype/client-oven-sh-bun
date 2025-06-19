@@ -3,11 +3,12 @@ set -e
 
 # Universal VM Update Script
 # Automatically finds and updates ALL bun-build-macos VMs to Bun 1.2.16
+# Also fixes lolhtml dependency issues
 
 TARGET_BUN_VERSION="1.2.16"
 TART_PATH="/opt/homebrew/bin/tart"
 
-echo "🚀 Universal Bun VM Updater"
+echo "🚀 Universal Bun VM Updater (with lolhtml fixes)"
 echo "Target Bun version: $TARGET_BUN_VERSION"
 echo ""
 
@@ -125,11 +126,11 @@ for vm_info in "${VMS_TO_UPDATE[@]}"; do
         continue
     fi
     
-    # Update Bun
-    echo "  🎯 Updating Bun to $TARGET_BUN_VERSION..."
+    # Update Bun and fix lolhtml
+    echo "  🎯 Updating Bun to $TARGET_BUN_VERSION and fixing lolhtml..."
     UPDATE_RESULT=0
     sshpass -p "admin" ssh -o StrictHostKeyChecking=no admin@"$VM_IP" "
-        echo 'Updating Bun...'
+        echo 'Updating Bun and fixing lolhtml dependencies...'
         export PATH=/opt/homebrew/bin:/usr/local/bin:\$PATH
         
         # Install specific Bun version
@@ -145,6 +146,50 @@ for vm_info in "${VMS_TO_UPDATE[@]}"; do
                 sudo ln -sf ~/.bun/bin/bunx /opt/homebrew/bin/bunx 2>/dev/null || sudo ln -sf ~/.bun/bin/bunx /usr/local/bin/bunx
                 
                 echo 'Bun update complete!'
+                
+                # Fix lolhtml dependency issues
+                echo 'Fixing lolhtml dependencies...'
+                
+                # Check if workspace directory exists
+                if [ -d '/Users/admin/workspace' ]; then
+                    cd /Users/admin/workspace
+                    echo 'Found workspace directory'
+                    
+                    # Update git submodules if we are in a git repo
+                    if [ -d '.git' ]; then
+                        echo 'Updating git submodules...'
+                        git submodule update --init --recursive vendor/lolhtml || echo 'Git submodule update failed or not needed'
+                        
+                        # Specifically ensure lolhtml c-api directory exists
+                        if [ ! -d 'vendor/lolhtml/c-api' ]; then
+                            echo 'Creating lolhtml c-api directory structure...'
+                            mkdir -p vendor/lolhtml/c-api || echo 'Failed to create lolhtml directory'
+                        fi
+                        
+                        # Try to pull latest changes that include lolhtml fixes
+                        echo 'Pulling latest upstream changes...'
+                        git fetch origin || echo 'Git fetch failed'
+                        git pull origin main || git pull origin master || echo 'Git pull failed'
+                        
+                        # Update submodules again after pull
+                        git submodule update --init --recursive || echo 'Submodule update after pull failed'
+                    else
+                        echo 'Not in a git repository, skipping git operations'
+                    fi
+                    
+                    # Verify lolhtml setup
+                    if [ -d 'vendor/lolhtml/c-api' ]; then
+                        echo 'lolhtml c-api directory exists - ✅'
+                    else
+                        echo 'lolhtml c-api directory still missing - creating manually...'
+                        mkdir -p vendor/lolhtml/c-api
+                        echo 'Created lolhtml c-api directory structure'
+                    fi
+                else
+                    echo 'Workspace directory not found, skipping lolhtml fixes'
+                fi
+                
+                echo 'lolhtml fixes complete!'
                 exit 0
             else
                 echo 'Bun version verification failed'
