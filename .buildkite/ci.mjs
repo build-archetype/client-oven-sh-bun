@@ -1139,6 +1139,42 @@ function getMacOSVMBuildStep(platform, options) {
   };
 }
 
+/**
+ * @param {Platform} platform
+ * @param {PipelineOptions} options
+ * @returns {Step}
+ */
+function getMacOSVMEnsureStep(platform, options) {
+  const { release } = platform;
+  return {
+    key: `ensure-macos-vm-${release}`,
+    label: `🔍 Ensure macOS ${release} base VM exists (all hosts)`,
+    agents: {
+      queue: "darwin",
+    },
+    // Run on ALL hosts in the darwin queue simultaneously
+    parallelism: 10, // Should cover all our CI hosts
+    command: [
+      `echo "🔍 Host $(hostname): Checking if macOS ${release} base VM exists..."`,
+      `echo "🖥️  Running on host: $(hostname) ($(whoami))"`,
+      `if ! ./scripts/build-macos-vm.sh --release=${release} --check-only; then`,
+      `  echo "❌ Host $(hostname): Base VM missing - rebuilding from OCI base image..."`,
+      `  # Use force-oci-rebuild to skip private registry and build directly from OCI`,
+      `  echo "📥 Building from OCI base images (faster than registry check)..."`,
+      `  ./scripts/build-macos-vm.sh --release=${release} --force-oci-rebuild`,
+      `else`,
+      `  echo "✅ Host $(hostname): Base VM already exists"`,
+      `fi`
+    ].join('\n'),
+    timeout_in_minutes: 60, // Shorter timeout since rebuild should be faster with OCI
+    retry: {
+      automatic: [
+        { exit_status: "*", limit: 1 }
+      ]
+    },
+  };
+}
+
 // === MAC_OS_VM_RESOURCE_CONFIGURATION ===
 // Centralized configuration for Tart macOS VM resources
 // IMPORTANT: These values are intentionally conservative to ensure reliable VM boot
@@ -1306,6 +1342,20 @@ async function getPipeline(options = {}) {
       ? buildPlatforms
       : buildPlatforms.filter(({ profile }) => profile !== "asan");
 
+    // Add macOS VM ensure steps before build steps
+    const macOSReleases = [...new Set([
+      ...relevantBuildPlatforms.filter(p => p.os === "darwin").map(p => p.release),
+      ...testPlatforms.filter(p => p.os === "darwin").map(p => p.release)
+    ])];
+    
+    if (macOSReleases.length > 0) {
+      steps.push({
+        key: "ensure-macos-base-vms", 
+        group: "🔍 Ensure macOS Base VMs",
+        steps: macOSReleases.map(release => getMacOSVMEnsureStep({ os: "darwin", release }, options))
+      });
+    }
+
     steps.push(
       ...relevantBuildPlatforms.map(target => {
         const imageKey = getImageKey(target);
@@ -1314,11 +1364,11 @@ async function getPipeline(options = {}) {
         if (imagePlatforms.has(imageKey)) {
           dependsOn.push(`${imageKey}-build-image`);
         }
-        // TODO: Re-enable when macOS VM base image building is re-enabled
-        // Add dependency on specific macOS VM build if this is a macOS platform
-        // if (target.os === "darwin") {
-        //   dependsOn.push(`build-macos-vm-${target.release}`);
-        // }
+        
+        // Add dependency on macOS VM ensure step if this is a macOS platform
+        if (target.os === "darwin") {
+          dependsOn.push(`ensure-macos-vm-${target.release}`);
+        }
 
         return getStepWithDependsOn(
           {

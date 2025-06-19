@@ -920,13 +920,23 @@ make_caching_decision() {
     local force_remote_refresh="${6:-false}"
     local local_dev_mode="${7:-false}"
     local disable_autoupdate="${8:-false}"
+    local force_oci_rebuild="${9:-false}"
     
     log "🧠 Making smart caching decision..." >&2
     log "  Target: Bun $target_bun_version, Bootstrap $target_bootstrap_version" >&2
     log "  Force refresh: $force_refresh" >&2
+    log "  Force OCI rebuild: $force_oci_rebuild" >&2
     log "  Force remote refresh: $force_remote_refresh" >&2
     log "  Local dev mode: $local_dev_mode" >&2
     log "  Disable autoupdate: $disable_autoupdate" >&2
+    
+    # If force OCI rebuild, skip all checks and build from OCI base images
+    if [ "$force_oci_rebuild" = true ]; then
+        log "🔄 Force OCI rebuild requested - will build directly from OCI base images" >&2
+        log "🎯 Decision: Build new image from OCI base (skipping all caches and registry)" >&2
+        echo "build_new_oci"
+        return
+    fi
     
     # If force refresh, skip all local checks
     if [ "$force_refresh" = true ]; then
@@ -1048,6 +1058,16 @@ execute_caching_decision() {
             log "🏗️  Building new image: $target_image_name" >&2
             # Clear any incremental base image
             unset INCREMENTAL_BASE_IMAGE
+            return 1  # Signal that we need to build
+            ;;
+            
+        "build_new_oci")
+            log "🏗️  Building new image from OCI base images: $target_image_name" >&2
+            log "   Skipping registry checks and building directly from OCI base" >&2
+            # Clear any incremental base image
+            unset INCREMENTAL_BASE_IMAGE
+            # Set flag to indicate OCI rebuild
+            export BUILD_FROM_OCI=true
             return 1  # Signal that we need to build
             ;;
             
@@ -1356,10 +1376,17 @@ main() {
     local disable_autoupdate=false
     local update_bun_only=false
     local update_homebrew_only=false
+    local check_only=false
+    local force_oci_rebuild=false
     for arg in "$@"; do
         case $arg in
             --force-refresh)
                 force_refresh=true
+                shift
+                ;;
+            --force-oci-rebuild)
+                force_oci_rebuild=true
+                force_refresh=true  # Implies force refresh but skips remote registry
                 shift
                 ;;
             --force-remote-refresh)
@@ -1368,6 +1395,10 @@ main() {
                 ;;
             --cleanup-only)
                 cleanup_only=true
+                shift
+                ;;
+            --check-only)
+                check_only=true
                 shift
                 ;;
             --force-rebuild-all)
@@ -1399,8 +1430,10 @@ main() {
                 echo ""
                 echo "Options:"
                 echo "  --force-refresh         Force refresh of base image"
+                echo "  --force-oci-rebuild     Force rebuild from OCI base images (skip registry checks)"
                 echo "  --force-remote-refresh  Force re-download of remote images (ignore cache)"
                 echo "  --cleanup-only          Clean up old VM images and exit"
+                echo "  --check-only            Check if base VM exists without building (exit 0 if exists, 1 if not)"
                 echo "  --local-dev             Enable local development mode (skip remote registry)"
                 echo "  --force-rebuild-all     Delete all local VM images and rebuild from scratch"
                 echo "  --disable-autoupdate    Disable version-based VM selection (use existing VMs)"
@@ -1561,6 +1594,23 @@ main() {
     REMOTE_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}-${ARCH}:${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
     LATEST_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}-${ARCH}:latest"
     
+    # Handle check-only mode - exit early with status code
+    if [ "$check_only" = true ]; then
+        log "=== CHECK-ONLY MODE ==="
+        log "🔍 Checking if base VM exists: $LOCAL_IMAGE_NAME"
+        
+        # Check if the exact VM exists locally
+        if tart list 2>/dev/null | grep -q "^local.*$LOCAL_IMAGE_NAME"; then
+            log "✅ Base VM exists: $LOCAL_IMAGE_NAME"
+            exit 0
+        else
+            log "❌ Base VM does not exist: $LOCAL_IMAGE_NAME"
+            log "   Available VMs:"
+            tart list | grep -E "bun-build-macos" || log "   (no bun-build-macos VMs found)"
+            exit 1
+        fi
+    fi
+    
     log "Configuration:"
     log "  macOS Release: $MACOS_RELEASE"
     log "  Architecture: $ARCH"
@@ -1628,7 +1678,7 @@ main() {
     log "=== SMART CACHING ANALYSIS ==="
     
     # Make intelligent caching decision
-    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh" "$force_remote_refresh" "$local_dev_mode" "$disable_autoupdate")
+    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh" "$force_remote_refresh" "$local_dev_mode" "$disable_autoupdate" "$force_oci_rebuild")
     
     log "Caching decision: $caching_decision"
     
