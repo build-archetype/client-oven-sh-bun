@@ -1187,7 +1187,7 @@ export function getBootstrapVersion(os) {
   if (os === "windows" || (!os && isWindows)) {
     scriptPath = join(import.meta.dirname, "bootstrap.ps1");
   } else if (os === "darwin" || (!os && isMacOS)) {
-    scriptPath = join(import.meta.dirname, "bootstrap-macos.sh");
+    scriptPath = join(import.meta.dirname, "bootstrap_new.sh");
   } else {
     scriptPath = join(import.meta.dirname, "bootstrap.sh");
   }

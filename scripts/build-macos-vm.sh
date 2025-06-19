@@ -987,7 +987,7 @@ comprehensive_vm_validation() {
         test_tool "clang++" "clang++ --version" "clang version"
         
         # Test codesigning tools (critical for Bun builds)
-        test_tool "codesign" "codesign --version" ""
+        test_tool "codesign" "" ""
         test_tool "xcrun" "xcrun --version" "xcrun version"
         
         # Test SDK availability
@@ -1605,7 +1605,7 @@ main() {
     log "Detected Bun version: $BUN_VERSION"
     
     # Bootstrap script version - increment this when bootstrap changes to force new images
-    BOOTSTRAP_VERSION=$(get_bootstrap_version scripts/bootstrap-macos.sh)
+    BOOTSTRAP_VERSION=$(get_bootstrap_version scripts/bootstrap_new.sh)
     log "Detected Bootstrap version: $BOOTSTRAP_VERSION"
     
     # Image names (mixed convention: local has full info, registry uses tags)
@@ -2054,7 +2054,7 @@ EOF
             
             # Copy bootstrap script to VM
             log "   Copying bootstrap script to VM..."
-            if ! sshpass -p "admin" scp $SSH_OPTS scripts/bootstrap-macos.sh admin@"$vm_ip":/tmp/; then
+            if ! sshpass -p "admin" scp $SSH_OPTS scripts/bootstrap_new.sh admin@"$vm_ip":/tmp/; then
                 log "❌ Failed to copy bootstrap script"
                 kill $vm_pid >/dev/null 2>&1 || true
                 if [ "$ci_mode" = true ]; then
@@ -2069,8 +2069,8 @@ EOF
             log "   Executing bootstrap script inside VM..."
             local bootstrap_cmd='
                 cd /tmp && \
-                chmod +x bootstrap-macos.sh && \
-                ./bootstrap-macos.sh
+                chmod +x bootstrap_new.sh && \
+                ./bootstrap_new.sh
             '
             
             if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$bootstrap_cmd"; then
@@ -2200,7 +2200,7 @@ EOF
     
     # Copy bootstrap script to VM
     log "   Copying bootstrap script to VM..."
-    if ! sshpass -p "admin" scp $SSH_OPTS scripts/bootstrap-macos.sh admin@"$vm_ip":/tmp/; then
+    if ! sshpass -p "admin" scp $SSH_OPTS scripts/bootstrap_new.sh admin@"$vm_ip":/tmp/; then
         log "❌ Failed to copy bootstrap script"
         kill $vm_pid >/dev/null 2>&1 || true
         if [ "$ci_mode" = true ]; then
@@ -2215,8 +2215,8 @@ EOF
     log "   Executing bootstrap script inside VM..."
     local bootstrap_cmd='
         cd /tmp && \
-        chmod +x bootstrap-macos.sh && \
-        ./bootstrap-macos.sh
+        chmod +x bootstrap_new.sh && \
+        ./bootstrap_new.sh
     '
     
     if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$bootstrap_cmd"; then

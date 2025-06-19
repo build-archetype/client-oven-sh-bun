@@ -49,7 +49,7 @@ detect_bun_version() {
 
 # Get bootstrap version from the bootstrap script (single source of truth)
 get_bootstrap_version() {
-    local script_path="scripts/bootstrap-macos.sh"
+    local script_path="scripts/bootstrap_new.sh"
     if [ ! -f "$script_path" ]; then
         echo "4.0"  # fallback
         return
@@ -118,62 +118,6 @@ ensure_vm_image_available() {
 # Function to get disk usage percentage
 get_disk_usage() {
     df -h . | tail -1 | awk '{print $5}' | sed 's/%//'
-}
-
-# Stop any orphaned base VMs to prevent clone conflicts
-stop_orphaned_base_vms() {
-    log "🧹 Checking for running base VMs that need to be stopped..."
-    
-    local running_base_vms=()
-    
-    # Find all running VMs that match base VM patterns
-    while IFS= read -r line; do
-        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+).*running ]]; then
-            local vm_name="${BASH_REMATCH[1]}"
-            # Check if it's a base VM (bun-build-macos pattern)
-            if [[ "$vm_name" =~ ^bun-build-macos- ]]; then
-                running_base_vms+=("$vm_name")
-                log "   Found running base VM: $vm_name"
-            fi
-        fi
-    done <<< "$(tart list 2>/dev/null || echo "")"
-    
-    if [ ${#running_base_vms[@]} -eq 0 ]; then
-        log "   ✅ No running base VMs found"
-        return 0
-    fi
-    
-    log "   🛑 Stopping ${#running_base_vms[@]} running base VM(s)..."
-    
-    for vm_name in "${running_base_vms[@]}"; do
-        log "     Stopping: $vm_name"
-        if tart stop "$vm_name" 2>/dev/null; then
-            log "       ✅ Stopped successfully"
-        else
-            log "       ⚠️  Stop command failed (VM may have stopped already)"
-        fi
-    done
-    
-    # Wait for all VMs to complete shutdown
-    if [ ${#running_base_vms[@]} -gt 0 ]; then
-        log "   ⏳ Waiting for VMs to complete shutdown..."
-        sleep 5
-        
-        # Verify they're all stopped
-        local still_running=0
-        for vm_name in "${running_base_vms[@]}"; do
-            if tart list | grep -q "^local.*${vm_name}.*running"; then
-                log "     ⚠️  $vm_name still running"
-                still_running=$((still_running + 1))
-            fi
-        done
-        
-        if [ $still_running -eq 0 ]; then
-            log "   ✅ All base VMs stopped successfully"
-        else
-            log "   ⚠️  $still_running VM(s) still running - continuing anyway"
-        fi
-    fi
 }
 
 # Internal function for robust VM cleanup (shared logic)
@@ -344,9 +288,6 @@ create_and_run_vm() {
     # Fail-safe: Clean up any orphaned VMs from previous failed builds FIRST
     log "🧹 Performing fail-safe cleanup of orphaned VMs..."
     cleanup_orphaned_vms
-    
-    # Stop any running base VMs to prevent clone conflicts
-    stop_orphaned_base_vms
 
     # Make vm_name available globally for cleanup trap (only after cleanup is done)
     VM_NAME_FOR_CLEANUP="$vm_name"
@@ -415,22 +356,6 @@ create_and_run_vm() {
     fi
     
     log "✅ Base image found - cloning VM"
-    
-    # Ensure base VM is stopped before cloning (Tart can't clone from running VMs)
-    log "🛑 Ensuring base VM is stopped before cloning..."
-    if tart list | grep -q "^local.*${base_vm_image}.*running"; then
-        log "   Base VM is currently running - stopping it..."
-        if tart stop "$base_vm_image" 2>/dev/null; then
-            log "   ✅ Base VM stopped successfully"
-            # Wait a moment for complete shutdown
-            sleep 3
-        else
-            log "   ⚠️  Failed to stop base VM gracefully - it may not be running"
-        fi
-    else
-        log "   ✅ Base VM is already stopped"
-    fi
-    
     if ! tart clone "$base_vm_image" "$vm_name"; then
         log "❌ Failed to clone VM from base image: $base_vm_image"
         log "   This could indicate disk space issues or corrupted base image"
