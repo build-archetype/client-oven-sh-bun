@@ -1,6 +1,30 @@
 #!/bin/bash
 set -euo pipefail
 
+# =============================================================================
+# BUILD-MACOS-VM.SH - Base VM Management Script
+# =============================================================================
+#
+# PURPOSE: Creates and maintains BASE VMs that serve as templates for builds
+# 
+# NAMING CONVENTION:
+#   Base VMs: bun-build-macos-{release}-{arch}-{bun_version}-bootstrap-{bootstrap_version}
+#   Example:  bun-build-macos-13-arm64-1.2.16-bootstrap-4.1
+#
+# BUILD FLOW:
+#   1. This script creates/validates BASE VMs (with all dependencies installed)
+#   2. ci-macos.sh CLONES base VMs to create EPHEMERAL VMs for actual builds
+#   3. Ephemeral VMs have names like: bun-build-{timestamp}-{UUID}
+#   4. Ephemeral VMs are deleted after each build
+#   5. Base VMs are reused across multiple builds for efficiency
+#
+# WHY THIS SEPARATION:
+#   - Base VMs: Expensive to create (download macOS, install tools, bootstrap)
+#   - Ephemeral VMs: Fast to create (just clone), safe to modify during builds
+#   - Avoids corrupting base VMs with build artifacts or configuration changes
+#
+# =============================================================================
+
 # Fix HOME environment variable if not set (common in CI environments running as root)
 if [ -z "${HOME:-}" ]; then
     # Determine appropriate HOME directory based on current user
@@ -1708,14 +1732,160 @@ main() {
         fi
     fi
     
-    # SIMPLE VM CHECK AND BUILD LOGIC
+    # === SIMPLE VM CHECK AND BUILD LOGIC
     log "=== SIMPLE VM CHECK ==="
-    
-    # Step 1: Check if exact VM exists
+
+    # Step 1: Check if exact VM exists and validate its integrity
     if tart list 2>/dev/null | grep -q "^local.*$LOCAL_IMAGE_NAME"; then
-        log "✅ Exact VM found: $LOCAL_IMAGE_NAME"
-        exit 0
+        log "✅ Found VM: $LOCAL_IMAGE_NAME"
+        
+        # Validate VM structure and detect corruption
+        log "🔍 Validating VM integrity..."
+        local vm_path="$HOME/.tart/vms/${LOCAL_IMAGE_NAME}"
+        local corruption_detected=false
+        
+        if [ -d "$vm_path" ]; then
+            # Check for essential VM files
+            local config_file="$vm_path/config.json"
+            local disk_file="$vm_path/disk.img"
+            
+            if [ ! -f "$config_file" ]; then
+                log "   ❌ config.json missing - VM corrupted"
+                corruption_detected=true
+            elif ! jq . "$config_file" >/dev/null 2>&1; then
+                log "   ❌ config.json invalid JSON - VM corrupted"
+                corruption_detected=true
+            elif [ ! -f "$disk_file" ]; then
+                log "   ❌ disk.img missing - VM corrupted"
+                corruption_detected=true
+            else
+                log "   ✅ VM structure appears valid"
+            fi
+        else
+            log "   ❌ VM directory missing - metadata corruption"
+            corruption_detected=true
+        fi
+        
+        # If corruption detected, delete and rebuild
+        if [ "$corruption_detected" = true ]; then
+            log "🔧 VM corruption detected - deleting and rebuilding..."
+            tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+            log "   Deleted corrupted VM, will rebuild from scratch"
+        else
+            # VM exists and structure is valid - now validate dependencies
+            log "🔬 Validating VM dependencies via SSH..."
+            
+            # Start the VM temporarily for validation
+            log "   Starting VM for dependency validation..."
+            tart run "$LOCAL_IMAGE_NAME" --no-graphics >/dev/null 2>&1 &
+            local vm_pid=$!
+            
+            # Wait for VM to boot
+            sleep 15
+            
+            # Get VM IP
+            local vm_ip=""
+            for i in {1..20}; do
+                vm_ip=$(tart ip "$LOCAL_IMAGE_NAME" 2>/dev/null || echo "")
+                if [ -n "$vm_ip" ]; then
+                    break
+                fi
+                sleep 3
+            done
+            
+            if [ -n "$vm_ip" ]; then
+                # Wait for SSH to be available
+                local ssh_ready=false
+                for i in {1..20}; do
+                    if sshpass -p "admin" ssh $SSH_OPTS -o ConnectTimeout=3 admin@"$vm_ip" "echo 'ready'" >/dev/null 2>&1; then
+                        ssh_ready=true
+                        break
+                    fi
+                    sleep 3
+                done
+                
+                if [ "$ssh_ready" = true ]; then
+                    log "   ✅ SSH connection established"
+                    
+                    # Check critical dependencies
+                    local validation_cmd='
+                        export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+                        
+                        echo "=== DEPENDENCY VALIDATION ==="
+                        missing_deps=""
+                        
+                        # Check critical tools
+                        for tool in bun cargo cmake clang ninja; do
+                            if command -v "$tool" >/dev/null 2>&1; then
+                                echo "✅ $tool: available"
+                            else
+                                echo "❌ $tool: MISSING"
+                                missing_deps="$missing_deps $tool"
+                            fi
+                        done
+                        
+                        # Check codesigning tools
+                        for tool in codesign xcrun; do
+                            if command -v "$tool" >/dev/null 2>&1; then
+                                echo "✅ $tool: available"
+                            else
+                                echo "❌ $tool: MISSING"
+                                missing_deps="$missing_deps $tool"
+                            fi
+                        done
+                        
+                        if [ -n "$missing_deps" ]; then
+                            echo "VALIDATION_FAILED: Missing dependencies:$missing_deps"
+                            exit 1
+                        else
+                            echo "VALIDATION_PASSED: All dependencies available"
+                            exit 0
+                        fi
+                    '
+                    
+                    local validation_result
+                    local validation_success=false
+                    if validation_result=$(sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$validation_cmd" 2>&1); then
+                        validation_success=true
+                    fi
+                    
+                    # Log validation output
+                    echo "$validation_result" | while read -r line; do
+                        log "   $line"
+                    done
+                    
+                    # Cleanup VM
+                    log "   Shutting down validation VM..."
+                    sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
+                    sleep 5
+                    kill $vm_pid >/dev/null 2>&1 || true
+                    sleep 3
+                    
+                    if [ "$validation_success" = true ]; then
+                        log "✅ VM validation passed - dependencies are ready"
+                        log "🎯 Base VM ready for cloning: $LOCAL_IMAGE_NAME"
+                        exit 0
+                    else
+                        log "❌ VM validation failed - dependencies missing"
+                        log "🔧 Will rebuild VM to fix dependencies..."
+                        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+                    fi
+                else
+                    log "   ❌ SSH not available - VM may be corrupted"
+                    kill $vm_pid >/dev/null 2>&1 || true
+                    tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+                    log "🔧 Deleted non-responsive VM, will rebuild"
+                fi
+            else
+                log "   ❌ Could not get VM IP - VM may be corrupted"
+                kill $vm_pid >/dev/null 2>&1 || true
+                tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+                log "🔧 Deleted non-booting VM, will rebuild"
+            fi
+        fi
     fi
+
+    # If we reach here, VM doesn't exist or failed validation - need to build
     
     # Step 2: Check remote registry (skip if force OCI rebuild requested)
     if [ "$force_oci_rebuild" = true ]; then
@@ -1756,21 +1926,6 @@ main() {
     if [ -n "$latest_local" ]; then
         log "🔄 Found local VM to use as base: $latest_local"
         log "   Cloning and updating to target version: $LOCAL_IMAGE_NAME"
-        
-        # Ensure base VM is stopped before cloning (Tart can't clone from running VMs)
-        log "🛑 Ensuring base VM is stopped before cloning..."
-        if tart list | grep -q "^local.*${latest_local}.*running"; then
-            log "   Base VM is currently running - stopping it..."
-            if tart stop "$latest_local" 2>/dev/null; then
-                log "   ✅ Base VM stopped successfully"
-                # Wait a moment for complete shutdown
-                sleep 3
-            else
-                log "   ⚠️  Failed to stop base VM gracefully - it may not be running"
-            fi
-        else
-            log "   ✅ Base VM is already stopped"
-        fi
         
         # Clone the base VM to target name
         if tart clone "$latest_local" "$LOCAL_IMAGE_NAME"; then
@@ -1886,102 +2041,7 @@ main() {
     set +e  # Temporarily disable exit on error for better error messages
     if tart clone "$BASE_IMAGE" "$LOCAL_IMAGE_NAME" 2>&1; then
         set -e  # Re-enable exit on error
-        log "✅ VM cloned from OCI base: $LOCAL_IMAGE_NAME"
-        log "🔧 Running bootstrap script to install build tools (Bun, Rust, CMake, etc.)..."
-
-        # Start the VM for bootstrapping
-        log "   Starting VM for bootstrap..."
-        tart run "$LOCAL_IMAGE_NAME" --no-graphics >/dev/null 2>&1 &
-        local vm_pid=$!
-        
-        # Wait for VM to boot
-        sleep 15
-        
-        # Get VM IP
-        local vm_ip=""
-        for i in {1..20}; do
-            vm_ip=$(tart ip "$LOCAL_IMAGE_NAME" 2>/dev/null || echo "")
-            if [ -n "$vm_ip" ]; then
-                break
-            fi
-            sleep 3
-        done
-        
-        if [ -z "$vm_ip" ]; then
-            log "❌ Could not get VM IP for bootstrap"
-            kill $vm_pid >/dev/null 2>&1 || true
-            if [ "$ci_mode" = true ]; then
-                log "🚧 CI Mode: Bootstrap failed but continuing pipeline"
-                exit 0  # Non-fatal in CI mode
-            else
-                exit 1
-            fi
-        fi
-        
-        # Wait for SSH to be available
-        local ssh_ready=false
-        for i in {1..30}; do
-            if sshpass -p "admin" ssh $SSH_OPTS -o ConnectTimeout=3 admin@"$vm_ip" "echo 'ready'" >/dev/null 2>&1; then
-                ssh_ready=true
-                break
-            fi
-            sleep 5
-        done
-        
-        if [ "$ssh_ready" != "true" ]; then
-            log "❌ SSH not available for bootstrap"
-            kill $vm_pid >/dev/null 2>&1 || true
-            if [ "$ci_mode" = true ]; then
-                log "🚧 CI Mode: SSH connection failed but continuing pipeline"
-                exit 0  # Non-fatal in CI mode
-            else
-                exit 1
-            fi
-        fi
-        
-        log "✅ VM ready for bootstrap (IP: $vm_ip)"
-        
-        # Copy bootstrap script to VM
-        log "   Copying bootstrap script to VM..."
-        if ! sshpass -p "admin" scp $SSH_OPTS scripts/bootstrap-macos.sh admin@"$vm_ip":/tmp/; then
-            log "❌ Failed to copy bootstrap script"
-            kill $vm_pid >/dev/null 2>&1 || true
-            if [ "$ci_mode" = true ]; then
-                log "🚧 CI Mode: Bootstrap script copy failed but continuing pipeline"
-                exit 0  # Non-fatal in CI mode
-            else
-                exit 1
-            fi
-        fi
-        
-        # Run bootstrap script inside VM
-        log "   Executing bootstrap script inside VM..."
-        local bootstrap_cmd='
-            cd /tmp && \
-            chmod +x bootstrap-macos.sh && \
-            ./bootstrap-macos.sh
-        '
-        
-        if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$bootstrap_cmd"; then
-            log "✅ Bootstrap completed successfully - build tools installed"
-        else
-            log "⚠️  Bootstrap script had issues but continuing..."
-        fi
-        
-        # Shutdown VM gracefully
-        log "   Shutting down VM..."
-        sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
-        
-        # Wait for VM to stop
-        sleep 10
-        
-        # Force kill if still running
-        kill $vm_pid >/dev/null 2>&1 || true
-        
-        # Wait for complete cleanup
-        sleep 5
-        
-        log "✅ VM updated and ready: $LOCAL_IMAGE_NAME"
+        log "✅ VM built from OCI base: $LOCAL_IMAGE_NAME"
     else
         local clone_exit_code=$?
         set -e  # Re-enable exit on error
@@ -2003,6 +2063,8 @@ main() {
             exit 1  # Fatal in normal mode
         fi
     fi
+    
+    log "✅ Bootstrap completed successfully"
 
     # Step 5: Try to push to registry (but don't fail if this doesn't work)
     log "=== REGISTRY PUSH ATTEMPT ==="
