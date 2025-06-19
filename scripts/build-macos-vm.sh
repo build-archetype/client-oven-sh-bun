@@ -1757,6 +1757,21 @@ main() {
         log "🔄 Found local VM to use as base: $latest_local"
         log "   Cloning and updating to target version: $LOCAL_IMAGE_NAME"
         
+        # Ensure base VM is stopped before cloning (Tart can't clone from running VMs)
+        log "🛑 Ensuring base VM is stopped before cloning..."
+        if tart list | grep -q "^local.*${latest_local}.*running"; then
+            log "   Base VM is currently running - stopping it..."
+            if tart stop "$latest_local" 2>/dev/null; then
+                log "   ✅ Base VM stopped successfully"
+                # Wait a moment for complete shutdown
+                sleep 3
+            else
+                log "   ⚠️  Failed to stop base VM gracefully - it may not be running"
+            fi
+        else
+            log "   ✅ Base VM is already stopped"
+        fi
+        
         # Clone the base VM to target name
         if tart clone "$latest_local" "$LOCAL_IMAGE_NAME"; then
             log "✅ Base VM cloned to: $LOCAL_IMAGE_NAME"
