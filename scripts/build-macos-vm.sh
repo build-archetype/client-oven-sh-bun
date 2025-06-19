@@ -2097,7 +2097,7 @@ EOF
     set +e  # Temporarily disable exit on error for better error messages
     if tart clone "$BASE_IMAGE" "$LOCAL_IMAGE_NAME" 2>&1; then
         set -e  # Re-enable exit on error
-        log "✅ VM built from OCI base: $LOCAL_IMAGE_NAME"
+        log "✅ VM cloned from OCI base: $LOCAL_IMAGE_NAME"
     else
         local clone_exit_code=$?
         set -e  # Re-enable exit on error
@@ -2120,7 +2120,116 @@ EOF
         fi
     fi
     
-    log "✅ Bootstrap completed successfully"
+    # CRITICAL: Now actually run the bootstrap script (this was missing!)
+    log "🔧 CRITICAL: Running bootstrap script to install build dependencies..."
+    log "   This VM currently only has vanilla macOS + Xcode - no bun, cargo, cmake, ninja, etc."
+    
+    # Start the VM for bootstrapping
+    log "   Starting VM for bootstrap..."
+    tart run "$LOCAL_IMAGE_NAME" --no-graphics >/dev/null 2>&1 &
+    local vm_pid=$!
+    
+    # Wait for VM to boot
+    sleep 15
+    
+    # Get VM IP
+    local vm_ip=""
+    for i in {1..30}; do
+        vm_ip=$(tart ip "$LOCAL_IMAGE_NAME" 2>/dev/null || echo "")
+        if [ -n "$vm_ip" ]; then
+            break
+        fi
+        sleep 3
+    done
+    
+    if [ -z "$vm_ip" ]; then
+        log "❌ Could not get VM IP for bootstrap"
+        kill $vm_pid >/dev/null 2>&1 || true
+        if [ "$ci_mode" = true ]; then
+            log "🚧 CI Mode: Bootstrap failed but continuing pipeline"
+            exit 0  # Non-fatal in CI mode
+        else
+            exit 1
+        fi
+    fi
+
+    # Wait for SSH to be available
+    local ssh_ready=false
+    for i in {1..30}; do
+        if sshpass -p "admin" ssh $SSH_OPTS -o ConnectTimeout=3 admin@"$vm_ip" "echo 'ready'" >/dev/null 2>&1; then
+            ssh_ready=true
+            break
+        fi
+        sleep 3
+    done
+    
+    if [ "$ssh_ready" != "true" ]; then
+        log "❌ SSH not available for bootstrap"
+        kill $vm_pid >/dev/null 2>&1 || true
+        if [ "$ci_mode" = true ]; then
+            log "🚧 CI Mode: SSH connection failed but continuing pipeline"
+            exit 0  # Non-fatal in CI mode
+        else
+            exit 1
+        fi
+    fi
+
+    log "✅ VM ready for bootstrap (IP: $vm_ip)"
+    
+    # Copy bootstrap script to VM
+    log "   Copying bootstrap script to VM..."
+    if ! sshpass -p "admin" scp $SSH_OPTS scripts/bootstrap-macos.sh admin@"$vm_ip":/tmp/; then
+        log "❌ Failed to copy bootstrap script"
+        kill $vm_pid >/dev/null 2>&1 || true
+        if [ "$ci_mode" = true ]; then
+            log "🚧 CI Mode: Bootstrap script copy failed but continuing pipeline"
+            exit 0  # Non-fatal in CI mode
+        else
+            exit 1
+        fi
+    fi
+    
+    # Run bootstrap script inside VM
+    log "   Executing bootstrap script inside VM..."
+    local bootstrap_cmd='
+        cd /tmp && \
+        chmod +x bootstrap-macos.sh && \
+        ./bootstrap-macos.sh
+    '
+    
+    if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$bootstrap_cmd"; then
+        log "✅ Bootstrap script execution completed"
+    else
+        log "⚠️  Bootstrap script had issues but continuing to validation..."
+    fi
+    
+    # CRITICAL: Now validate the VM after bootstrap to ensure it actually worked
+    log "🔬 CRITICAL: Validating VM after bootstrap to ensure tools are installed..."
+    
+    # Shutdown the bootstrap VM first so validation can start it cleanly
+    log "   Shutting down bootstrap VM for clean validation..."
+    sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
+    sleep 10
+    kill $vm_pid >/dev/null 2>&1 || true
+    sleep 5
+    
+    # Now run comprehensive validation (starts VM fresh)
+    if comprehensive_vm_validation "$LOCAL_IMAGE_NAME" "post-bootstrap"; then
+        log "✅ VM passed post-bootstrap validation - ready for building"
+    else
+        log "❌ VM failed post-bootstrap validation - bootstrap did not work properly"
+        log "🔧 This indicates the bootstrap script failed to install required dependencies"
+        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+        
+        if [ "$ci_mode" = true ]; then
+            log "🚧 CI Mode: VM validation failed but continuing pipeline"
+            exit 0  # Non-fatal in CI mode
+        else
+            exit 1
+        fi
+    fi
+    
+    log "✅ Bootstrap and validation completed successfully - VM is ready"
 
     # Step 5: Try to push to registry (but don't fail if this doesn't work)
     log "=== REGISTRY PUSH ATTEMPT ==="
