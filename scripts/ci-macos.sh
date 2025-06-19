@@ -366,6 +366,76 @@ create_and_run_vm() {
     
     log "✅ Base image found - cloning VM"
     
+    # COMPREHENSIVE DEBUG: Add extensive debugging before clone operation
+    log "🔍 === COMPREHENSIVE PRE-CLONE DEBUG ==="
+    log "   Current working directory: $(pwd 2>&1 || echo 'FAILED TO GET PWD')"
+    log "   Directory validity test: $(pwd >/dev/null 2>&1 && echo 'VALID' || echo 'INVALID')"
+    log "   HOME: ${HOME:-<not set>}"
+    log "   USER: ${USER:-<not set>}"
+    log "   Base VM image: $base_vm_image"
+    log "   Target VM name: $vm_name"
+    log "   Tart directory: $HOME/.tart"
+    
+    # Check base VM file integrity before cloning
+    local base_vm_path="$HOME/.tart/vms/$base_vm_image"
+    log "   Base VM path: $base_vm_path"
+    if [ -d "$base_vm_path" ]; then
+        log "   ✅ Base VM directory exists"
+        
+        local config_file="$base_vm_path/config.json"
+        local disk_file="$base_vm_path/disk.img"
+        
+        if [ -f "$config_file" ]; then
+            log "   ✅ config.json exists"
+            local config_size=$(stat -f%z "$config_file" 2>/dev/null || echo "unknown")
+            log "   ✅ config.json size: $config_size bytes"
+            
+            if jq . "$config_file" >/dev/null 2>&1; then
+                log "   ✅ config.json is valid JSON"
+            else
+                log "   ❌ config.json is INVALID JSON - VM CORRUPTED!"
+                log "   Config file contents (first 200 chars):"
+                head -c 200 "$config_file" | while read -r line; do
+                    log "     $line"
+                done
+            fi
+        else
+            log "   ❌ config.json MISSING - VM CORRUPTED!"
+        fi
+        
+        if [ -f "$disk_file" ]; then
+            log "   ✅ disk.img exists"
+            local disk_size=$(stat -f%z "$disk_file" 2>/dev/null || echo "unknown")
+            log "   ✅ disk.img size: $disk_size bytes"
+        else
+            log "   ❌ disk.img MISSING - VM CORRUPTED!"
+        fi
+        
+        # List all files in VM directory
+        log "   VM directory contents:"
+        ls -la "$base_vm_path" 2>/dev/null | while read -r line; do
+            log "     $line"
+        done
+    else
+        log "   ❌ Base VM directory MISSING: $base_vm_path"
+    fi
+    
+    # Check current Tart state
+    log "   Current Tart VM list:"
+    tart list 2>&1 | while read -r line; do
+        log "     $line"
+    done
+    
+    # Test if base VM is accessible by Tart
+    log "   Testing Tart access to base VM..."
+    if tart list | grep -q "$base_vm_image"; then
+        log "   ✅ Base VM found in Tart list"
+    else
+        log "   ❌ Base VM NOT found in Tart list!"
+    fi
+    
+    log "🔍 === END PRE-CLONE DEBUG ==="
+    
     # SAFETY: Ensure we're in a valid directory before tart clone operations
     # Fix for: "shell-init: error retrieving current directory: getcwd: cannot access parent directories"
     if ! pwd >/dev/null 2>&1; then
@@ -374,26 +444,59 @@ create_and_run_vm() {
         log "   Switched to: $(pwd)"
     fi
     
-    if ! tart clone "$base_vm_image" "$vm_name"; then
-        log "❌ Failed to clone VM from base image: $base_vm_image"
-        log "   This could indicate disk space issues or corrupted base image"
+    # Additional safety: Verify VM isn't corrupted before attempting clone
+    local base_vm_config="$HOME/.tart/vms/$base_vm_image/config.json"
+    if [ ! -f "$base_vm_config" ] || ! jq . "$base_vm_config" >/dev/null 2>&1; then
+        log "❌ CRITICAL: Base VM is corrupted (missing or invalid config.json)"
+        log "   This explains the clone failure - the base VM needs to be rebuilt"
+        log "   Run: ./scripts/build-macos-vm.sh --release=$release --force-rebuild"
         exit 1
     fi
-    log "✅ VM cloned successfully: $vm_name"
     
-    # Allocate VM resources for build performance
-    log "Allocating VM resources for build performance..."
-    log "  Setting memory: ${MACOS_VM_MEMORY:-6144}MB (${MACOS_VM_CONFIG_DESCRIPTION:-conservative default})"
-    log "  Setting CPUs: ${MACOS_VM_CPU:-4} cores"
-    tart set "$vm_name" --memory "${MACOS_VM_MEMORY:-6144}" --cpu "${MACOS_VM_CPU:-4}"
-    log "✅ VM resources allocated"
+    # TEMPORARY WORKAROUND: Skip VM cloning if SKIP_VM_CLONE is set
+    if [ "${SKIP_VM_CLONE:-}" = "true" ]; then
+        log "⚠️  TEMPORARY WORKAROUND: Skipping VM clone due to SKIP_VM_CLONE=true"
+        log "   Assuming base VM is already working and using it directly"
+        log "   Base VM: $base_vm_image"
+        
+        # Use the base VM directly instead of cloning
+        vm_name="$base_vm_image"
+        log "✅ Using base VM directly: $vm_name"
+        
+        # Skip the clone operation entirely and go straight to VM startup
+        log "🔄 Proceeding to VM startup without cloning..."
+        
+    else
+        log "🔄 Attempting VM clone..."
+        
+        if ! tart clone "$base_vm_image" "$vm_name"; then
+            log "❌ Failed to clone VM from base image: $base_vm_image"
+            log "   This could indicate disk space issues or corrupted base image"
+            exit 1
+        fi
+        log "✅ VM cloned successfully: $vm_name"
+        
+        # Allocate VM resources for build performance
+        log "Allocating VM resources for build performance..."
+        log "  Setting memory: ${MACOS_VM_MEMORY:-6144}MB (${MACOS_VM_CONFIG_DESCRIPTION:-conservative default})"
+        log "  Setting CPUs: ${MACOS_VM_CPU:-4} cores"
+        tart set "$vm_name" --memory "${MACOS_VM_MEMORY:-6144}" --cpu "${MACOS_VM_CPU:-4}"
+        log "✅ VM resources allocated"
+    fi
     
     # Set up cleanup trap IMMEDIATELY after VM creation to prevent orphaned VMs
     cleanup_trap() {
         local exit_code=$?
         log "🛡️  Cleanup trap triggered (exit code: $exit_code)"
         if [ -n "${VM_NAME_FOR_CLEANUP:-}" ]; then
-            cleanup_vm "$VM_NAME_FOR_CLEANUP"
+            # SAFETY: Don't delete base VMs when using skip workaround
+            if [ "${SKIP_VM_CLONE:-}" = "true" ] && [ "$VM_NAME_FOR_CLEANUP" = "$base_vm_image" ]; then
+                log "⚠️  SKIP_VM_CLONE mode: Not deleting base VM $VM_NAME_FOR_CLEANUP"
+                log "   Only stopping the VM if it's running"
+                tart stop "$VM_NAME_FOR_CLEANUP" 2>/dev/null || true
+            else
+                cleanup_vm "$VM_NAME_FOR_CLEANUP"
+            fi
         else
             log "⚠️  No VM name available for cleanup"
         fi
@@ -801,6 +904,7 @@ show_usage() {
     echo "Environment Variables:"
     echo "  BASE_VM_IMAGE             Base VM image to clone (auto-determined if not set)"
     echo "  FORCE_BASE_IMAGE_REBUILD  Set to 'true' to force base image rebuild (default: false)"
+    echo "  SKIP_VM_CLONE             Set to 'true' to use base VM directly without cloning (TEMPORARY DEBUG)"
     echo ""
     echo "Examples:"
     echo "  $0                                           # Run default build on macOS 14"
