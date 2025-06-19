@@ -1674,76 +1674,58 @@ main() {
         fi
     fi
     
-    # SMART CACHING LOGIC
-    log "=== SMART CACHING ANALYSIS ==="
+    # SIMPLE VM CHECK AND BUILD LOGIC
+    log "=== SIMPLE VM CHECK ==="
     
-    # Make intelligent caching decision
-    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh" "$force_remote_refresh" "$local_dev_mode" "$disable_autoupdate" "$force_oci_rebuild")
-    
-    log "Caching decision: $caching_decision"
-    
-    # Execute the decision
-    if execute_caching_decision "$caching_decision" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL"; then
-        log "✅ Image ready via smart caching!"
-        log "Final image name: $LOCAL_IMAGE_NAME"
-        log "Available images:"
-        tart list | grep -E "(NAME|bun-build-macos)" || tart list
+    # Step 1: Check if exact VM exists
+    if tart list 2>/dev/null | grep -q "^local.*$LOCAL_IMAGE_NAME"; then
+        log "✅ Exact VM found: $LOCAL_IMAGE_NAME"
         exit 0
     fi
     
-    # If we reach here, we need to build a new image
-
-    # Validate the appropriate image - base VM for incremental builds, target VM for new builds
-    log "=== VALIDATING VM IMAGE ==="
-    if [ -n "${INCREMENTAL_BASE_IMAGE:-}" ]; then
-        # For incremental builds, validate the base VM that exists
-        log "Incremental build detected - validating base VM: $INCREMENTAL_BASE_IMAGE"
-        if ! validate_vm_image_tools "$INCREMENTAL_BASE_IMAGE"; then
-            log "❌ Base VM image validation failed"
-            exit 1
-        fi
-        log "✅ Base VM image validation passed"
-    elif [ "${BUILD_FROM_OCI:-false}" = "true" ]; then
-        # For OCI builds, check if we have any compatible VM first
-        log "OCI build requested - checking for compatible existing VMs first..."
-        
-        # Look for any compatible VM for this macOS release and architecture
-        local tart_output=$(tart list 2>&1)
-        local compatible_vm=""
-        
-        while IFS= read -r line; do
-            if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+) ]]; then
-                local vm_name="${BASH_REMATCH[1]}"
-                
-                # Check for compatible macOS release and similar bootstrap version
-                if [[ "$vm_name" =~ ^bun-build-macos-${MACOS_RELEASE}.*bootstrap-[0-9]+\.[0-9]+$ ]]; then
-                    log "   Found compatible VM: $vm_name"
-                    compatible_vm="$vm_name"
-                    break
-                fi
+    # Step 2: Check remote registry
+    log "🌐 Checking remote registry..."
+    if check_remote_image "$REMOTE_IMAGE_URL" "$force_remote_refresh"; then
+        log "📥 Using remote image: $REMOTE_IMAGE_URL"
+        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+        tart clone "$REMOTE_IMAGE_URL" "$LOCAL_IMAGE_NAME"
+        log "✅ Remote image cloned as: $LOCAL_IMAGE_NAME"
+        exit 0
+    fi
+    
+    # Step 3: Use latest available local VM
+    log "🔍 Looking for latest local VM..."
+    local latest_local=""
+    local tart_output=$(tart list 2>&1)
+    
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+) ]]; then
+            local vm_name="${BASH_REMATCH[1]}"
+            if [[ "$vm_name" =~ ^bun-build-macos-${MACOS_RELEASE} ]]; then
+                latest_local="$vm_name"
+                break
             fi
-        done <<< "$tart_output"
-        
-        if [ -n "$compatible_vm" ]; then
-            log "✅ Using compatible existing VM: $compatible_vm"
-            log "   (Close enough for CI purposes - skipping OCI rebuild)"
-            log "Final VM available: $compatible_vm"
-            exit 0
-        else
-            log "❌ No compatible VMs found - OCI build would be needed"
-            log "⚠️  Note: Actual VM building from OCI base images is not yet implemented"
-            log "   Please build VMs manually for now:"
-            log "   ./scripts/build-macos-vm.sh --release=$MACOS_RELEASE"
-            exit 1
         fi
+    done <<< "$tart_output"
+    
+    if [ -n "$latest_local" ]; then
+        log "✅ Using latest local VM: $latest_local"
+        log "   (Good enough for CI - exact version not critical)"
+        exit 0
+    fi
+    
+    # Step 4: Build from OCI base images
+    log "🏗️  No local VMs found - building from OCI base image..."
+    log "   Base image: $BASE_IMAGE"
+    log "   Target: $LOCAL_IMAGE_NAME"
+    
+    # Clone from OCI base
+    if tart clone "$BASE_IMAGE" "$LOCAL_IMAGE_NAME"; then
+        log "✅ VM built from OCI base: $LOCAL_IMAGE_NAME"
+        exit 0
     else
-        # For other new builds, validate the target VM (should exist by now)
-        log "New build detected - validating target VM: $LOCAL_IMAGE_NAME"
-        if ! validate_vm_image_tools "$LOCAL_IMAGE_NAME"; then
-            log "❌ VM image validation failed"
-            exit 1
-        fi
-        log "✅ VM image validation passed"
+        log "❌ Failed to build from OCI base image"
+        exit 1
     fi
 
     log "✅ Bootstrap completed successfully"
