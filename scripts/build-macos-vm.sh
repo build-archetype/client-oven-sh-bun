@@ -1406,6 +1406,7 @@ main() {
     local update_homebrew_only=false
     local check_only=false
     local force_oci_rebuild=false
+    local ci_mode=false
     for arg in "$@"; do
         case $arg in
             --force-refresh)
@@ -1427,6 +1428,10 @@ main() {
                 ;;
             --check-only)
                 check_only=true
+                shift
+                ;;
+            --ci-mode)
+                ci_mode=true
                 shift
                 ;;
             --force-rebuild-all)
@@ -1462,6 +1467,7 @@ main() {
                 echo "  --force-remote-refresh  Force re-download of remote images (ignore cache)"
                 echo "  --cleanup-only          Clean up old VM images and exit"
                 echo "  --check-only            Check if base VM exists without building (exit 0 if exists, 1 if not)"
+                echo "  --ci-mode               Enable CI mode (non-fatal failures, continue pipeline)"
                 echo "  --local-dev             Enable local development mode (skip remote registry)"
                 echo "  --force-rebuild-all     Delete all local VM images and rebuild from scratch"
                 echo "  --disable-autoupdate    Disable version-based VM selection (use existing VMs)"
@@ -1711,14 +1717,25 @@ main() {
         exit 0
     fi
     
-    # Step 2: Check remote registry
-    log "🌐 Checking remote registry..."
-    if check_remote_image "$REMOTE_IMAGE_URL" "$force_remote_refresh"; then
-        log "📥 Using remote image: $REMOTE_IMAGE_URL"
-        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
-        tart clone "$REMOTE_IMAGE_URL" "$LOCAL_IMAGE_NAME"
-        log "✅ Remote image cloned as: $LOCAL_IMAGE_NAME"
-        exit 0
+    # Step 2: Check remote registry (skip if force OCI rebuild requested)
+    if [ "$force_oci_rebuild" = true ]; then
+        log "🔄 Force OCI rebuild requested - skipping registry checks"
+        log "   Will build directly from OCI base image: $BASE_IMAGE"
+    else
+        log "🌐 Checking remote registry..."
+        # Use error handling to gracefully fall back to local build if registry fails
+        set +e  # Temporarily disable exit on error
+        if check_remote_image "$REMOTE_IMAGE_URL" "$force_remote_refresh"; then
+            set -e  # Re-enable exit on error
+            log "📥 Using remote image: $REMOTE_IMAGE_URL"
+            tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+            tart clone "$REMOTE_IMAGE_URL" "$LOCAL_IMAGE_NAME"
+            log "✅ Remote image cloned as: $LOCAL_IMAGE_NAME"
+            exit 0
+        else
+            set -e  # Re-enable exit on error
+            log "⚠️  Remote registry check failed - will build locally"
+        fi
     fi
     
     # Step 3: Use latest available local VM as base and update it
@@ -1744,7 +1761,7 @@ main() {
         if tart clone "$latest_local" "$LOCAL_IMAGE_NAME"; then
             log "✅ Base VM cloned to: $LOCAL_IMAGE_NAME"
             log "🔧 Running bootstrap script to update Bun version and configuration..."
-            
+    
             # Start the VM for bootstrapping
             log "   Starting VM for bootstrap..."
             tart run "$LOCAL_IMAGE_NAME" --no-graphics >/dev/null 2>&1 &
@@ -1752,7 +1769,7 @@ main() {
             
             # Wait for VM to boot
             sleep 10
-            
+    
             # Get VM IP
             local vm_ip=""
             for i in {1..20}; do
@@ -1762,13 +1779,18 @@ main() {
                 fi
                 sleep 3
             done
-            
+    
             if [ -z "$vm_ip" ]; then
                 log "❌ Could not get VM IP for bootstrap"
                 kill $vm_pid >/dev/null 2>&1 || true
-                exit 1
+                if [ "$ci_mode" = true ]; then
+                    log "🚧 CI Mode: Bootstrap failed but continuing pipeline"
+                    exit 0  # Non-fatal in CI mode
+                else
+                    exit 1
+                fi
             fi
-            
+
             # Wait for SSH to be available
             local ssh_ready=false
             for i in {1..20}; do
@@ -1778,13 +1800,18 @@ main() {
                 fi
                 sleep 3
             done
-            
+        
             if [ "$ssh_ready" != "true" ]; then
                 log "❌ SSH not available for bootstrap"
                 kill $vm_pid >/dev/null 2>&1 || true
-                exit 1
+                if [ "$ci_mode" = true ]; then
+                    log "🚧 CI Mode: SSH connection failed but continuing pipeline"
+                    exit 0  # Non-fatal in CI mode
+                else
+                    exit 1
+                fi
             fi
-            
+
             log "✅ VM ready for bootstrap (IP: $vm_ip)"
             
             # Copy bootstrap script to VM
@@ -1792,7 +1819,12 @@ main() {
             if ! sshpass -p "admin" scp $SSH_OPTS scripts/bootstrap-macos.sh admin@"$vm_ip":/tmp/; then
                 log "❌ Failed to copy bootstrap script"
                 kill $vm_pid >/dev/null 2>&1 || true
-                exit 1
+                if [ "$ci_mode" = true ]; then
+                    log "🚧 CI Mode: Bootstrap script copy failed but continuing pipeline"
+                    exit 0  # Non-fatal in CI mode
+                else
+                    exit 1
+                fi
             fi
             
             # Run bootstrap script inside VM
@@ -1829,19 +1861,37 @@ main() {
             # Continue to step 4 (OCI build)
         fi
     fi
-    
+        
     # Step 4: Build from OCI base images
     log "🏗️  No local VMs found - building from OCI base image..."
     log "   Base image: $BASE_IMAGE"
     log "   Target: $LOCAL_IMAGE_NAME"
     
-    # Clone from OCI base
-    if tart clone "$BASE_IMAGE" "$LOCAL_IMAGE_NAME"; then
+    # Clone from OCI base with error handling
+    set +e  # Temporarily disable exit on error for better error messages
+    if tart clone "$BASE_IMAGE" "$LOCAL_IMAGE_NAME" 2>&1; then
+        set -e  # Re-enable exit on error
         log "✅ VM built from OCI base: $LOCAL_IMAGE_NAME"
-        exit 0
     else
-        log "❌ Failed to build from OCI base image"
-        exit 1
+        local clone_exit_code=$?
+        set -e  # Re-enable exit on error
+        log "❌ Failed to build from OCI base image (exit code: $clone_exit_code)"
+        log "   Base image: $BASE_IMAGE"
+        log "   This may indicate:"
+        log "   - Network connectivity issues"
+        log "   - Base image not available"
+        log "   - Insufficient disk space"
+        
+        if [ "$ci_mode" = true ]; then
+            log "🚧 CI Mode: VM build failed but continuing pipeline"
+            log "   Machine: $(hostname)"
+            log "   This machine will not have the VM image available"
+            log "   Other machines in the cluster may still succeed"
+            log "   CI pipeline will continue with available resources"
+            exit 0  # Non-fatal in CI mode
+        else
+            exit 1  # Fatal in normal mode
+        fi
     fi
 
     log "✅ Bootstrap completed successfully"
