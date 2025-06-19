@@ -8,6 +8,28 @@ const getOrgFromRepo = () => {
   return match ? match[1] : 'oven-sh'; // fallback to oven-sh if we can't determine
 };
 
+// Get current architecture
+const getArchitecture = () => {
+  const arch = process.arch;
+  switch (arch) {
+    case 'arm64':
+    case 'aarch64':
+      return 'arm64';
+    case 'x64':
+    case 'x86_64':
+    case 'amd64':
+      return 'x64';
+    default:
+      throw new Error(`Unsupported architecture: ${arch}`);
+  }
+};
+
+// Get macOS release version
+const getMacOSRelease = () => {
+  // Default to macOS 14 (Sonoma), but this could be made configurable
+  return process.env.MACOS_RELEASE || '14';
+};
+
 // Get Bun version from various sources
 const getBunVersion = () => {
   try {
@@ -44,9 +66,9 @@ export const IMAGE_CONFIG = {
     name: "bun-build-macos",
     tag: "latest",
     get versionedName() {
-      const version = getBunVersion();
-      const bootstrapVersion = getBootstrapVersion("darwin"); // Single source of truth from bootstrap-macos.sh
-      return `bun-build-macos-${version}-bootstrap-${bootstrapVersion}`;
+      const macosRelease = getMacOSRelease();
+      const arch = getArchitecture();
+      return `bun-build-macos-${macosRelease}-${arch}`;
     },
     get fullName() {
       return `${this.registry}/${this.organization}/${this.repository}/${this.name}:${this.tag}`;
@@ -67,4 +89,18 @@ export const IMAGE_CONFIG = {
 export function getFullImageName(name, tag = "latest") {
   // Use baseImage's registry and organization for consistency
   return `${IMAGE_CONFIG.baseImage.registry}/${IMAGE_CONFIG.baseImage.organization}/${IMAGE_CONFIG.baseImage.repository}/${name}:${tag}`;
+}
+
+// Helper function to create versioned tag (version + bootstrap info)
+export function getVersionedTag() {
+  const version = getBunVersion();
+  const bootstrapVersion = getBootstrapVersion("darwin");
+  return `${version}-bootstrap-${bootstrapVersion}`;
+}
+
+// Helper function to get full versioned image URL
+export function getVersionedImageURL() {
+  const imageName = IMAGE_CONFIG.baseImage.versionedName;
+  const tag = getVersionedTag();
+  return getFullImageName(imageName, tag);
 } 

@@ -164,7 +164,7 @@ image_exists_in_registry() {
     fi
 }
 
-# Cleanup old VM images to free storage space
+# Cleanup old VM images to free storage space (UPDATED FOR NEW NAMING CONVENTION)
 cleanup_old_images() {
     log "=== STORAGE CLEANUP ==="
     log "🧹 Cleaning up old VM images to free storage space..."
@@ -179,105 +179,46 @@ cleanup_old_images() {
     # Get all local images
     local tart_output=$(tart list 2>&1)
     
-    # Track latest version for each macOS release (using regular variables for Bash 3.x compatibility)
-    local latest_macos13_version=""
-    local latest_macos13_bootstrap=""
-    local latest_macos13_image=""
-    local latest_macos14_version=""
-    local latest_macos14_bootstrap=""
-    local latest_macos14_image=""
-    
+    # Track latest image for each macOS release and architecture combination
     local all_bun_images=()
+    local images_to_keep=()
     local images_to_delete=()
     
-    # Parse all bun-build-macos images and find latest for each macOS version
+    # Parse all bun-build-macos images
     while IFS= read -r line; do
         if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+) ]]; then
             local image_name="${BASH_REMATCH[1]}"
             
-            # Only consider bun-build-macos images
-            if [[ "$image_name" =~ ^bun-build-macos-([0-9]+)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
+            # Only consider bun-build-macos images with new naming convention
+            if [[ "$image_name" =~ ^bun-build-macos-([0-9]+)-(arm64|x64)$ ]]; then
                 local macos_ver="${BASH_REMATCH[1]}"
-                local bun_ver="${BASH_REMATCH[2]}"
-                local bootstrap_ver="${BASH_REMATCH[3]}"
+                local arch="${BASH_REMATCH[2]}"
                 
                 all_bun_images+=("$image_name")
-                log "  Found: $image_name (macOS: $macos_ver, Bun: $bun_ver, Bootstrap: $bootstrap_ver)"
+                log "  Found: $image_name (macOS: $macos_ver, Architecture: $arch)"
                 
-                # Track latest for macOS 13
-                if [ "$macos_ver" = "13" ]; then
-                    if [ -z "${latest_macos13_version:-}" ] || version_compare "$bun_ver" "${latest_macos13_version}"; then
-                        # If same Bun version, prefer higher bootstrap version
-                        if [ "$bun_ver" = "${latest_macos13_version:-}" ]; then
-                            if version_compare "$bootstrap_ver" "${latest_macos13_bootstrap:-}"; then
-                                latest_macos13_version="$bun_ver"
-                                latest_macos13_bootstrap="$bootstrap_ver"
-                                latest_macos13_image="$image_name"
-                            fi
-                        else
-                            latest_macos13_version="$bun_ver"
-                            latest_macos13_bootstrap="$bootstrap_ver"
-                            latest_macos13_image="$image_name"
-                        fi
-                    fi
-                fi
-                
-                # Track latest for macOS 14
-                if [ "$macos_ver" = "14" ]; then
-                    if [ -z "${latest_macos14_version:-}" ] || version_compare "$bun_ver" "${latest_macos14_version}"; then
-                        # If same Bun version, prefer higher bootstrap version
-                        if [ "$bun_ver" = "${latest_macos14_version:-}" ]; then
-                            if version_compare "$bootstrap_ver" "${latest_macos14_bootstrap:-}"; then
-                                latest_macos14_version="$bun_ver"
-                                latest_macos14_bootstrap="$bootstrap_ver"
-                                latest_macos14_image="$image_name"
-                            fi
-                        else
-                            latest_macos14_version="$bun_ver"
-                            latest_macos14_bootstrap="$bootstrap_ver"
-                            latest_macos14_image="$image_name"
-                        fi
-                    fi
-                fi
+                # With new naming convention, we keep all images since they represent
+                # different macOS release + architecture combinations
+                # No version info in name means we can't determine "older" vs "newer"
+                images_to_keep+=("$image_name")
             fi
         fi
     done <<< "$tart_output"
     
-    # Show what we found as latest
-    if [ -n "${latest_macos13_image:-}" ]; then
-        log "  📌 Latest macOS 13: ${latest_macos13_image} (Bun ${latest_macos13_version}, Bootstrap ${latest_macos13_bootstrap})"
-    else
-        log "  📌 No macOS 13 images found"
-    fi
-    
-    if [ -n "${latest_macos14_image:-}" ]; then
-        log "  📌 Latest macOS 14: ${latest_macos14_image} (Bun ${latest_macos14_version}, Bootstrap ${latest_macos14_bootstrap})"
-    else
-        log "  📌 No macOS 14 images found"
-    fi
-    
-    # Mark all others for deletion
-    if [ ${#all_bun_images[@]} -gt 0 ]; then
-        for image in "${all_bun_images[@]}"; do
-            local should_keep=false
-            
-            # Keep if it's the latest for macOS 13
-            if [ -n "${latest_macos13_image:-}" ] && [ "$image" = "${latest_macos13_image}" ]; then
-                should_keep=true
-            fi
-            
-            # Keep if it's the latest for macOS 14
-            if [ -n "${latest_macos14_image:-}" ] && [ "$image" = "${latest_macos14_image}" ]; then
-                should_keep=true
-            fi
-            
-            if [ "$should_keep" = false ]; then
-                images_to_delete+=("$image")
-            fi
+    # Show what we found
+    if [ ${#images_to_keep[@]} -gt 0 ]; then
+        log "  📌 Keeping all images (new naming convention - no version in name):"
+        for image in "${images_to_keep[@]}"; do
+            log "    - $image"
         done
+    else
+        log "  📌 No bun-build-macos images found"
     fi
     
-    # Delete old images
+    # NOTE: With the new naming convention, we don't automatically delete images
+    # since version information is not in the image name. Users should manually
+    # delete specific macOS release + architecture combinations they no longer need.
+    
     if [ ${#images_to_delete[@]} -gt 0 ]; then
         log "🗑️  Deleting ${#images_to_delete[@]} old VM images:"
         for image in "${images_to_delete[@]}"; do
@@ -290,7 +231,7 @@ cleanup_old_images() {
         done
         log "✅ Cleanup completed"
     else
-        log "✅ No old images to clean up"
+        log "✅ No old images to clean up (keeping all with new naming convention)"
     fi
     
     # Show final storage state
@@ -399,88 +340,109 @@ get_minor_version() {
     echo "$version" | sed -E 's/^([0-9]+\.[0-9]+)\..*/\1/'
 }
 
-# Parse image name to extract version and bootstrap info
+# Parse image name to extract architecture and macOS release info
+# NEW FORMAT: Local images are named bun-build-macos-{MACOS_RELEASE}-{ARCH}
+# Version and bootstrap info are in the tags for remote images
 parse_image_name() {
     local image_name="$1"
+    local macos_release=""
+    local arch=""
+    
+    # Extract macOS release and architecture from image name
+    # New format: bun-build-macos-{MACOS_RELEASE}-{ARCH}
+    # Example: bun-build-macos-13-arm64
+    if [[ "$image_name" =~ bun-build-macos-([0-9]+)-(arm64|x64) ]]; then
+        macos_release="${BASH_REMATCH[1]}"  # First capture group is macOS release
+        arch="${BASH_REMATCH[2]}"           # Second capture group is architecture
+    fi
+    
+    echo "$macos_release|$arch"
+}
+
+# Parse remote image tag to extract version and bootstrap info
+# Format: {BUN_VERSION}-bootstrap-{BOOTSTRAP_VERSION}
+# Example: 1.2.17-bootstrap-4.1
+parse_image_tag() {
+    local image_tag="$1"
     local bun_version=""
     local bootstrap_version=""
     
-    # Extract Bun version and bootstrap version from image name
-    # Format: bun-build-macos-[MACOS_RELEASE]-[BUN_VERSION]-bootstrap-[BOOTSTRAP_VERSION]
-    # Example: bun-build-macos-13-1.2.16-bootstrap-4.1
-    if [[ "$image_name" =~ bun-build-macos-([0-9]+)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
-        bun_version="${BASH_REMATCH[2]}"      # Second capture group is Bun version
-        bootstrap_version="${BASH_REMATCH[3]}" # Third capture group is Bootstrap version
+    if [[ "$image_tag" =~ ^([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+)$ ]]; then
+        bun_version="${BASH_REMATCH[1]}"      # First capture group is Bun version
+        bootstrap_version="${BASH_REMATCH[2]}" # Second capture group is Bootstrap version
     fi
     
     echo "$bun_version|$bootstrap_version"
 }
 
-# Check local images and categorize them
+# Check local images and categorize them (NEW NAMING CONVENTION)
+# With the new convention, local images are named: bun-build-macos-{MACOS_RELEASE}-{ARCH}
+# Version compatibility is determined differently since version info is not in the image name
 check_local_image_version() {
     local target_bun_version="$1"
     local target_bootstrap_version="$2"
     local target_image_name="$3"
     
-    log "🔍 Analyzing local images for Bun $target_bun_version, Bootstrap $target_bootstrap_version" >&2
+    log "🔍 Analyzing local images for target: $target_image_name" >&2
     
     # Get all local images
     local tart_output=$(tart list 2>&1)
     
     # Results
     local exact_match=""
-    local compatible_images=()  # Same minor version (e.g., 1.2.x)
-    local usable_images=()      # Different minor version but could be useful
+    local compatible_images=()  # Same macOS release and architecture
+    local usable_images=()      # Different macOS release but same architecture
     local all_bun_images=()
     
-    local target_minor=$(get_minor_version "$target_bun_version")
+    # Parse target image info
+    local target_info=$(parse_image_name "$target_image_name")
+    local target_macos_release="${target_info%|*}"
+    local target_arch="${target_info#*|}"
+    
+    log "  Target: macOS $target_macos_release, Architecture: $target_arch" >&2
     
     # Parse each line for bun-build-macos images
     while IFS= read -r line; do
         if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+) ]]; then
             local image_name="${BASH_REMATCH[1]}"
             
-            # Only consider bun-build-macos images
-            if [[ "$image_name" =~ ^bun-build-macos- ]]; then
+            # Only consider bun-build-macos images with new naming convention
+            if [[ "$image_name" =~ ^bun-build-macos-([0-9]+)-(arm64|x64)$ ]]; then
                 all_bun_images+=("$image_name")
                 
-                # Parse version info
-                local version_info=$(parse_image_name "$image_name")
-                local bun_ver="${version_info%|*}"
-                local bootstrap_ver="${version_info#*|}"
+                # Parse image info
+                local image_info=$(parse_image_name "$image_name")
+                local macos_release="${image_info%|*}"
+                local arch="${image_info#*|}"
                 
-                log "  Found: $image_name (Bun: $bun_ver, Bootstrap: $bootstrap_ver)" >&2
+                log "  Found: $image_name (macOS: $macos_release, Architecture: $arch)" >&2
                 
                 # Check for exact match
                 if [ "$image_name" = "$target_image_name" ]; then
                     exact_match="$image_name"
                     log "    ✅ Exact match found!" >&2
-                # Check for compatible match (same minor version)
-                elif [ -n "$bun_ver" ] && version_compatible "$bun_ver" "$target_bun_version"; then
+                # Check for compatible match (same macOS release and architecture)
+                elif [ "$macos_release" = "$target_macos_release" ] && [ "$arch" = "$target_arch" ]; then
                     compatible_images+=("$image_name")
-                    log "    🔄 Compatible match (same minor version: $(get_minor_version "$bun_ver"))" >&2
-                # Check for usable match (different minor but could bootstrap)
-                elif [ -n "$bun_ver" ] && [ "$bun_ver" != "$target_bun_version" ]; then
+                    log "    🔄 Compatible match (same macOS release and architecture)" >&2
+                # Check for usable match (different macOS release but same architecture)
+                elif [ "$arch" = "$target_arch" ]; then
                     usable_images+=("$image_name")
-                    log "    🔧 Usable base (different minor: $(get_minor_version "$bun_ver"))" >&2
+                    log "    🔧 Usable base (same architecture, different macOS: $macos_release)" >&2
+                else
+                    log "    ❌ Incompatible (different architecture: $arch)" >&2
                 fi
             fi
         fi
     done <<< "$tart_output"
     
-    # Find best compatible image (highest version with same minor)
+    # Choose best compatible image (prefer exact macOS match)
     local best_compatible=""
     if [ ${#compatible_images[@]} -gt 0 ]; then
-        local best_compatible_version=""
-        for image in "${compatible_images[@]}"; do
-            local version_info=$(parse_image_name "$image")
-            local bun_ver="${version_info%|*}"
-            if [ -z "$best_compatible_version" ] || version_compare "$bun_ver" "$best_compatible_version"; then
-                best_compatible="$image"
-                best_compatible_version="$bun_ver"
-            fi
-        done
-        log "  🎯 Best compatible: $best_compatible (Bun: $best_compatible_version)" >&2
+        # With new naming, all compatible images are equivalent (same macOS + arch)
+        # Just pick the first one
+        best_compatible="${compatible_images[0]}"
+        log "  🎯 Best compatible: $best_compatible" >&2
     fi
     
     # Return results (format: exact|compatible|usable|all)
@@ -1445,13 +1407,16 @@ main() {
     BOOTSTRAP_VERSION=$(get_bootstrap_version scripts/bootstrap-macos.sh)
     log "Detected Bootstrap version: $BOOTSTRAP_VERSION"
     
-    # Image names (include release and bootstrap version to force rebuilds when bootstrap changes)
-    LOCAL_IMAGE_NAME="bun-build-macos-${MACOS_RELEASE}-${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
-    REMOTE_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}:${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
-    LATEST_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}:latest"
+    # Image names (new convention: version and bootstrap info in tag, not image name)
+    # Local name: bun-build-macos-{MACOS_RELEASE}-{ARCH} (no version info)
+    # Remote URL: registry/org/repo/bun-build-macos-{MACOS_RELEASE}-{ARCH}:{BUN_VERSION}-bootstrap-{BOOTSTRAP_VERSION}
+    LOCAL_IMAGE_NAME="bun-build-macos-${MACOS_RELEASE}-${ARCH}"
+    REMOTE_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}-${ARCH}:${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
+    LATEST_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}-${ARCH}:latest"
     
     log "Configuration:"
     log "  macOS Release: $MACOS_RELEASE"
+    log "  Architecture: $ARCH"
     log "  Base image: $BASE_IMAGE"
     log "  Local name: $LOCAL_IMAGE_NAME"
     log "  Remote URL: $REMOTE_IMAGE_URL"
@@ -1464,31 +1429,30 @@ main() {
         log "=== DISABLE AUTOUPDATE MODE ==="
         log "🔒 Autoupdate disabled - using existing VMs without version checks"
         
-        # Find the most recent VM image for this macOS release
+        # Find the most recent VM image for this macOS release and architecture
         local tart_output=$(tart list 2>&1)
         local existing_image=""
-        local latest_image=""
+        local target_pattern="bun-build-macos-${MACOS_RELEASE}-${ARCH}"
         
         while IFS= read -r line; do
             if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+) ]]; then
                 local image_name="${BASH_REMATCH[1]}"
-                if [[ "$image_name" =~ ^bun-build-macos-${MACOS_RELEASE}- ]]; then
+                if [ "$image_name" = "$target_pattern" ]; then
                     existing_image="$image_name"
-                    if [ -z "$latest_image" ] || [[ "$image_name" > "$latest_image" ]]; then
-                        latest_image="$image_name"
-                    fi
+                    break
                 fi
             fi
         done <<< "$tart_output"
         
-        if [ -n "$latest_image" ]; then
-            log "✅ Using existing VM: $latest_image"
-            log "Final image name: $latest_image"
+        if [ -n "$existing_image" ]; then
+            log "✅ Using existing VM: $existing_image"
+            log "Final image name: $existing_image"
             log "Available images:"
             tart list | grep -E "(NAME|bun-build-macos)" || tart list
             exit 0
         else
-            log "❌ No existing VM found for macOS $MACOS_RELEASE"
+            log "❌ No existing VM found for macOS $MACOS_RELEASE with architecture $ARCH"
+            log "   Looking for: $target_pattern"
             log "   Available VMs:"
             tart list | grep -E "bun-build-macos" || log "   (none)"
             log "   Please build a VM first without --disable-autoupdate"
@@ -1514,126 +1478,6 @@ main() {
     fi
     
     # If we reach here, we need to build a new image
-    if [ -n "${INCREMENTAL_BASE_IMAGE:-}" ]; then
-        log "=== BUILDING INCREMENTAL IMAGE ==="
-        log "Building incremental image for Bun ${BUN_VERSION} from base: $INCREMENTAL_BASE_IMAGE"
-        
-        # Clean up the specific image we're about to build (if it exists)
-        log "Cleaning up target image if it exists: $LOCAL_IMAGE_NAME"
-        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "Target image doesn't exist (expected)"
-        
-        # Clone from incremental base instead of raw macOS image
-        log "Cloning from incremental base: $INCREMENTAL_BASE_IMAGE"
-        tart clone "$INCREMENTAL_BASE_IMAGE" "$LOCAL_IMAGE_NAME"
-        log "✅ Incremental base cloned"
-        
-        # Allocate VM resources for build performance
-        log "Allocating VM resources for build performance..."
-        log "  Setting memory: ${MACOS_VM_MEMORY:-6144}MB (${MACOS_VM_CONFIG_DESCRIPTION:-conservative default})"
-        log "  Setting CPUs: ${MACOS_VM_CPU:-4} cores"
-        tart set "$LOCAL_IMAGE_NAME" --memory "${MACOS_VM_MEMORY:-6144}" --cpu "${MACOS_VM_CPU:-4}"
-        log "✅ VM resources allocated"
-        
-        IS_INCREMENTAL_BUILD=true
-    else
-        log "=== BUILDING NEW BASE IMAGE ==="
-        log "Building new base image for Bun ${BUN_VERSION}..."
-        
-        # Clean up the specific image we're about to build (if it exists)
-        log "Cleaning up target image if it exists: $LOCAL_IMAGE_NAME"
-        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || log "Target image doesn't exist (expected)"
-        
-        # Clone base image
-        log "Cloning base image: $BASE_IMAGE"
-        tart clone "$BASE_IMAGE" "$LOCAL_IMAGE_NAME"
-        log "✅ Base image cloned"
-        
-        IS_INCREMENTAL_BUILD=false
-    fi
-    
-    # Pass the version to bootstrap script
-    log "Making bootstrap script executable..."
-    chmod +x scripts/bootstrap-macos.sh
-    
-    # Start VM with shared directory
-    log "Starting VM: $LOCAL_IMAGE_NAME"
-    tart run "$LOCAL_IMAGE_NAME" --dir=workspace:"$PWD" --no-graphics &
-    VM_PID=$!
-
-    # Wait for VM to boot
-    log "Waiting for VM to boot (reduced from 60s to 2s - retry logic handles slow boots)..."
-    sleep 2
-    
-    # Get VM IP
-    log "Getting VM IP address..."
-    VM_IP=""
-    for i in {1..10}; do
-        VM_IP=$(tart ip "$LOCAL_IMAGE_NAME" 2>/dev/null || echo "")
-        if [ -n "$VM_IP" ]; then
-            log "VM IP: $VM_IP"
-            break
-        fi
-        log "Attempt $i: waiting for VM IP..."
-        sleep 2
-    done
-    
-    if [ -z "$VM_IP" ]; then
-        log "❌ Could not get VM IP after 10 attempts"
-        kill $VM_PID 2>/dev/null || true
-        exit 1
-    fi
-
-    # Wait for SSH to be available and run bootstrap
-    log "Waiting for SSH to be available and running bootstrap..."
-    SSH_SUCCESS=false
-    
-    for i in {1..30}; do
-        log "SSH attempt $i/30..."
-        
-        # First check if we can SSH at all
-        if sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "echo 'SSH connection successful'"; then
-            log "✅ SSH connection established"
-            
-            # Check initial state before bootstrap
-            log "Checking VM state before bootstrap..."
-            sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" '
-                echo "Current user: $(whoami)"
-                echo "Current directory: $(pwd)"
-                echo "PATH: $PATH"
-                echo "Available in /usr/local/bin: $(ls -la /usr/local/bin/ 2>/dev/null || echo none)"
-                echo "Available in /opt/homebrew/bin: $(ls -la /opt/homebrew/bin/ 2>/dev/null | head -5 || echo none)"
-            '
-            
-            # Run the bootstrap script
-            local bootstrap_args=""
-            if [ "$update_bun_only" = true ]; then
-                bootstrap_args="--update-bun-only --skip-verification"
-                log "🎯 Running Bun-only update..."
-            elif [ "$update_homebrew_only" = true ]; then
-                bootstrap_args="--update-homebrew-only --skip-verification"
-                log "🍺 Running Homebrew-only update..."
-            else
-                log "🔄 Running full bootstrap..."
-            fi
-            
-            if sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "cd '/Volumes/My Shared Files/workspace' && ./scripts/bootstrap-macos.sh $bootstrap_args"; then
-                log "✅ Bootstrap completed successfully!"
-                SSH_SUCCESS=true
-                break
-            else
-                log "❌ Bootstrap failed on attempt $i"
-            fi
-        else
-            log "SSH attempt $i failed, retrying in 2 seconds..."
-        fi
-        sleep 2
-    done
-    
-    if [ "$SSH_SUCCESS" != "true" ]; then
-        log "❌ Bootstrap failed after 30 SSH attempts"
-        kill $VM_PID 2>/dev/null || true
-        exit 1
-    fi
 
     # Validate that all required tools are installed
     log "=== VALIDATING BASE IMAGE ==="
@@ -1935,5 +1779,28 @@ main() {
     log "Available images:"
     tart list
 }
+
+# Detect architecture
+get_architecture() {
+    local arch="$(uname -m)"
+    case "$arch" in
+        arm64|aarch64)
+            echo "arm64"
+            ;;
+        x86_64|x64|amd64)
+            echo "x64"
+            ;;
+        *)
+            log "❌ Unsupported architecture: $arch"
+            exit 1
+            ;;
+    esac
+}
+
+# Architecture for this build
+ARCH="$(get_architecture)"
+
+# Base image to clone for new VM images
+BASE_IMAGE="${BASE_IMAGE:-ghcr.io/cirruslabs/macos-sonoma-xcode:latest}"
 
 main "$@" 
