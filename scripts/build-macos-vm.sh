@@ -1011,6 +1011,8 @@ main() {
     local force_remote_refresh=false
     local local_dev_mode=false
     local disable_autoupdate=false
+    local update_bun_only=false
+    local update_homebrew_only=false
     for arg in "$@"; do
         case $arg in
             --force-refresh)
@@ -1037,6 +1039,14 @@ main() {
                 disable_autoupdate=true
                 shift
                 ;;
+            --update-bun-only)
+                update_bun_only=true
+                shift
+                ;;
+            --update-homebrew-only)
+                update_homebrew_only=true
+                shift
+                ;;
             --release=*)
                 MACOS_RELEASE="${arg#*=}"
                 shift
@@ -1051,6 +1061,8 @@ main() {
                 echo "  --local-dev             Enable local development mode (skip remote registry)"
                 echo "  --force-rebuild-all     Delete all local VM images and rebuild from scratch"
                 echo "  --disable-autoupdate    Disable version-based VM selection (use existing VMs)"
+                echo "  --update-bun-only       Update only the Bun version"
+                echo "  --update-homebrew-only  Update only the Homebrew version"
                 echo "  --release=VERSION       macOS release version (13, 14) [default: 14]"
                 echo "  --help, -h              Show this help message"
                 echo ""
@@ -1086,6 +1098,8 @@ main() {
                 echo "  $0 --force-rebuild-all    # Delete all local VMs and rebuild"
                 echo "  $0 --cleanup-only         # Clean up old images and exit"
                 echo "  $0 --disable-autoupdate   # Use existing VMs without version checks"
+                echo "  $0 --update-bun-only      # Update only the Bun version"
+                echo "  $0 --update-homebrew-only # Update only the Homebrew version"
                 exit 0
                 ;;
         esac
@@ -1357,7 +1371,18 @@ main() {
             '
             
             # Run the bootstrap script
-            if sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "cd '/Volumes/My Shared Files/workspace' && ./scripts/bootstrap-macos.sh"; then
+            local bootstrap_args=""
+            if [ "$update_bun_only" = true ]; then
+                bootstrap_args="--update-bun-only --skip-verification"
+                log "🎯 Running Bun-only update..."
+            elif [ "$update_homebrew_only" = true ]; then
+                bootstrap_args="--update-homebrew-only --skip-verification"
+                log "🍺 Running Homebrew-only update..."
+            else
+                log "🔄 Running full bootstrap..."
+            fi
+            
+            if sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "cd '/Volumes/My Shared Files/workspace' && ./scripts/bootstrap-macos.sh $bootstrap_args"; then
                 log "✅ Bootstrap completed successfully!"
                 SSH_SUCCESS=true
                 break

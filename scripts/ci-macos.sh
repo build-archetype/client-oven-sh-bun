@@ -1,10 +1,6 @@
 #!/bin/bash
 set -euo pipefail
 
-# TEMPORARY: Force fresh VM rebuild to ensure upstream lolhtml fixes are included
-# Remove this after the fresh VM is built and cached
-export FORCE_BASE_IMAGE_REBUILD=true
-
 # Configuration - can be overridden via environment variables
 BASE_VM_IMAGE="${BASE_VM_IMAGE:-}"  # Will be determined based on platform
 FORCE_BASE_IMAGE_REBUILD="${FORCE_BASE_IMAGE_REBUILD:-false}"
@@ -295,16 +291,9 @@ create_and_run_vm() {
     
     # Check if forced rebuild is requested
     if [ "$FORCE_BASE_IMAGE_REBUILD" = "true" ]; then
-        log "🔄 Force rebuild requested - automatically building fresh VM with upstream fixes"
-        log "   Running: ./scripts/build-macos-vm.sh --release=$release --force-refresh"
-        
-        if ! ./scripts/build-macos-vm.sh --release="$release" --force-refresh; then
-            log "❌ Failed to build fresh VM with upstream fixes"
-            exit 1
-        fi
-        
-        log "✅ Fresh VM with upstream fixes built successfully"
-        # Continue with the build using the fresh VM
+        log "🔄 Force rebuild requested - please run image prep step manually"
+        log "Run: ./scripts/build-macos-vm.sh --release=$release --force-refresh"
+        exit 1
     fi
     
     # Check if base image exists and ensure it's available (with registry fallback)

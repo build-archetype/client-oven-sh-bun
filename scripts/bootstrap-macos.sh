@@ -5,6 +5,54 @@ set -x
 # Version: 4.1 - Added US locale configuration and ICU4C for test compatibility
 # A comprehensive bootstrap script for macOS based on the main bootstrap.sh
 
+# Parse command line arguments for selective updates
+UPDATE_MODE="full"  # full, bun-only, homebrew-only
+SKIP_VERIFICATION=false
+SHOW_VERSIONS=false
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --update-bun-only)
+            UPDATE_MODE="bun-only"
+            shift
+            ;;
+        --update-homebrew-only)
+            UPDATE_MODE="homebrew-only"
+            shift
+            ;;
+        --skip-verification)
+            SKIP_VERIFICATION=true
+            shift
+            ;;
+        --show-versions)
+            SHOW_VERSIONS=true
+            shift
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+print "Bootstrap mode: $UPDATE_MODE"
+
+# Show pinned versions if requested
+show_pinned_versions() {
+    print ""
+    print "=== PINNED COMPONENT VERSIONS ==="
+    print "Node.js: $(nodejs_version_exact)"
+    print "Bun: $(bun_version_exact)"
+    print "LLVM: $(llvm_version_exact)"
+    print "Buildkite Agent: 3.87.0"
+    print "================================="
+    print ""
+}
+
+if [ "$SHOW_VERSIONS" = true ]; then
+    show_pinned_versions
+    exit 0
+fi
+
 # Constants
 MAX_RETRIES=3
 INITIAL_BACKOFF=5
@@ -795,31 +843,64 @@ main() {
     print "Home: $HOME"
     print "Architecture: $(uname -m)"
     print "OS Version: $(sw_vers -productVersion)"
+    print "Update mode: $UPDATE_MODE"
     
-    # Install Homebrew first
-    install_brew
-    
-    # Update Homebrew with timeout (this often hangs in VMs)
-    print "Updating Homebrew (with timeout to prevent hangs)..."
-    if timeout 600 brew update >/dev/null 2>&1; then
-        print "✅ Homebrew updated successfully"
-    else
-        print "⚠️  Homebrew update timed out or failed - continuing with existing formulae"
-        print "   This is often normal in VM environments and won't affect package installation"
-    fi
-    
-    # Install software in stages
-    install_common_software
-    install_build_essentials
-    install_chromium
-    install_docker
-    install_xcode_tools
-    
-    # Run codesigning environment diagnostics (for debugging OverlappingSegments issues)
-    check_codesigning_environment
-    
-    # Verify installations
-    verify_installations
+    case "$UPDATE_MODE" in
+        "bun-only")
+            print "🎯 BUN-ONLY UPDATE: Only updating Bun to latest version"
+            install_bun
+            if [ "$SKIP_VERIFICATION" = false ]; then
+                # Quick verification of just bun
+                if command -v bun >/dev/null 2>&1; then
+                    print "✅ Bun update verified: $(bun --version)"
+                else
+                    error "Bun update verification failed"
+                fi
+            fi
+            ;;
+        "homebrew-only")
+            print "🍺 HOMEBREW-ONLY UPDATE: Only updating Homebrew and packages"
+            install_brew
+            print "Updating Homebrew (with timeout to prevent hangs)..."
+            if timeout 600 brew update >/dev/null 2>&1; then
+                print "✅ Homebrew updated successfully"
+            else
+                print "⚠️  Homebrew update timed out or failed - continuing with existing formulae"
+            fi
+            ;;
+        "full")
+            print "🔄 FULL BOOTSTRAP: Installing all components"
+            # Install Homebrew first
+            install_brew
+            
+            # Update Homebrew with timeout (this often hangs in VMs)
+            print "Updating Homebrew (with timeout to prevent hangs)..."
+            if timeout 600 brew update >/dev/null 2>&1; then
+                print "✅ Homebrew updated successfully"
+            else
+                print "⚠️  Homebrew update timed out or failed - continuing with existing formulae"
+                print "   This is often normal in VM environments and won't affect package installation"
+            fi
+            
+            # Install software in stages
+            install_common_software
+            install_build_essentials
+            install_chromium
+            install_docker
+            install_xcode_tools
+            
+            # Run codesigning environment diagnostics (for debugging OverlappingSegments issues)
+            check_codesigning_environment
+            
+            # Verify installations
+            if [ "$SKIP_VERIFICATION" = false ]; then
+                verify_installations
+            fi
+            ;;
+        *)
+            error "Unknown update mode: $UPDATE_MODE"
+            ;;
+    esac
     
     print "✅ Bootstrap completed successfully!"
     print ""
