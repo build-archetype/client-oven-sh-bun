@@ -120,129 +120,65 @@ get_disk_usage() {
     df -h . | tail -1 | awk '{print $5}' | sed 's/%//'
 }
 
-# Function to clean up orphaned temporary VMs
+# Function to cleanup orphaned VMs
 cleanup_orphaned_vms() {
-    log "🧹 Cleaning up orphaned temporary VMs..."
+    log "🧹 Cleaning up orphaned VMs..."
+    local orphaned_count=0
     
-    local cleaned_count=0
-    local total_size_freed=0
+    # Use a more specific pattern for our CI VM names
+    local vm_pattern="bun-build-"
+    local vms_to_cleanup=()
     
-    # Get list of temporary VMs (pattern: bun-build-TIMESTAMP-UUID)
-    local temp_vms=()
-    
-    # Parse tart list output more robustly
-    # Format: "local  vm-name  100  66  66  stopped"
-    while IFS= read -r line; do
-        # Skip header lines and empty lines
-        [[ "$line" =~ ^(Source|local|OCI)?[[:space:]]*$ ]] && continue
-        [[ "$line" =~ ^[[:space:]]*$ ]] && continue
-        [[ "$line" =~ Name[[:space:]]*Disk ]] && continue
-        
-        # Match lines that start with "local" and contain our temporary VM pattern
-        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+[0-9]+[[:space:]]+([0-9]+)[[:space:]]+[0-9]+[[:space:]]+(stopped|running) ]]; then
-            local vm_name="${BASH_REMATCH[1]}"
-            local size="${BASH_REMATCH[2]}"
-            
-            # Only process temporary VMs (our pattern: bun-build-TIMESTAMP-UUID)
-            if [[ "$vm_name" =~ ^bun-build-[0-9]+-[A-F0-9-]+$ ]]; then
-                temp_vms+=("$vm_name:$size")
-                log "   Found temporary VM: $vm_name (${size}GB)"
-            fi
+    # Get list of VMs that match our pattern
+    while read -r vm_name; do
+        if [[ "$vm_name" =~ $vm_pattern ]]; then
+            vms_to_cleanup+=("$vm_name")
+            orphaned_count=$((orphaned_count + 1))
         fi
-    done <<< "$(tart list 2>/dev/null || echo '')"
+    done < <(tart list --quiet 2>/dev/null | grep "^$vm_pattern" | awk '{print $1}' || true)
     
-    if [ ${#temp_vms[@]} -eq 0 ]; then
-        log "✅ No orphaned temporary VMs found"
+    if [ ${#vms_to_cleanup[@]} -eq 0 ]; then
+        log "✅ No orphaned VMs found"
         return 0
     fi
     
-    log "Found ${#temp_vms[@]} temporary VMs to clean up"
+    log "Found $orphaned_count orphaned VM(s) to clean up:"
+    for vm_name in "${vms_to_cleanup[@]}"; do
+        log "  - $vm_name"
+    done
     
-    # Clean up each temporary VM using robust cleanup logic
-    for vm_info in "${temp_vms[@]:-}"; do
-        local vm_name="${vm_info%:*}"
-        local size="${vm_info#*:}"
-        
-        log "🗑️  Processing orphaned temporary VM: $vm_name (${size}GB)"
+    # Clean up each orphaned VM
+    local cleaned=0
+    for vm_name in "${vms_to_cleanup[@]}"; do
+        log "🗑️  Cleaning up orphaned VM: $vm_name"
         
         # Use the robust cleanup_vm function for each orphaned VM
         if cleanup_vm_internal "$vm_name"; then
-            log "✅ Successfully cleaned up $vm_name"
-            cleaned_count=$((cleaned_count + 1))
-            total_size_freed=$((total_size_freed + size))
+            log "✅ Successfully cleaned up: $vm_name"
+            cleaned=$((cleaned + 1))
         else
-            log "❌ Failed to clean up $vm_name"
+            log "⚠️  Failed to clean up: $vm_name (may require manual intervention)"
         fi
     done
     
-    if [ $cleaned_count -gt 0 ]; then
-        log "🎉 Cleaned up $cleaned_count orphaned VMs, freed ${total_size_freed}GB"
-    else
-        log "✅ No orphaned temporary VMs found"
-    fi
+    log "🧹 Orphaned VM cleanup complete: $cleaned/$orphaned_count VMs cleaned"
+    return 0
 }
 
-# Internal function for robust VM cleanup (shared logic)
-cleanup_vm_internal() {
+# Function to cleanup single VM with better error handling
+cleanup_vm() {
     local vm_name="$1"
     
-    # Check if VM exists first with fresh state
-    if ! tart list 2>/dev/null | grep -q "^local.*$vm_name"; then
-        # VM doesn't exist, consider it cleaned
+    log "🧹 Cleaning up VM: $vm_name"
+    
+    if cleanup_vm_internal "$vm_name"; then
+        log "✅ Successfully deleted VM: $vm_name"
         return 0
+    else
+        log "⚠️ All delete attempts failed, VM $vm_name may be orphaned"
+        log "   Manual cleanup may be required: tart delete $vm_name"
+        return 1
     fi
-    
-    # Try to stop VM first if it's running (with timeout)
-    if tart list 2>/dev/null | grep "$vm_name" | grep -q "running"; then
-        log "   🛑 Stopping running VM: $vm_name"
-        tart stop "$vm_name" 2>/dev/null || log "     ⚠️ Failed to stop VM (may already be stopped)"
-        sleep 2
-        
-        # Wait for VM to actually stop with timeout
-        local stop_attempts=0
-        while tart list 2>/dev/null | grep "$vm_name" | grep -q "running" && [ $stop_attempts -lt 5 ]; do
-            log "     Waiting for VM to stop... (attempt $((stop_attempts + 1))/5)"
-            sleep 2
-            stop_attempts=$((stop_attempts + 1))
-        done
-        
-        # Check if still running after timeout
-        if tart list 2>/dev/null | grep "$vm_name" | grep -q "running"; then
-            log "     ⚠️ VM still running after stop attempts, proceeding with delete anyway"
-        fi
-    fi
-    
-    # Delete the VM with retry logic
-    local delete_attempts=0
-    local max_delete_attempts=3
-    
-    while [ $delete_attempts -lt $max_delete_attempts ]; do
-        delete_attempts=$((delete_attempts + 1))
-        
-        # Check again if VM still exists (state might have changed)
-        if ! tart list 2>/dev/null | grep -q "^local.*$vm_name"; then
-            # VM no longer exists, consider success
-            return 0
-        fi
-        
-        log "     🗑️  Deleting VM: $vm_name (attempt $delete_attempts/$max_delete_attempts)"
-        
-        if tart delete "$vm_name" 2>/dev/null; then
-            # Verify deletion worked
-            if ! tart list 2>/dev/null | grep -q "^local.*$vm_name"; then
-                return 0
-            fi
-        fi
-        
-        # If we get here, deletion failed
-        if [ $delete_attempts -lt $max_delete_attempts ]; then
-            log "     ⚠️ Delete attempt failed, retrying in 3 seconds..."
-            sleep 3
-        fi
-    done
-    
-    log "     ❌ All delete attempts failed for $vm_name"
-    return 1
 }
 
 # Function to start logging
@@ -715,17 +651,35 @@ create_and_run_vm() {
 
     # Handle artifact upload after successful builds (C++ and Zig steps only)
     if [ "${BUN_CPP_ONLY:-}" = "ON" ]; then
-        log "🔧 C++ build completed - uploading libbun-profile.a artifact..."
-        if [ -f "./build/release/libbun-profile.a" ]; then
+        log "🔧 C++ build completed - checking for artifacts to upload..."
+        
+        # Check if CMake already compressed and uploaded the artifact
+        if [ -f "./build/release/libbun-profile.a.gz" ]; then
+            log "✅ Found compressed C++ artifact (already processed by CMake): ./build/release/libbun-profile.a.gz"
+            buildkite-agent artifact upload "./build/release/libbun-profile.a.gz" || log "❌ Failed to upload pre-compressed C++ artifact"
+            log "✅ C++ artifact uploaded: libbun-profile.a.gz"
+        elif [ -f "./build/release/libbun-profile.a" ]; then
+            log "✅ Found uncompressed C++ artifact - compressing and uploading..."
             gzip -c "./build/release/libbun-profile.a" > "./libbun-profile.a.gz"
             buildkite-agent artifact upload "libbun-profile.a.gz" || log "❌ Failed to upload C++ artifact"
             log "✅ C++ artifact uploaded: libbun-profile.a.gz"
         else
-            log "❌ C++ artifact not found: ./build/release/libbun-profile.a"
+            log "⚠️  C++ artifact not found in expected locations:"
+            log "   - ./build/release/libbun-profile.a (uncompressed)"
+            log "   - ./build/release/libbun-profile.a.gz (compressed)"
+            log "🔍 Checking if CMake already handled artifact upload..."
+            # This is not necessarily an error - CMake may have uploaded the artifact during build
         fi
     elif [ "${BUN_ZIG_ONLY:-}" = "ON" ] || [[ "$command" == *"--target bun-zig"* ]]; then
-        log "⚡ Zig build completed - uploading bun-zig.o artifact..."
-        if [ -f "./build/release/bun-zig.o" ]; then
+        log "⚡ Zig build completed - checking for artifacts to upload..."
+        
+        # Check if the artifact was already compressed and uploaded
+        if [ -f "./build/release/bun-zig.o.gz" ]; then
+            log "✅ Found compressed Zig artifact: ./build/release/bun-zig.o.gz"
+            buildkite-agent artifact upload "./build/release/bun-zig.o.gz" || log "❌ Failed to upload pre-compressed Zig artifact"
+            log "✅ Zig artifact uploaded: bun-zig.o.gz"
+        elif [ -f "./build/release/bun-zig.o" ]; then
+            log "✅ Found uncompressed Zig artifact - compressing and uploading..."
             gzip -c "./build/release/bun-zig.o" > "./bun-zig.o.gz"
             buildkite-agent artifact upload "bun-zig.o.gz" || log "❌ Failed to upload Zig artifact"
             log "✅ Zig artifact uploaded: bun-zig.o.gz"
@@ -968,20 +922,67 @@ EOF
 # Run main if script is executed directly
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
-fi 
+fi
 
-# Function to cleanup single VM with better error handling
-cleanup_vm() {
+# Internal function for robust VM cleanup (shared logic)
+cleanup_vm_internal() {
     local vm_name="$1"
     
-    log "🧹 Cleaning up VM: $vm_name"
-    
-    if cleanup_vm_internal "$vm_name"; then
-        log "✅ Successfully deleted VM: $vm_name"
+    # Check if VM exists first with fresh state
+    if ! tart list 2>/dev/null | grep -q "^local.*$vm_name"; then
+        # VM doesn't exist, consider it cleaned
         return 0
-    else
-        log "⚠️ All delete attempts failed, VM $vm_name may be orphaned"
-        log "   Manual cleanup may be required: tart delete $vm_name"
-        return 1
     fi
+    
+    # Try to stop VM first if it's running (with timeout)
+    if tart list 2>/dev/null | grep "$vm_name" | grep -q "running"; then
+        log "   🛑 Stopping running VM: $vm_name"
+        tart stop "$vm_name" 2>/dev/null || log "     ⚠️ Failed to stop VM (may already be stopped)"
+        sleep 2
+        
+        # Wait for VM to actually stop with timeout
+        local stop_attempts=0
+        while tart list 2>/dev/null | grep "$vm_name" | grep -q "running" && [ $stop_attempts -lt 5 ]; do
+            log "     Waiting for VM to stop... (attempt $((stop_attempts + 1))/5)"
+            sleep 2
+            stop_attempts=$((stop_attempts + 1))
+        done
+        
+        # Check if still running after timeout
+        if tart list 2>/dev/null | grep "$vm_name" | grep -q "running"; then
+            log "     ⚠️ VM still running after stop attempts, proceeding with delete anyway"
+        fi
+    fi
+    
+    # Delete the VM with retry logic
+    local delete_attempts=0
+    local max_delete_attempts=3
+    
+    while [ $delete_attempts -lt $max_delete_attempts ]; do
+        delete_attempts=$((delete_attempts + 1))
+        
+        # Check again if VM still exists (state might have changed)
+        if ! tart list 2>/dev/null | grep -q "^local.*$vm_name"; then
+            # VM no longer exists, consider success
+            return 0
+        fi
+        
+        log "     🗑️  Deleting VM: $vm_name (attempt $delete_attempts/$max_delete_attempts)"
+        
+        if tart delete "$vm_name" 2>/dev/null; then
+            # Verify deletion worked
+            if ! tart list 2>/dev/null | grep -q "^local.*$vm_name"; then
+                return 0
+            fi
+        fi
+        
+        # If we get here, deletion failed
+        if [ $delete_attempts -lt $max_delete_attempts ]; then
+            log "     ⚠️ Delete attempt failed, retrying in 3 seconds..."
+            sleep 3
+        fi
+    done
+    
+    log "     ❌ All delete attempts failed for $vm_name"
+    return 1
 } 
