@@ -1,5 +1,5 @@
 #!/bin/sh
-# Version: 12 - Enhanced macOS support with Xcode tools and Chromium
+# Version: 13 - Fixed Tailscale Go compatibility and Bun PATH issues on macOS
 
 # A script that installs the dependencies needed to build and test Bun.
 # This should work on macOS and Linux with a POSIX shell.
@@ -795,9 +795,35 @@ install_bun() {
 	bun_tmpdir="$(dirname "$bun_zip")"
 	execute "$unzip" -o "$bun_zip" -d "$bun_tmpdir"
 
-	move_to_bin "$bun_tmpdir/$bun_triplet/bun"
-	bun_path="$(require bun)"
-	execute_sudo ln -sf "$bun_path" "$(dirname "$bun_path")/bunx"
+	# Determine the correct bin directory based on OS and architecture
+	case "$os" in
+	darwin)
+		case "$arch" in
+		aarch64)
+			bin_dir="/opt/homebrew/bin"
+			;;
+		x64)
+			bin_dir="/usr/local/bin"
+			;;
+		esac
+		;;
+	*)
+		bin_dir="/usr/local/bin"
+		;;
+	esac
+	
+	# Ensure the bin directory exists and move bun there
+	execute_sudo mkdir -p "$bin_dir"
+	grant_to_user "$bun_tmpdir/$bun_triplet/bun"
+	execute_sudo mv -f "$bun_tmpdir/$bun_triplet/bun" "$bin_dir/bun"
+	
+	# Make sure bun is executable
+	execute_sudo chmod +x "$bin_dir/bun"
+	
+	# Create bunx symlink - use absolute path to avoid require call issues
+	execute_sudo ln -sf "$bin_dir/bun" "$bin_dir/bunx"
+	
+	print "✅ Bun installed successfully at $bin_dir/bun"
 }
 
 install_cmake() {
@@ -1188,9 +1214,13 @@ install_tailscale() {
 		execute "$sh" "$tailscale_script"
 		;;
 	darwin)
-		install_packages go
-		execute_as_user go install tailscale.com/cmd/tailscale{,d}@latest
-		append_to_path "$home/go/bin"
+		# Use homebrew instead of go install to avoid Go version compatibility issues
+		print "Installing Tailscale via Homebrew..."
+		if execute_as_user brew install tailscale --cask 2>/dev/null; then
+			print "✅ Tailscale installed successfully via Homebrew"
+		else
+			print "⚠️ Tailscale installation failed - not critical for builds, continuing..."
+		fi
 		;;
 	esac
 }
