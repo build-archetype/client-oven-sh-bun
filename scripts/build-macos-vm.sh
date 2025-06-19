@@ -1693,8 +1693,8 @@ main() {
         exit 0
     fi
     
-    # Step 3: Use latest available local VM
-    log "🔍 Looking for latest local VM..."
+    # Step 3: Use latest available local VM as base and update it
+    log "🔍 Looking for latest local VM to use as base..."
     local latest_local=""
     local tart_output=$(tart list 2>&1)
     
@@ -1709,9 +1709,97 @@ main() {
     done <<< "$tart_output"
     
     if [ -n "$latest_local" ]; then
-        log "✅ Using latest local VM: $latest_local"
-        log "   (Good enough for CI - exact version not critical)"
-        exit 0
+        log "🔄 Found local VM to use as base: $latest_local"
+        log "   Cloning and updating to target version: $LOCAL_IMAGE_NAME"
+        
+        # Clone the base VM to target name
+        if tart clone "$latest_local" "$LOCAL_IMAGE_NAME"; then
+            log "✅ Base VM cloned to: $LOCAL_IMAGE_NAME"
+            log "🔧 Running bootstrap script to update Bun version and configuration..."
+            
+            # Start the VM for bootstrapping
+            log "   Starting VM for bootstrap..."
+            tart run "$LOCAL_IMAGE_NAME" --no-graphics >/dev/null 2>&1 &
+            local vm_pid=$!
+            
+            # Wait for VM to boot
+            sleep 10
+            
+            # Get VM IP
+            local vm_ip=""
+            for i in {1..20}; do
+                vm_ip=$(tart ip "$LOCAL_IMAGE_NAME" 2>/dev/null || echo "")
+                if [ -n "$vm_ip" ]; then
+                    break
+                fi
+                sleep 3
+            done
+            
+            if [ -z "$vm_ip" ]; then
+                log "❌ Could not get VM IP for bootstrap"
+                kill $vm_pid >/dev/null 2>&1 || true
+                exit 1
+            fi
+            
+            # Wait for SSH to be available
+            local ssh_ready=false
+            for i in {1..20}; do
+                if sshpass -p "admin" ssh $SSH_OPTS -o ConnectTimeout=3 admin@"$vm_ip" "echo 'ready'" >/dev/null 2>&1; then
+                    ssh_ready=true
+                    break
+                fi
+                sleep 3
+            done
+            
+            if [ "$ssh_ready" != "true" ]; then
+                log "❌ SSH not available for bootstrap"
+                kill $vm_pid >/dev/null 2>&1 || true
+                exit 1
+            fi
+            
+            log "✅ VM ready for bootstrap (IP: $vm_ip)"
+            
+            # Copy bootstrap script to VM
+            log "   Copying bootstrap script to VM..."
+            if ! sshpass -p "admin" scp $SSH_OPTS scripts/bootstrap-macos.sh admin@"$vm_ip":/tmp/; then
+                log "❌ Failed to copy bootstrap script"
+                kill $vm_pid >/dev/null 2>&1 || true
+                exit 1
+            fi
+            
+            # Run bootstrap script inside VM
+            log "   Executing bootstrap script inside VM..."
+            local bootstrap_cmd='
+                cd /tmp && \
+                chmod +x bootstrap-macos.sh && \
+                ./bootstrap-macos.sh
+            '
+            
+            if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$bootstrap_cmd"; then
+                log "✅ Bootstrap completed successfully"
+            else
+                log "⚠️  Bootstrap script had issues but continuing..."
+            fi
+            
+            # Shutdown VM gracefully
+            log "   Shutting down VM..."
+            sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
+            
+            # Wait for VM to stop
+            sleep 10
+            
+            # Force kill if still running
+            kill $vm_pid >/dev/null 2>&1 || true
+            
+            # Wait for complete cleanup
+            sleep 5
+            
+            log "✅ VM updated and ready: $LOCAL_IMAGE_NAME"
+            exit 0
+        else
+            log "❌ Failed to clone base VM"
+            # Continue to step 4 (OCI build)
+        fi
     fi
     
     # Step 4: Build from OCI base images
