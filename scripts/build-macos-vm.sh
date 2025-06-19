@@ -85,7 +85,7 @@ assoc_set() {
     
     # Check if key already exists
     for i in "${!_assoc_keys[@]:-}"; do
-        if [ "${_assoc_keys[i]}" = "$key" ]; then
+        if [ "${_assoc_keys[i]:-}" = "$key" ]; then
             _assoc_values[i]="$value"
             return 0
         fi
@@ -102,7 +102,7 @@ assoc_get() {
     local i
     
     for i in "${!_assoc_keys[@]:-}"; do
-        if [ "${_assoc_keys[i]}" = "$key" ]; then
+        if [ "${_assoc_keys[i]:-}" = "$key" ]; then
             echo "${_assoc_values[i]}"
             return 0
         fi
