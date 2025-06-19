@@ -1809,17 +1809,67 @@ main() {
                     
                     # Check critical dependencies
                     local validation_cmd='
-                        export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+                        # Comprehensive PATH setup for all common installation locations
+                        export PATH="/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+                        
+                        # Also try to source common shell profiles that might set PATH
+                        [ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile" 2>/dev/null || true
+                        [ -f "$HOME/.bash_profile" ] && source "$HOME/.bash_profile" 2>/dev/null || true
+                        [ -f "$HOME/.profile" ] && source "$HOME/.profile" 2>/dev/null || true
                         
                         echo "=== DEPENDENCY VALIDATION ==="
+                        echo "Current PATH: $PATH"
+                        echo "Architecture: $(uname -m)"
+                        echo ""
+                        
                         missing_deps=""
                         
-                        # Check critical tools
+                        # Check critical tools with detailed diagnostics
                         for tool in bun cargo cmake clang ninja; do
                             if command -v "$tool" >/dev/null 2>&1; then
-                                echo "✅ $tool: available"
+                                tool_path=$(command -v "$tool")
+                                echo "✅ $tool: available at $tool_path"
                             else
                                 echo "❌ $tool: MISSING"
+                                
+                                # Special diagnostics for ninja
+                                if [ "$tool" = "ninja" ]; then
+                                    echo "   🔍 Ninja diagnostics:"
+                                    echo "   Checking common ninja locations..."
+                                    for ninja_path in /opt/homebrew/bin/ninja /usr/local/bin/ninja /usr/bin/ninja; do
+                                        if [ -f "$ninja_path" ]; then
+                                            echo "   ✅ Found ninja at: $ninja_path"
+                                            if [ -x "$ninja_path" ]; then
+                                                echo "   ✅ Ninja is executable"
+                                                version=$("$ninja_path" --version 2>/dev/null || echo "version check failed")
+                                                echo "   ✅ Ninja version: $version"
+                                            else
+                                                echo "   ❌ Ninja exists but is not executable"
+                                            fi
+                                        else
+                                            echo "   ❌ Not found: $ninja_path"
+                                        fi
+                                    done
+                                    
+                                    # Check if ninja is installed via brew
+                                    if command -v brew >/dev/null 2>&1; then
+                                        echo "   🍺 Checking Homebrew ninja installation..."
+                                        brew_info=$(brew list ninja 2>/dev/null || echo "not installed")
+                                        echo "   Brew ninja status: $brew_info"
+                                        
+                                        if [ "$brew_info" != "not installed" ]; then
+                                            brew_prefix=$(brew --prefix 2>/dev/null || echo "unknown")
+                                            echo "   Brew prefix: $brew_prefix"
+                                            potential_ninja="$brew_prefix/bin/ninja"
+                                            if [ -f "$potential_ninja" ]; then
+                                                echo "   ✅ Found ninja via brew: $potential_ninja"
+                                            else
+                                                echo "   ❌ Expected ninja not found: $potential_ninja"
+                                            fi
+                                        fi
+                                    fi
+                                fi
+                                
                                 missing_deps="$missing_deps $tool"
                             fi
                         done
@@ -1827,7 +1877,8 @@ main() {
                         # Check codesigning tools
                         for tool in codesign xcrun; do
                             if command -v "$tool" >/dev/null 2>&1; then
-                                echo "✅ $tool: available"
+                                tool_path=$(command -v "$tool")
+                                echo "✅ $tool: available at $tool_path"
                             else
                                 echo "❌ $tool: MISSING"
                                 missing_deps="$missing_deps $tool"
@@ -1984,17 +2035,67 @@ main() {
                 if [ "$ssh_ready" = true ]; then
                     # Check critical dependencies
                     local validation_cmd='
-                        export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+                        # Comprehensive PATH setup for all common installation locations
+                        export PATH="/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+                        
+                        # Also try to source common shell profiles that might set PATH
+                        [ -f "$HOME/.zprofile" ] && source "$HOME/.zprofile" 2>/dev/null || true
+                        [ -f "$HOME/.bash_profile" ] && source "$HOME/.bash_profile" 2>/dev/null || true
+                        [ -f "$HOME/.profile" ] && source "$HOME/.profile" 2>/dev/null || true
                         
                         echo "=== REMOTE IMAGE VALIDATION ==="
+                        echo "Current PATH: $PATH"
+                        echo "Architecture: $(uname -m)"
+                        echo ""
+                        
                         missing_deps=""
                         
-                        # Check critical tools
+                        # Check critical tools with detailed diagnostics
                         for tool in bun cargo cmake clang ninja; do
                             if command -v "$tool" >/dev/null 2>&1; then
-                                echo "✅ $tool: available"
+                                tool_path=$(command -v "$tool")
+                                echo "✅ $tool: available at $tool_path"
                             else
                                 echo "❌ $tool: MISSING"
+                                
+                                # Special diagnostics for ninja
+                                if [ "$tool" = "ninja" ]; then
+                                    echo "   🔍 Ninja diagnostics:"
+                                    echo "   Checking common ninja locations..."
+                                    for ninja_path in /opt/homebrew/bin/ninja /usr/local/bin/ninja /usr/bin/ninja; do
+                                        if [ -f "$ninja_path" ]; then
+                                            echo "   ✅ Found ninja at: $ninja_path"
+                                            if [ -x "$ninja_path" ]; then
+                                                echo "   ✅ Ninja is executable"
+                                                version=$("$ninja_path" --version 2>/dev/null || echo "version check failed")
+                                                echo "   ✅ Ninja version: $version"
+                                            else
+                                                echo "   ❌ Ninja exists but is not executable"
+                                            fi
+                                        else
+                                            echo "   ❌ Not found: $ninja_path"
+                                        fi
+                                    done
+                                    
+                                    # Check if ninja is installed via brew
+                                    if command -v brew >/dev/null 2>&1; then
+                                        echo "   🍺 Checking Homebrew ninja installation..."
+                                        brew_info=$(brew list ninja 2>/dev/null || echo "not installed")
+                                        echo "   Brew ninja status: $brew_info"
+                                        
+                                        if [ "$brew_info" != "not installed" ]; then
+                                            brew_prefix=$(brew --prefix 2>/dev/null || echo "unknown")
+                                            echo "   Brew prefix: $brew_prefix"
+                                            potential_ninja="$brew_prefix/bin/ninja"
+                                            if [ -f "$potential_ninja" ]; then
+                                                echo "   ✅ Found ninja via brew: $potential_ninja"
+                                            else
+                                                echo "   ❌ Expected ninja not found: $potential_ninja"
+                                            fi
+                                        fi
+                                    fi
+                                fi
+                                
                                 missing_deps="$missing_deps $tool"
                             fi
                         done
@@ -2002,7 +2103,8 @@ main() {
                         # Check codesigning tools
                         for tool in codesign xcrun; do
                             if command -v "$tool" >/dev/null 2>&1; then
-                                echo "✅ $tool: available"
+                                tool_path=$(command -v "$tool")
+                                echo "✅ $tool: available at $tool_path"
                             else
                                 echo "❌ $tool: MISSING"
                                 missing_deps="$missing_deps $tool"
