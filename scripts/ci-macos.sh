@@ -138,7 +138,7 @@ cleanup_orphaned_vms() {
     done <<< "$(tart list 2>/dev/null || echo '')"
     
     # Clean up each temporary VM using robust cleanup logic
-    for vm_info in "${temp_vms[@]}"; do
+    for vm_info in "${temp_vms[@]:-}"; do
         local vm_name="${vm_info%:*}"
         local size="${vm_info#*:}"
         
