@@ -5,6 +5,16 @@ set -x
 # Version: 4.1 - Added US locale configuration and ICU4C for test compatibility
 # A comprehensive bootstrap script for macOS based on the main bootstrap.sh
 
+# Helper functions (define early)
+print() {
+    echo "$@"
+}
+
+error() {
+    print "error: $@" >&2
+    exit 1
+}
+
 # Parse command line arguments for selective updates
 UPDATE_MODE="full"  # full, bun-only, homebrew-only
 SKIP_VERIFICATION=false
@@ -36,38 +46,12 @@ done
 
 print "Bootstrap mode: $UPDATE_MODE"
 
-# Show pinned versions if requested
-show_pinned_versions() {
-    print ""
-    print "=== PINNED COMPONENT VERSIONS ==="
-    print "Node.js: $(nodejs_version_exact)"
-    print "Bun: $(bun_version_exact)"
-    print "LLVM: $(llvm_version_exact)"
-    print "Buildkite Agent: 3.87.0"
-    print "================================="
-    print ""
-}
-
-if [ "$SHOW_VERSIONS" = true ]; then
-    show_pinned_versions
-    exit 0
-fi
-
 # Constants
 MAX_RETRIES=3
 INITIAL_BACKOFF=5
 MAX_BACKOFF=30
 
 # Helper functions
-print() {
-    echo "$@"
-}
-
-error() {
-    print "error: $@" >&2
-    exit 1
-}
-
 execute() {
     print "$ $@" >&2
     if ! "$@"; then
@@ -484,6 +468,23 @@ install_llvm() {
     
     print "✅ LLVM installed and symlinked successfully"
 }
+
+# Show pinned versions if requested (define after version functions)
+show_pinned_versions() {
+    print ""
+    print "=== PINNED COMPONENT VERSIONS ==="
+    print "Node.js: $(nodejs_version_exact)"
+    print "Bun: $(bun_version_exact)"
+    print "LLVM: $(llvm_version_exact)"
+    print "Buildkite Agent: 3.87.0"
+    print "================================="
+    print ""
+}
+
+if [ "$SHOW_VERSIONS" = true ]; then
+    show_pinned_versions
+    exit 0
+fi
 
 install_ccache() {
     install_packages ccache

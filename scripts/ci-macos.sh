@@ -168,12 +168,12 @@ cleanup_vm_internal() {
         if tart delete "$vm_name" 2>/dev/null; then
             # Verify deletion worked
             if ! tart list 2>/dev/null | grep -q "^local.*$vm_name"; then
-                return 0
+            return 0
             fi
         fi
         
         # If we get here, deletion failed
-        if [ $delete_attempts -lt $max_delete_attempts ]; then
+            if [ $delete_attempts -lt $max_delete_attempts ]; then
             log "     ⚠️ Delete attempt failed, retrying in 3 seconds..."
             sleep 3
         fi
@@ -242,9 +242,9 @@ cleanup_vm() {
         log "✅ Successfully deleted VM: $vm_name"
         return 0
     else
-        log "⚠️ All delete attempts failed, VM $vm_name may be orphaned"
-        log "   Manual cleanup may be required: tart delete $vm_name"
-        return 1
+    log "⚠️ All delete attempts failed, VM $vm_name may be orphaned"
+    log "   Manual cleanup may be required: tart delete $vm_name"
+    return 1
     fi
 }
 
@@ -540,7 +540,7 @@ create_and_run_vm() {
                     log "   🎉 SUCCESS: ccache populated - future C++ builds will be much faster!"
                 else
                     log "   ⚠️  WARNING: ccache appears empty after build"
-                fi
+                    fi
             fi
             
             # Check if zig-cache was created for Zig builds

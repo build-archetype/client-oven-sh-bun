@@ -296,8 +296,8 @@ cleanup_old_images() {
             local latest_info=$(assoc_get "$key")
             local image_name="${latest_info%|*}"
             local version="${latest_info#*|}"
-            images_to_keep+=("$image_name")
-            log "  📌 Keeping latest for $key: $image_name (version: $version)"
+        images_to_keep+=("$image_name")
+        log "  📌 Keeping latest for $key: $image_name (version: $version)"
         fi
     done <<< "$(assoc_keys)"
     
@@ -716,16 +716,16 @@ check_remote_image() {
                 ;;
             *)
                 log "   ⚠️  Download failed with exit code $pull_exit_code" >&2
-                if [ "$auth_setup" = false ]; then
-                    log "   Possible causes:" >&2
-                    log "   - Image doesn't exist in registry" >&2
-                    log "   - Registry requires authentication (set GITHUB_TOKEN and GITHUB_USERNAME)" >&2
-                else
-                    log "   Possible causes:" >&2
-                    log "   - Image doesn't exist in registry" >&2
-                    log "   - Authentication failed (check GITHUB_TOKEN permissions)" >&2
-                    log "   - Network connectivity issues" >&2
-                fi
+        if [ "$auth_setup" = false ]; then
+            log "   Possible causes:" >&2
+            log "   - Image doesn't exist in registry" >&2
+            log "   - Registry requires authentication (set GITHUB_TOKEN and GITHUB_USERNAME)" >&2
+        else
+            log "   Possible causes:" >&2
+            log "   - Image doesn't exist in registry" >&2
+            log "   - Authentication failed (check GITHUB_TOKEN permissions)" >&2
+            log "   - Network connectivity issues" >&2
+        fi
                 ;;
         esac
         
@@ -1731,7 +1731,7 @@ main() {
             tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
             tart clone "$REMOTE_IMAGE_URL" "$LOCAL_IMAGE_NAME"
             log "✅ Remote image cloned as: $LOCAL_IMAGE_NAME"
-            exit 0
+        exit 0
         else
             set -e  # Re-enable exit on error
             log "⚠️  Remote registry check failed - will build locally"
@@ -1748,8 +1748,8 @@ main() {
             local vm_name="${BASH_REMATCH[1]}"
             if [[ "$vm_name" =~ ^bun-build-macos-${MACOS_RELEASE} ]]; then
                 latest_local="$vm_name"
-                break
-            fi
+            break
+        fi
         fi
     done <<< "$tart_output"
     
@@ -1789,7 +1789,7 @@ main() {
                 else
                     exit 1
                 fi
-            fi
+    fi
 
             # Wait for SSH to be available
             local ssh_ready=false
@@ -1893,7 +1893,7 @@ main() {
             exit 1  # Fatal in normal mode
         fi
     fi
-
+    
     log "✅ Bootstrap completed successfully"
 
     # Step 5: Try to push to registry (but don't fail if this doesn't work)
