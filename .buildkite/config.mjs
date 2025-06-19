@@ -91,8 +91,9 @@ export function getFullImageName(name, tag = "latest") {
   return `${IMAGE_CONFIG.baseImage.registry}/${IMAGE_CONFIG.baseImage.organization}/${IMAGE_CONFIG.baseImage.repository}/${name}:${tag}`;
 }
 
-// Helper function to create versioned tag (version + bootstrap info)
+// Helper function to create versioned tag (mixed convention: version info in tags)
 export function getVersionedTag() {
+  // With mixed naming convention, version info goes in the tag
   const version = getBunVersion();
   const bootstrapVersion = getBootstrapVersion("darwin");
   return `${version}-bootstrap-${bootstrapVersion}`;
@@ -101,6 +102,6 @@ export function getVersionedTag() {
 // Helper function to get full versioned image URL
 export function getVersionedImageURL() {
   const imageName = IMAGE_CONFIG.baseImage.versionedName;
-  const tag = getVersionedTag();
+  const tag = getVersionedTag(); // Will be version-bootstrap format
   return getFullImageName(imageName, tag);
 } 
