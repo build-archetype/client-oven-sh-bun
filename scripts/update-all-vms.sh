@@ -121,6 +121,75 @@ for vm_name in "${VMS_TO_UPDATE[@]}"; do
                 sudo ln -sf ~/.bun/bin/bunx /opt/homebrew/bin/bunx 2>/dev/null || sudo ln -sf ~/.bun/bin/bunx /usr/local/bin/bunx
                 
                 echo 'Bun update complete! ✅'
+                
+                # Fix lolhtml dependency issues - THIS IS THE MAIN POINT!
+                echo 'Fixing lolhtml dependencies...'
+                
+                # Find workspace directory more aggressively
+                WORKSPACE_DIR=\"\"
+                echo 'Searching for workspace directory...'
+                
+                # Check common locations
+                for dir in '/Users/mac-ci/workspace' '/Users/admin/workspace' \"\$HOME/workspace\" '/Users/runner/workspace' '/workspace' '/Users/*/workspace'; do
+                    if [ -d \"\$dir\" ]; then
+                        WORKSPACE_DIR=\"\$dir\"
+                        echo \"Found workspace at: \$dir\"
+                        break
+                    fi
+                done
+                
+                # If not found, search more broadly
+                if [ -z \"\$WORKSPACE_DIR\" ]; then
+                    echo 'Searching entire filesystem for workspace...'
+                    FOUND_DIR=\$(find /Users -name 'workspace' -type d 2>/dev/null | head -1)
+                    if [ -n \"\$FOUND_DIR\" ]; then
+                        WORKSPACE_DIR=\"\$FOUND_DIR\"
+                        echo \"Found workspace at: \$FOUND_DIR\"
+                    fi
+                fi
+                
+                if [ -n \"\$WORKSPACE_DIR\" ]; then
+                    cd \"\$WORKSPACE_DIR\"
+                    echo \"Working in: \$WORKSPACE_DIR\"
+                    
+                    # Create lolhtml directory structure if missing
+                    echo 'Ensuring lolhtml c-api directory exists...'
+                    mkdir -p vendor/lolhtml/c-api
+                    
+                    # If we're in a git repo, try to fix submodules
+                    if [ -d '.git' ]; then
+                        echo 'Git repository detected - updating submodules...'
+                        git submodule update --init --recursive vendor/lolhtml || echo 'Submodule update failed'
+                        
+                        # Pull latest changes that might include lolhtml fixes
+                        echo 'Pulling latest upstream changes...'
+                        git fetch origin || echo 'Git fetch failed'
+                        git pull origin main || git pull origin master || echo 'Git pull failed'
+                        
+                        # Update submodules again after pull
+                        git submodule update --init --recursive || echo 'Final submodule update failed'
+                    else
+                        echo 'Not a git repository - just ensuring directory exists'
+                    fi
+                    
+                    # Verify the fix
+                    if [ -d 'vendor/lolhtml/c-api' ]; then
+                        echo 'SUCCESS: lolhtml c-api directory exists! ✅'
+                        ls -la vendor/lolhtml/c-api/ || echo 'Directory exists but empty'
+                    else
+                        echo 'WARNING: lolhtml c-api directory still missing ⚠️'
+                    fi
+                    
+                    echo 'lolhtml fix attempt complete!'
+                else
+                    echo 'ERROR: Could not find workspace directory anywhere!'
+                    echo 'This might cause lolhtml build failures.'
+                    
+                    # List all directories to help debug
+                    echo 'Available directories in /Users:'
+                    ls -la /Users/ || echo 'Cannot list /Users'
+                fi
+                
                 exit 0
             else
                 echo 'Bun version verification failed'
