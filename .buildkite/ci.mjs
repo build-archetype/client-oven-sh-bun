@@ -1152,8 +1152,8 @@ function getMacOSVMEnsureStep(platform, options) {
     agents: {
       queue: "darwin",
     },
-    // Run on ALL hosts in the darwin queue simultaneously
-    parallelism: 10, // Should cover all our CI hosts
+    // Run on all hosts in the darwin queue simultaneously (3 hosts)
+    parallelism: 3, // Matches actual number of CI hosts
     command: `./scripts/build-macos-vm.sh --release=${release} --check-only || ./scripts/build-macos-vm.sh --release=${release} --force-oci-rebuild`,
     timeout_in_minutes: 60, // Shorter timeout since rebuild should be faster with OCI
     retry: {
