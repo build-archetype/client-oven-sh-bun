@@ -127,22 +127,32 @@ cleanup_orphaned_vms() {
     local cleaned_count=0
     local total_size_freed=0
     
-    # Find all temporary VMs (pattern: bun-build-TIMESTAMP-UUID)
+    # Get list of temporary VMs (pattern: bun-build-TIMESTAMP-UUID)
+    local temp_vms=()
     while IFS= read -r line; do
         if [[ "$line" =~ ^local[[:space:]]+bun-build-[0-9]+-[A-F0-9-]+[[:space:]] ]]; then
             local vm_name=$(echo "$line" | awk '{print $2}')
             local size=$(echo "$line" | awk '{print $4}')
-            
-            log "🗑️  Deleting orphaned temporary VM: $vm_name (${size}GB)"
-            if tart delete "$vm_name"; then
-                log "✅ Successfully deleted $vm_name"
-                cleaned_count=$((cleaned_count + 1))
-                total_size_freed=$((total_size_freed + size))
-            else
-                log "❌ Failed to delete $vm_name"
-            fi
+            temp_vms+=("$vm_name:$size")
         fi
     done <<< "$(tart list 2>/dev/null || echo '')"
+    
+    # Clean up each temporary VM using robust cleanup logic
+    for vm_info in "${temp_vms[@]}"; do
+        local vm_name="${vm_info%:*}"
+        local size="${vm_info#*:}"
+        
+        log "🗑️  Processing orphaned temporary VM: $vm_name (${size}GB)"
+        
+        # Use the robust cleanup_vm function for each orphaned VM
+        if cleanup_vm_internal "$vm_name"; then
+            log "✅ Successfully cleaned up $vm_name"
+            cleaned_count=$((cleaned_count + 1))
+            total_size_freed=$((total_size_freed + size))
+        else
+            log "❌ Failed to clean up $vm_name"
+        fi
+    done
     
     if [ $cleaned_count -gt 0 ]; then
         log "🎉 Cleaned up $cleaned_count orphaned VMs, freed ${total_size_freed}GB"
@@ -151,35 +161,33 @@ cleanup_orphaned_vms() {
     fi
 }
 
-# Function to cleanup single VM with better error handling
-cleanup_vm() {
+# Internal function for robust VM cleanup (shared logic)
+cleanup_vm_internal() {
     local vm_name="$1"
     
-    log "🧹 Cleaning up VM: $vm_name"
-    
-    # Check if VM exists first
-    if ! tart list | grep -q "^local.*$vm_name"; then
-        log "✅ VM $vm_name already deleted or doesn't exist"
+    # Check if VM exists first with fresh state
+    if ! tart list 2>/dev/null | grep -q "^local.*$vm_name"; then
+        # VM doesn't exist, consider it cleaned
         return 0
     fi
     
     # Try to stop VM first if it's running (with timeout)
-    if tart list | grep "$vm_name" | grep -q "running"; then
-        log "🛑 Stopping running VM: $vm_name"
-        tart stop "$vm_name" || log "⚠️ Failed to stop VM (may already be stopped)"
+    if tart list 2>/dev/null | grep "$vm_name" | grep -q "running"; then
+        log "   🛑 Stopping running VM: $vm_name"
+        tart stop "$vm_name" 2>/dev/null || log "     ⚠️ Failed to stop VM (may already be stopped)"
         sleep 2
         
-        # Wait for VM to actually stop
+        # Wait for VM to actually stop with timeout
         local stop_attempts=0
-        while tart list | grep "$vm_name" | grep -q "running" && [ $stop_attempts -lt 10 ]; do
-            log "   Waiting for VM to stop... (attempt $((stop_attempts + 1))/10)"
+        while tart list 2>/dev/null | grep "$vm_name" | grep -q "running" && [ $stop_attempts -lt 5 ]; do
+            log "     Waiting for VM to stop... (attempt $((stop_attempts + 1))/5)"
             sleep 2
             stop_attempts=$((stop_attempts + 1))
         done
         
-        # Force kill if still running
-        if tart list | grep "$vm_name" | grep -q "running"; then
-            log "⚠️ VM still running after stop attempts, this may indicate a problem"
+        # Check if still running after timeout
+        if tart list 2>/dev/null | grep "$vm_name" | grep -q "running"; then
+            log "     ⚠️ VM still running after stop attempts, proceeding with delete anyway"
         fi
     fi
     
@@ -189,23 +197,30 @@ cleanup_vm() {
     
     while [ $delete_attempts -lt $max_delete_attempts ]; do
         delete_attempts=$((delete_attempts + 1))
-        log "🗑️  Deleting VM: $vm_name (attempt $delete_attempts/$max_delete_attempts)"
+        
+        # Check again if VM still exists (state might have changed)
+        if ! tart list 2>/dev/null | grep -q "^local.*$vm_name"; then
+            # VM no longer exists, consider success
+            return 0
+        fi
+        
+        log "     🗑️  Deleting VM: $vm_name (attempt $delete_attempts/$max_delete_attempts)"
         
         if tart delete "$vm_name" 2>/dev/null; then
-            log "✅ Successfully deleted VM: $vm_name"
-            return 0
-        else
-            log "❌ Failed to delete VM: $vm_name (attempt $delete_attempts)"
-            if [ $delete_attempts -lt $max_delete_attempts ]; then
-                log "   Retrying in 5 seconds..."
-                sleep 5
+            # Verify deletion worked
+            if ! tart list 2>/dev/null | grep -q "^local.*$vm_name"; then
+                return 0
             fi
+        fi
+        
+        # If we get here, deletion failed
+        if [ $delete_attempts -lt $max_delete_attempts ]; then
+            log "     ⚠️ Delete attempt failed, retrying in 3 seconds..."
+            sleep 3
         fi
     done
     
-    # Final attempt with force if available
-    log "⚠️ All delete attempts failed, VM $vm_name may be orphaned"
-    log "   Manual cleanup may be required: tart delete $vm_name"
+    log "     ❌ All delete attempts failed for $vm_name"
     return 1
 }
 
@@ -933,3 +948,19 @@ EOF
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi 
+
+# Function to cleanup single VM with better error handling
+cleanup_vm() {
+    local vm_name="$1"
+    
+    log "🧹 Cleaning up VM: $vm_name"
+    
+    if cleanup_vm_internal "$vm_name"; then
+        log "✅ Successfully deleted VM: $vm_name"
+        return 0
+    else
+        log "⚠️ All delete attempts failed, VM $vm_name may be orphaned"
+        log "   Manual cleanup may be required: tart delete $vm_name"
+        return 1
+    fi
+} 
