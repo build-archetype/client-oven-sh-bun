@@ -42,7 +42,7 @@ SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalK
 # You can override these via environment variables before running the script.
 
 # macOS release version (can be overridden by --release flag)
-MACOS_RELEASE="${MACOS_RELEASE:-14}"
+MACOS_RELEASE="${MACOS_RELEASE:-13}"
 # Registry for images (default: GitHub Container Registry)
 REGISTRY="${REGISTRY:-ghcr.io}"
 # Organization/user for image (default: build-archetype or from GITHUB_REPOSITORY_OWNER)
