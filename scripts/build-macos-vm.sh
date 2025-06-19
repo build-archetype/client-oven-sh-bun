@@ -68,8 +68,61 @@ GITHUB_USERNAME="${GITHUB_USERNAME:-}"
 # =====================
 
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >&2
 }
+
+# === BASH 3.2 COMPATIBILITY FUNCTIONS ===
+# Simulate associative arrays for bash 3.2 compatibility
+# Global arrays to store key-value pairs
+_assoc_keys=()
+_assoc_values=()
+
+# Set a key-value pair
+assoc_set() {
+    local key="$1"
+    local value="$2"
+    local i
+    
+    # Check if key already exists
+    for i in "${!_assoc_keys[@]}"; do
+        if [ "${_assoc_keys[i]}" = "$key" ]; then
+            _assoc_values[i]="$value"
+            return 0
+        fi
+    done
+    
+    # Add new key-value pair
+    _assoc_keys+=("$key")
+    _assoc_values+=("$value")
+}
+
+# Get value by key
+assoc_get() {
+    local key="$1"
+    local i
+    
+    for i in "${!_assoc_keys[@]}"; do
+        if [ "${_assoc_keys[i]}" = "$key" ]; then
+            echo "${_assoc_values[i]}"
+            return 0
+        fi
+    done
+    
+    # Key not found
+    return 1
+}
+
+# Get all keys
+assoc_keys() {
+    printf '%s\n' "${_assoc_keys[@]}"
+}
+
+# Clear the associative array simulation
+assoc_clear() {
+    _assoc_keys=()
+    _assoc_values=()
+}
+# === END BASH 3.2 COMPATIBILITY ===
 
 # Get base image based on macOS release
 get_base_image() {
@@ -180,7 +233,9 @@ cleanup_old_images() {
     local tart_output=$(tart list 2>&1)
     
     # Track images by macOS release and architecture combination
-    declare -A latest_images  # Key: "macos-arch", Value: "image_name|bun_version"
+    # declare -A latest_images  # Key: "macos-arch", Value: "image_name|bun_version"
+    # BASH 3.2 COMPATIBILITY: Use function-based associative array simulation
+    assoc_clear  # Clear previous data
     local all_bun_images=()
     local images_to_keep=()
     local images_to_delete=()
@@ -208,11 +263,11 @@ cleanup_old_images() {
                 
                 # Track the latest version for each macOS release + architecture combination
                 local key="${macos_release}-${arch}"
-                local current_latest="${latest_images[$key]:-}"
+                local current_latest=$(assoc_get "$key" 2>/dev/null || echo "")
                 
                 if [ -z "$current_latest" ]; then
                     # First image for this combination
-                    latest_images[$key]="$image_name|$bun_version"
+                    assoc_set "$key" "$image_name|$bun_version"
                     log "    📌 First image for macOS $macos_release + $arch"
                 else
                     # Compare versions
@@ -220,7 +275,7 @@ cleanup_old_images() {
                     if version_compare "$bun_version" "$current_version"; then
                         # This version is newer
                         local old_image="${current_latest%|*}"
-                        latest_images[$key]="$image_name|$bun_version"
+                        assoc_set "$key" "$image_name|$bun_version"
                         log "    📈 Newer version found: $bun_version > $current_version"
                         log "    🗑️  Will delete older: $old_image"
                         images_to_delete+=("$old_image")
@@ -236,12 +291,15 @@ cleanup_old_images() {
     done <<< "$tart_output"
     
     # Collect images to keep (the latest for each macOS release + architecture)
-    for key in "${!latest_images[@]}"; do
-        local image_name="${latest_images[$key]%|*}"
-        local version="${latest_images[$key]#*|}"
-        images_to_keep+=("$image_name")
-        log "  📌 Keeping latest for $key: $image_name (version: $version)"
-    done
+    while IFS= read -r key; do
+        if [ -n "$key" ]; then
+            local latest_info=$(assoc_get "$key")
+            local image_name="${latest_info%|*}"
+            local version="${latest_info#*|}"
+            images_to_keep+=("$image_name")
+            log "  📌 Keeping latest for $key: $image_name (version: $version)"
+        fi
+    done <<< "$(assoc_keys)"
     
     # Show what we found
     if [ ${#images_to_keep[@]} -gt 0 ]; then
