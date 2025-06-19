@@ -129,13 +129,34 @@ cleanup_orphaned_vms() {
     
     # Get list of temporary VMs (pattern: bun-build-TIMESTAMP-UUID)
     local temp_vms=()
+    
+    # Parse tart list output more robustly
+    # Format: "local  vm-name  100  66  66  stopped"
     while IFS= read -r line; do
-        if [[ "$line" =~ ^local[[:space:]]+bun-build-[0-9]+-[A-F0-9-]+[[:space:]] ]]; then
-            local vm_name=$(echo "$line" | awk '{print $2}')
-            local size=$(echo "$line" | awk '{print $4}')
-            temp_vms+=("$vm_name:$size")
+        # Skip header lines and empty lines
+        [[ "$line" =~ ^(Source|local|OCI)?[[:space:]]*$ ]] && continue
+        [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+        [[ "$line" =~ Name[[:space:]]*Disk ]] && continue
+        
+        # Match lines that start with "local" and contain our temporary VM pattern
+        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+[0-9]+[[:space:]]+([0-9]+)[[:space:]]+[0-9]+[[:space:]]+(stopped|running) ]]; then
+            local vm_name="${BASH_REMATCH[1]}"
+            local size="${BASH_REMATCH[2]}"
+            
+            # Only process temporary VMs (our pattern: bun-build-TIMESTAMP-UUID)
+            if [[ "$vm_name" =~ ^bun-build-[0-9]+-[A-F0-9-]+$ ]]; then
+                temp_vms+=("$vm_name:$size")
+                log "   Found temporary VM: $vm_name (${size}GB)"
+            fi
         fi
     done <<< "$(tart list 2>/dev/null || echo '')"
+    
+    if [ ${#temp_vms[@]} -eq 0 ]; then
+        log "✅ No orphaned temporary VMs found"
+        return 0
+    fi
+    
+    log "Found ${#temp_vms[@]} temporary VMs to clean up"
     
     # Clean up each temporary VM using robust cleanup logic
     for vm_info in "${temp_vms[@]:-}"; do
