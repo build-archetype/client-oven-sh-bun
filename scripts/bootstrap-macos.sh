@@ -245,22 +245,34 @@ install_brew() {
             print "⚠️  Homebrew installation timed out or failed"
             print "Checking if Homebrew was partially installed..."
             
+            # Add Homebrew to PATH first before checking if brew command works
+            case "$(uname -m)" in
+            arm64)
+                export PATH="/opt/homebrew/bin:$PATH"
+                ;;
+            x86_64)
+                export PATH="/usr/local/bin:$PATH"
+                ;;
+            esac
+            
             # Check if brew binary exists even if installation "failed"
             local brew_paths="/opt/homebrew/bin/brew /usr/local/bin/brew"
+            local found_brew=false
             for brew_path in $brew_paths; do
                 if [ -x "$brew_path" ]; then
                     print "✅ Found Homebrew at $brew_path - continuing"
+                    found_brew=true
                     break
                 fi
             done
             
             # If still no brew, fail
-            if ! command -v brew >/dev/null 2>&1; then
+            if [ "$found_brew" = false ] || ! command -v brew >/dev/null 2>&1; then
                 error "Homebrew installation failed and no brew binary found"
             fi
         fi
         
-        # Add Homebrew to PATH based on architecture
+        # Add Homebrew to PATH based on architecture (make persistent)
         case "$(uname -m)" in
         arm64)
             append_to_path "/opt/homebrew/bin"
