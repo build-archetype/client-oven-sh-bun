@@ -1643,13 +1643,25 @@ main() {
     
     # If we reach here, we need to build a new image
 
-    # Validate the image using the proper validation function
+    # Validate the appropriate image - base VM for incremental builds, target VM for new builds
     log "=== VALIDATING VM IMAGE ==="
-    if ! validate_vm_image_tools "$LOCAL_IMAGE_NAME"; then
-        log "❌ VM image validation failed"
-        exit 1
+    if [ -n "${INCREMENTAL_BASE_IMAGE:-}" ]; then
+        # For incremental builds, validate the base VM that exists
+        log "Incremental build detected - validating base VM: $INCREMENTAL_BASE_IMAGE"
+        if ! validate_vm_image_tools "$INCREMENTAL_BASE_IMAGE"; then
+            log "❌ Base VM image validation failed"
+            exit 1
+        fi
+        log "✅ Base VM image validation passed"
+    else
+        # For new builds, validate the target VM (should exist by now)
+        log "New build detected - validating target VM: $LOCAL_IMAGE_NAME"
+        if ! validate_vm_image_tools "$LOCAL_IMAGE_NAME"; then
+            log "❌ VM image validation failed"
+            exit 1
+        fi
+        log "✅ VM image validation passed"
     fi
-    log "✅ VM image validation passed"
 
     log "✅ Bootstrap completed successfully"
 
