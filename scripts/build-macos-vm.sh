@@ -913,14 +913,14 @@ comprehensive_vm_validation() {
                     else
                         echo "   ✅ $tool: functional test passed"
                         return 0
-                    fi
-                else
+                fi
+            else
                     echo "   ❌ $tool: functional test failed - command failed"
                     echo "   Error output: $output"
                     failed_tests="$failed_tests $tool"
                     return 1
-                fi
-            else
+            fi
+        else
                 echo "   ✅ $tool: presence verified"
                 return 0
             fi
@@ -1029,8 +1029,8 @@ EOF
             else
                 echo "❌ C++ compilation test: executable failed to run correctly"
                 failed_tests="$failed_tests compilation"
-            fi
-        else
+        fi
+    else
             echo "❌ C++ compilation test: FAILED to compile"
             failed_tests="$failed_tests compilation"
         fi
@@ -1049,8 +1049,8 @@ EOF
             else
                 echo "❌ Bun build test: output file not created"
                 failed_tests="$failed_tests bun-build"
-            fi
-        else
+        fi
+    else
             echo "❌ Bun build test: FAILED"
             failed_tests="$failed_tests bun-build"
         fi
@@ -1093,10 +1093,290 @@ EOF
     
     if [ "$validation_success" = true ]; then
         log "   ✅ VM passed comprehensive validation - ready for building"
+    return 0
+else
+        log "   ❌ VM failed comprehensive validation - not ready for building"
+    return 1
+    fi
+}
+
+# Enhanced GitHub credentials loading with keychain support
+load_github_credentials() {
+    local force_prompt="${1:-false}"
+    local interactive_mode="${2:-true}"
+    
+    log "🔐 Loading GitHub credentials for registry access..."
+    
+    # If credentials already loaded and not forcing prompt, use them
+    if [ "$force_prompt" != "true" ] && [ -n "${GITHUB_USERNAME:-}" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
+        log "✅ Using existing GitHub credentials: $GITHUB_USERNAME"
+        export TART_REGISTRY_USERNAME="$GITHUB_USERNAME"
+        export TART_REGISTRY_PASSWORD="$GITHUB_TOKEN"
+        return 0
+    fi
+    
+    # Method 1: Try loading from CI keychain (most secure)
+    log "   Trying CI keychain..."
+    local keychain_username=""
+    local keychain_token=""
+    
+    # Check if CI keychain exists
+    local ci_keychain="$HOME/Library/Keychains/bun-ci.keychain-db"
+    local keychain_password_file="$HOME/.buildkite-agent/ci-keychain-password.txt"
+    
+    if [ -f "$ci_keychain" ]; then
+        log "   Found CI keychain: $ci_keychain"
+        
+        # Unlock keychain if password file exists
+        if [ -f "$keychain_password_file" ]; then
+            local keychain_password=$(cat "$keychain_password_file" 2>/dev/null || echo "")
+            if [ -n "$keychain_password" ]; then
+                security unlock-keychain -p "$keychain_password" "$ci_keychain" 2>/dev/null || true
+            fi
+        fi
+        
+        # Load credentials using search all keychains method (works over SSH)
+        keychain_username=$(security find-generic-password -a "bun-ci" -s "github-username" -w 2>/dev/null || echo "")
+        keychain_token=$(security find-generic-password -a "bun-ci" -s "github-token" -w 2>/dev/null || echo "")
+        
+        if [ -n "$keychain_username" ] && [ -n "$keychain_token" ]; then
+            log "✅ Loaded GitHub credentials from CI keychain: $keychain_username"
+            export GITHUB_USERNAME="$keychain_username"
+            export GITHUB_TOKEN="$keychain_token"
+            export TART_REGISTRY_USERNAME="$keychain_username"
+            export TART_REGISTRY_PASSWORD="$keychain_token"
+            return 0
+        else
+            log "   CI keychain exists but no credentials found"
+        fi
+    else
+        log "   No CI keychain found at $ci_keychain"
+    fi
+    
+    # Method 2: Try environment variables
+    log "   Trying environment variables..."
+    if [ -n "${GITHUB_USERNAME:-}" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
+        log "✅ Using GitHub credentials from environment: $GITHUB_USERNAME"
+        export TART_REGISTRY_USERNAME="$GITHUB_USERNAME"
+        export TART_REGISTRY_PASSWORD="$GITHUB_TOKEN"
         return 0
     else
-        log "   ❌ VM failed comprehensive validation - not ready for building"
-        return 1
+        log "   No environment variables found"
+    fi
+    
+    # Method 3: Try legacy credential files
+    log "   Trying legacy credential files..."
+    if [ -f /tmp/github-token.txt ] && [ -f /tmp/github-username.txt ]; then
+        local file_token=$(cat /tmp/github-token.txt 2>/dev/null || echo "")
+        local file_username=$(cat /tmp/github-username.txt 2>/dev/null || echo "")
+        if [ -n "$file_token" ] && [ -n "$file_username" ]; then
+            log "✅ Using GitHub credentials from legacy files: $file_username"
+            export GITHUB_USERNAME="$file_username"
+            export GITHUB_TOKEN="$file_token"
+            export TART_REGISTRY_USERNAME="$file_username"
+            export TART_REGISTRY_PASSWORD="$file_token"
+            return 0
+        else
+            log "   Legacy files exist but are empty or unreadable"
+        fi
+    else
+        log "   No legacy credential files found"
+    fi
+    
+    # Method 4: Try helper script from setup-mac-server.sh
+    log "   Trying helper script..."
+    local helper_script="$HOME/.buildkite-agent/load-github-credentials.sh"
+    if [ -f "$helper_script" ] && [ -x "$helper_script" ]; then
+        log "   Found credentials helper script: $helper_script"
+        if source "$helper_script" 2>/dev/null; then
+            if [ -n "${GITHUB_USERNAME:-}" ] && [ -n "${GITHUB_TOKEN:-}" ]; then
+                log "✅ Loaded GitHub credentials from helper script: $GITHUB_USERNAME"
+                return 0
+            fi
+        fi
+        log "   Helper script failed to load credentials"
+    else
+        log "   No helper script found at $helper_script"
+    fi
+    
+    # Method 5: Interactive prompt (only if in interactive mode and not in CI)
+    if [ "$interactive_mode" = "true" ] && [ -t 0 ] && [ -z "${CI:-}" ] && [ -z "${BUILDKITE:-}" ]; then
+        log "   No credentials found, prompting user..."
+        
+        # Prompt for credentials
+        local input_username=""
+        local input_token=""
+        
+        echo -n "Enter GitHub username for registry access: "
+        read input_username
+        
+        if [ -n "$input_username" ]; then
+            echo -n "Enter GitHub token (will be hidden): "
+            # Read token securely
+            local char
+            while IFS= read -r -s -n1 char; do
+                if [[ $char == $'\0' || $char == $'\n' ]]; then
+                    break
+                fi
+                if [[ $char == $'\177' ]]; then
+                    if [ -n "$input_token" ]; then
+                        input_token="${input_token%?}"
+                        printf '\b \b'
+                    fi
+                else
+                    input_token+="$char"
+                    printf '•'
+                fi
+            done
+            echo
+            
+            if [ -n "$input_token" ]; then
+                log "✅ Using manually entered GitHub credentials: $input_username"
+                export GITHUB_USERNAME="$input_username"
+                export GITHUB_TOKEN="$input_token"
+                export TART_REGISTRY_USERNAME="$input_username"
+                export TART_REGISTRY_PASSWORD="$input_token"
+                
+                # Offer to store in keychain for future use
+                echo -n "Store credentials in CI keychain for future use? (y/n): "
+                read store_choice
+                if [[ "$store_choice" == "y" || "$store_choice" == "Y" ]]; then
+                    store_credentials_in_keychain "$input_username" "$input_token"
+                fi
+                
+                return 0
+            else
+                log "   No token entered"
+            fi
+        else
+            log "   No username entered"
+        fi
+    else
+        log "   Skipping interactive prompt (non-interactive mode or CI environment)"
+    fi
+    
+    # No credentials found
+    log "❌ No GitHub credentials found"
+    log "   Registry operations will be attempted without authentication"
+    log "   This may fail for private repositories or pushing images"
+    return 1
+}
+
+# Store credentials in CI keychain for future use
+store_credentials_in_keychain() {
+    local username="$1"
+    local token="$2"
+    
+    log "🔒 Storing GitHub credentials in CI keychain..."
+    
+    # Create CI keychain if it doesn't exist
+    local ci_keychain="$HOME/Library/Keychains/bun-ci.keychain-db"
+    local keychain_password_file="$HOME/.buildkite-agent/ci-keychain-password.txt"
+    
+    if [ ! -f "$ci_keychain" ]; then
+        log "   Creating CI keychain..."
+        
+        # Create directories
+        mkdir -p "$HOME/.buildkite-agent"
+        mkdir -p "$HOME/Library/Keychains"
+        
+        # Generate secure password
+        local keychain_password=$(openssl rand -base64 32)
+        
+        # Create keychain
+        security create-keychain -p "$keychain_password" "$ci_keychain"
+        security set-keychain-settings "$ci_keychain"
+        security list-keychains -s "$ci_keychain" $(security list-keychains -d user | tr -d '"')
+        security unlock-keychain -p "$keychain_password" "$ci_keychain"
+        
+        # Store password for future use
+        echo "$keychain_password" > "$keychain_password_file"
+        chmod 600 "$keychain_password_file"
+        
+        log "   ✅ CI keychain created"
+    else
+        log "   Using existing CI keychain"
+        
+        # Unlock if password file exists
+        if [ -f "$keychain_password_file" ]; then
+            local keychain_password=$(cat "$keychain_password_file" 2>/dev/null || echo "")
+            if [ -n "$keychain_password" ]; then
+                security unlock-keychain -p "$keychain_password" "$ci_keychain" 2>/dev/null || true
+            fi
+        fi
+    fi
+    
+    # Store credentials (remove existing first to avoid duplicates)
+    security delete-generic-password -a "bun-ci" -s "github-username" "$ci_keychain" 2>/dev/null || true
+    security delete-generic-password -a "bun-ci" -s "github-token" "$ci_keychain" 2>/dev/null || true
+    
+    # Add new credentials
+    security add-generic-password -a "bun-ci" -s "github-username" -w "$username" "$ci_keychain"
+    security add-generic-password -a "bun-ci" -s "github-token" -w "$token" "$ci_keychain"
+    
+    log "   ✅ Credentials stored securely in CI keychain"
+    
+    # Create helper script if it doesn't exist
+    local helper_script="$HOME/.buildkite-agent/load-github-credentials.sh"
+    if [ ! -f "$helper_script" ]; then
+        cat > "$helper_script" << 'CREDENTIALS_SCRIPT_END'
+#!/bin/bash
+# Load GitHub credentials from keychain (using search all keychains method that works over SSH)
+
+GITHUB_USERNAME=$(security find-generic-password -a "bun-ci" -s "github-username" -w 2>/dev/null)
+GITHUB_TOKEN=$(security find-generic-password -a "bun-ci" -s "github-token" -w 2>/dev/null)
+
+if [ -n "$GITHUB_USERNAME" ] && [ -n "$GITHUB_TOKEN" ]; then
+    export TART_REGISTRY_USERNAME="$GITHUB_USERNAME"
+    export TART_REGISTRY_PASSWORD="$GITHUB_TOKEN"
+    export GITHUB_USERNAME="$GITHUB_USERNAME"
+    export GITHUB_TOKEN="$GITHUB_TOKEN"
+    echo "✅ GitHub credentials loaded: $GITHUB_USERNAME"
+    return 0
+else
+    echo "❌ Failed to load GitHub credentials from keychain"
+    return 1
+fi
+CREDENTIALS_SCRIPT_END
+        
+        chmod +x "$helper_script"
+        log "   ✅ Helper script created at $helper_script"
+    fi
+}
+
+# Check if local image exists and get its creation time (legacy function, kept for compatibility)
+get_local_image_info() {
+    local image_name="$1"
+    
+    log "🔍 Checking for local image: $image_name"
+    
+    # Get the full tart list output
+    local tart_output=$(tart list 2>&1)
+    
+    # Check if our specific image exists
+    if echo "$tart_output" | grep -q "^local.*${image_name}"; then
+        log "✅ Found local image: $image_name"
+        echo "exists"
+    else
+        log "❌ No local image found: $image_name"
+        echo "missing"
+    fi
+}
+
+# Get bootstrap version from the bootstrap script (single source of truth)
+get_bootstrap_version() {
+    local script_path="$1"
+    if [ ! -f "$script_path" ]; then
+        echo "4.0"  # fallback
+        return
+    fi
+    
+    # Extract version from comment like "# Version: 4.0 - description"
+    local version=$(grep -E "^# Version: " "$script_path" | sed -E 's/^# Version: ([0-9.]+).*/\1/' | head -1)
+    if [ -n "$version" ]; then
+        echo "$version"
+    else
+        echo "4.0"  # fallback
     fi
 }
 
@@ -1374,8 +1654,8 @@ main() {
             
             if [ "$corruption_detected" = true ]; then
                 log "❌ VM is corrupted and not ready for building"
-                exit 1
-            fi
+            exit 1
+        fi
             
             # Now run comprehensive dependency validation
             log "   Starting VM for comprehensive dependency validation..."
@@ -1617,7 +1897,7 @@ EOF
                 
                 if [ -n "$missing_tools" ] || [ -n "$failed_tests" ]; then
                     echo "VALIDATION_FAILED: VM not ready for building"
-                    exit 1
+            exit 1
                 else
                     echo "VALIDATION_PASSED: VM ready for production builds"
                     exit 0
@@ -1645,7 +1925,7 @@ EOF
             if [ "$validation_success" = true ]; then
                 log "✅ VM passed comprehensive validation - ready for building"
                 log "🎯 Base VM is ready for cloning: $LOCAL_IMAGE_NAME"
-                exit 0
+        exit 0
             else
                 log "❌ VM failed comprehensive validation - not ready for building"
                 log "🔧 VM exists but is missing tools or has broken dependencies"
@@ -1933,4 +2213,4 @@ ARCH="$(get_architecture)"
 # Base image to clone for new VM images
 BASE_IMAGE="${BASE_IMAGE:-ghcr.io/cirruslabs/macos-sonoma-xcode:latest}"
 
-main "$@" 
+main "$@"
