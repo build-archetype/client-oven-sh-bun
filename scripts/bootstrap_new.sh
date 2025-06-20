@@ -107,6 +107,7 @@ compare_version() {
 }
 
 create_directory() {
+	echo "create_directory $1"
 	path="$1"
 	path_dir="$path"
 	while ! [ -d "$path_dir" ]; do
