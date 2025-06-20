@@ -9,11 +9,65 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
 }
 
-# Function to get base VM image name
+# Get Bun version from package.json (same logic as build-macos-vm.sh)
+get_bun_version() {
+    local version=""
+    
+    # First try package.json - this is the authoritative source
+    if [ -f "package.json" ]; then
+        version=$(jq -r '.version // empty' package.json 2>/dev/null || true)
+    fi
+    
+    # If no package.json, try CMakeLists.txt but look for the right pattern
+    if [ -z "$version" ] && [ -f "CMakeLists.txt" ]; then
+        # Look for project(Bun VERSION ...) or similar patterns
+        version=$(grep -E "project\(.*VERSION\s+" CMakeLists.txt | sed -E 's/.*VERSION\s+([0-9]+\.[0-9]+\.[0-9]+).*/\1/' || true)
+    fi
+    
+    # Fallback to git tags
+    if [ -z "$version" ]; then
+        version=$(git describe --tags --always --dirty 2>/dev/null | sed 's/^bun-v//' | sed 's/^v//' || echo "1.2.14")
+    fi
+    
+    # Clean up version string
+    version=${version#v}
+    version=${version#bun-}
+    
+    # Validate version format
+    if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+        version="1.2.14"
+    fi
+    
+    echo "$version"
+}
+
+# Get bootstrap version from the bootstrap script (same logic as build-macos-vm.sh)
+get_bootstrap_version() {
+    local script_path="$1"
+    if [ ! -f "$script_path" ]; then
+        echo "14"  # fallback
+        return
+    fi
+    
+    # Extract version from comment like "# Version: 14 - description"
+    local version=$(grep -E "^# Version: " "$script_path" | sed -E 's/^# Version: ([0-9.]+).*/\1/' | head -1)
+    if [ -n "$version" ]; then
+        echo "$version"
+    else
+        echo "14"  # fallback
+    fi
+}
+
+# Function to get base VM image name (now dynamic!)
 get_base_vm_image() {
     local release="${1:-14}"
     local arch="arm64"  # Default to arm64 for Apple Silicon
-    echo "bun-build-macos-${release}-${arch}-1.2.16-bootstrap-14"
+    
+    # Get versions dynamically (same as build-macos-vm.sh)
+    local bun_version=$(get_bun_version)
+    local bootstrap_version=$(get_bootstrap_version "scripts/bootstrap_new.sh")
+    
+    echo "bun-build-macos-${release}-${arch}-${bun_version}-bootstrap-${bootstrap_version}"
 }
 
 # Function to cleanup VM
