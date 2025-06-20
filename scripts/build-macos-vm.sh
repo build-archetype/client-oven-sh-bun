@@ -1089,7 +1089,30 @@ EOF
     
     # Use proper Tart shutdown instead of forceful kill that was corrupting VMs
     if tart stop "$vm_name" 2>/dev/null; then
-        log "   ✅ VM stopped gracefully via tart"
+        log "   ✅ VM stop command executed successfully"
+        
+        # CRITICAL: Wait for VM to actually stop completely
+        # This prevents race condition where clone fails because VM is still shutting down
+        log "   ⏳ Waiting for VM to completely stop..."
+        local stop_wait_attempts=0
+        local max_stop_wait=30
+        
+        while [ $stop_wait_attempts -lt $max_stop_wait ]; do
+            stop_wait_attempts=$((stop_wait_attempts + 1))
+            
+            # Check if VM is actually stopped
+            if tart list | grep "$vm_name" | grep -q "running"; then
+                log "   VM still running, waiting... (attempt $stop_wait_attempts/$max_stop_wait)"
+                sleep 1
+            else
+                log "   ✅ VM fully stopped after ${stop_wait_attempts}s"
+                break
+            fi
+        done
+        
+        # Additional wait to ensure all file locks are released
+        sleep 2
+        log "   ✅ VM shutdown complete - ready for clone operations"
     else
         log "   ⚠️  Tart stop failed, but continuing..."
     fi
@@ -1949,7 +1972,30 @@ EOF
             
             # Use proper Tart shutdown instead of forceful kill that was corrupting VMs
             if tart stop "$vm_name" 2>/dev/null; then
-                log "   ✅ VM stopped gracefully via tart"
+                log "   ✅ VM stop command executed successfully"
+                
+                # CRITICAL: Wait for VM to actually stop completely
+                # This prevents race condition where clone fails because VM is still shutting down
+                log "   ⏳ Waiting for VM to completely stop..."
+                local stop_wait_attempts=0
+                local max_stop_wait=30
+                
+                while [ $stop_wait_attempts -lt $max_stop_wait ]; do
+                    stop_wait_attempts=$((stop_wait_attempts + 1))
+                    
+                    # Check if VM is actually stopped
+                    if tart list | grep "$vm_name" | grep -q "running"; then
+                        log "   VM still running, waiting... (attempt $stop_wait_attempts/$max_stop_wait)"
+                        sleep 1
+                    else
+                        log "   ✅ VM fully stopped after ${stop_wait_attempts}s"
+                        break
+                    fi
+                done
+                
+                # Additional wait to ensure all file locks are released
+                sleep 2
+                log "   ✅ VM shutdown complete - ready for clone operations"
             else
                 log "   ⚠️  Tart stop failed, but continuing..."
             fi
