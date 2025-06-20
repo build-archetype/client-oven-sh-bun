@@ -200,6 +200,9 @@ create_and_run_vm() {
     log "✅ Base image found - cloning VM"
     tart clone "$base_vm_image" "$vm_name"
     
+    log "Setting VM resources..."
+    tart set "$vm_name" --cpu=6 --memory=16384
+    
     log "Starting VM with workspace: $workspace_dir"
     tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" > vm.log 2>&1 &
     
