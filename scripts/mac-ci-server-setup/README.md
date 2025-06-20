@@ -34,7 +34,7 @@ The image building process uses SSH automation to run bootstrap scripts inside V
 - **Base image**: Uses `ghcr.io/cirruslabs/macos-sequoia-base:latest` which has SSH enabled
 - **Credentials**: Default `admin/admin` account for SSH access
 - **Shared directory**: Mounts current workspace as `/Volumes/My Shared Files/workspace`
-- **Bootstrap execution**: Runs `./scripts/bootstrap-macos.sh` via SSH inside the VM
+- **Bootstrap execution**: Runs `./scripts/bootstrap_new.sh` via SSH inside the VM
 
 ### Build Process Flow
 

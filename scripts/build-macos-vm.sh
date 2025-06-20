@@ -1138,7 +1138,7 @@ main() {
     log "Detected Bun version: $BUN_VERSION"
     
     # Bootstrap script version - increment this when bootstrap changes to force new images
-    BOOTSTRAP_VERSION=$(get_bootstrap_version scripts/bootstrap-macos.sh)
+    BOOTSTRAP_VERSION=$(get_bootstrap_version scripts/bootstrap_new.sh)
     log "Detected Bootstrap version: $BOOTSTRAP_VERSION"
     
     # Image names (include release and bootstrap version to force rebuilds when bootstrap changes)
@@ -1211,7 +1211,7 @@ main() {
     
     # Pass the version to bootstrap script
     log "Making bootstrap script executable..."
-    chmod +x scripts/bootstrap-macos.sh
+    chmod +x scripts/bootstrap_new.sh
     
     # Start VM with shared directory
     log "Starting VM: $LOCAL_IMAGE_NAME"
@@ -1263,7 +1263,7 @@ main() {
             '
             
             # Run the bootstrap script
-            if sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "cd '/Volumes/My Shared Files/workspace' && ./scripts/bootstrap-macos.sh"; then
+            if sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "cd '/Volumes/My Shared Files/workspace' && ./scripts/bootstrap_new.sh"; then
                 log "✅ Bootstrap completed successfully!"
                 SSH_SUCCESS=true
                 break

@@ -45,7 +45,7 @@ export const IMAGE_CONFIG = {
     tag: "latest",
     get versionedName() {
       const version = getBunVersion();
-      const bootstrapVersion = getBootstrapVersion("darwin"); // Single source of truth from bootstrap-macos.sh
+      const bootstrapVersion = getBootstrapVersion("darwin"); // Single source of truth from bootstrap_new.sh
       return `bun-build-macos-${version}-bootstrap-${bootstrapVersion}`;
     },
     get fullName() {

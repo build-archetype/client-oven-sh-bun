@@ -14,29 +14,30 @@ log() {
 # Function to get base VM image name for a specific macOS release
 get_base_vm_image() {
     local release="${1:-14}"
-    local arch="${2:-arm64}"  # Default to arm64 for Apple Silicon
-    local bun_version="${3:-1.2.16}"
+    local bun_version="${2:-1.2.16}"
     # Auto-detect bootstrap version from script (single source of truth)
-    local bootstrap_version="${4:-$(get_bootstrap_version)}"
-    echo "bun-build-macos-${release}-${arch}-${bun_version}-bootstrap-${bootstrap_version}"
+    local bootstrap_version="${3:-$(get_bootstrap_version)}"
+    echo "bun-build-macos-${release}-${bun_version}-bootstrap-${bootstrap_version}"
 }
 
 # Get bootstrap version from the bootstrap script (single source of truth)
 get_bootstrap_version() {
-    local script_path="scripts/bootstrap_new.sh"  # Updated to use bootstrap_new.sh
+    local script_path="scripts/bootstrap_new.sh"
     if [ ! -f "$script_path" ]; then
-        echo "14"  # Updated fallback from 4.0 to 14
+        echo "4.0"  # fallback
         return
     fi
     
-    # Extract version from comment like "# Version: 14 - description"
+    # Extract version from comment like "# Version: 4.0 - description"
     local version=$(grep -E "^# Version: " "$script_path" | sed -E 's/^# Version: ([0-9.]+).*/\1/' | head -1)
     if [ -n "$version" ]; then
         echo "$version"
     else
-        echo "14"  # Updated fallback from 4.0 to 14
+        echo "4.0"  # fallback
     fi
-} # SSH options for VM connectivity
+}
+
+# SSH options for VM connectivity
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
 
 # Function to ensure VM image is available (lightweight registry check)
@@ -229,7 +230,7 @@ create_and_run_vm() {
         base_vm_image="$BASE_VM_IMAGE"
         log "Using explicit base VM image: $base_vm_image"
     else
-        base_vm_image=$(get_base_vm_image "$release" "arm64")
+        base_vm_image=$(get_base_vm_image "$release")
         log "Using release-specific base VM image: $base_vm_image"
     fi
 
