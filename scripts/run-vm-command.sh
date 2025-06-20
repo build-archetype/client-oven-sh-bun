@@ -12,40 +12,6 @@ fi
 VM_NAME="$1"
 COMMAND="${2:-echo 'VM is ready'}"
 
-# Check for required dependencies and install if needed
-if ! command -v sshpass >/dev/null 2>&1; then
-    echo "🔧 sshpass is required but not found - installing automatically..."
-    
-    # Try to use Homebrew to install sshpass
-    if command -v brew >/dev/null 2>&1; then
-        echo "   Installing sshpass via Homebrew..."
-        if brew install sshpass; then
-            echo "✅ sshpass installed successfully"
-        else
-            echo "❌ Failed to install sshpass via Homebrew"
-            echo "   Please install sshpass manually:"
-            echo "   brew install sshpass"
-            exit 1
-        fi
-    else
-        echo "❌ Homebrew not found - cannot auto-install sshpass"
-        echo "   Please install sshpass manually:"
-        echo "   1. Install Homebrew: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
-        echo "   2. Install sshpass: brew install sshpass"
-        echo "   Current PATH: $PATH"
-        exit 1
-    fi
-    
-    # Verify installation worked
-    if ! command -v sshpass >/dev/null 2>&1; then
-        echo "❌ sshpass installation failed - still not available"
-        echo "   Please check your Homebrew installation and PATH"
-        exit 1
-    fi
-else
-    echo "✅ sshpass is available"
-fi
-
 # SSH options for reliability - comprehensive host key bypass
 SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ServerAliveInterval=5 -o ServerAliveCountMax=3"
 
