@@ -76,7 +76,8 @@ fix_tart_permissions() {
     # Handle undefined HOME variable - common when running as root in CI
     local home_dir="${HOME:-/var/root}"
     local tart_dir="$home_dir/.tart"
-    local real_user="${SUDO_USER:-$USER}"
+    # Handle undefined USER and SUDO_USER - common when running as root in CI
+    local real_user="${SUDO_USER:-${USER:-root}}"
     
     log "Fixing Tart permissions..."
     log "Home directory: $home_dir"
