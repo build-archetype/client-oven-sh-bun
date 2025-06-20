@@ -27,6 +27,109 @@ get_disk_usage() {
     df -h . | tail -1 | awk '{print $5}' | sed 's/%//'
 }
 
+
+# Function to extract bootstrap version from bootstrap-macos.sh
+get_bootstrap_version() {
+    local bootstrap_file="${1:-scripts/bootstrap-macos.sh}"
+    if [ -f "$bootstrap_file" ]; then
+        # Extract version from comment line: # Version: 3.6 - Description
+        grep -m1 "^# Version:" "$bootstrap_file" | sed 's/^# Version: *\([0-9.]*\).*/\1/'
+    else
+        echo "3.6"  # fallback
+    fi
+}
+
+# Function to clean up temporary VMs before creating new ones
+cleanup_temporary_vms() {
+    log "🧹 ===== CLEANING UP TEMPORARY VMS ====="
+    
+    local current_bootstrap_version=$(get_bootstrap_version)
+    local cleaned_count=0
+    local space_freed=0
+    
+    log "Current bootstrap version detected: $current_bootstrap_version"
+    
+    # Get list of all local VMs
+    local tart_output=$(tart list 2>/dev/null || echo "")
+    
+    if [ -z "$tart_output" ]; then
+        log "No VMs found or tart command failed"
+        return 0
+    fi
+    
+    # Clean up temporary build VMs (UUID-named)
+    log "🗑️  Removing temporary build VMs..."
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+[0-9]+[[:space:]]+([0-9]+)[[:space:]]+[0-9]+[[:space:]]+stopped ]]; then
+            local vm_name="${BASH_REMATCH[1]}"
+            local size_gb="${BASH_REMATCH[2]}"
+            
+            # Match temporary build VMs: bun-build-{timestamp}-{UUID}
+            if [[ "$vm_name" =~ ^bun-build-[0-9]+-[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$ ]]; then
+                log "    Deleting temporary VM: $vm_name (${size_gb}GB)"
+                if tart delete "$vm_name" 2>/dev/null; then
+                    log "    ✅ Deleted successfully"
+                    cleaned_count=$((cleaned_count + 1))
+                    space_freed=$((space_freed + size_gb))
+                else
+                    log "    ⚠️  Failed to delete"
+                fi
+            fi
+        fi
+    done <<< "$tart_output"
+    
+    # Clean up outdated base images (old bootstrap versions)
+    log "🗑️  Removing outdated base images..."
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+[0-9]+[[:space:]]+([0-9]+)[[:space:]]+[0-9]+[[:space:]]+stopped ]]; then
+            local vm_name="${BASH_REMATCH[1]}"
+            local size_gb="${BASH_REMATCH[2]}"
+            
+            # Match base images with bootstrap versions
+            if [[ "$vm_name" =~ ^bun-build-macos-[0-9]+-.*-bootstrap-(.+)$ ]]; then
+                local bootstrap_version="${BASH_REMATCH[1]}"
+                
+                # Only delete if bootstrap version is NOT current
+                if [[ "$bootstrap_version" != "$current_bootstrap_version" ]]; then
+                    log "    Deleting outdated base image: $vm_name (bootstrap-${bootstrap_version} != current-${current_bootstrap_version}) (${size_gb}GB)"
+                    if tart delete "$vm_name" 2>/dev/null; then
+                        log "    ✅ Deleted successfully"
+                        cleaned_count=$((cleaned_count + 1))
+                        space_freed=$((space_freed + size_gb))
+                    else
+                        log "    ⚠️  Failed to delete"
+                    fi
+                fi
+            fi
+        fi
+    done <<< "$tart_output"
+    
+    # Clean up redundant arch-specific images (keep only generic ones)
+    log "🗑️  Removing redundant architecture-specific images..."
+    while IFS= read -r line; do
+        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+[0-9]+[[:space:]]+([0-9]+)[[:space:]]+[0-9]+[[:space:]]+stopped ]]; then
+            local vm_name="${BASH_REMATCH[1]}"
+            local size_gb="${BASH_REMATCH[2]}"
+            
+            # Match arch-specific images: bun-build-macos-{release}-{arch}-{version}-bootstrap-{bootstrap}
+            if [[ "$vm_name" =~ ^bun-build-macos-[0-9]+-arm64-.*-bootstrap-.*$ ]] || 
+               [[ "$vm_name" =~ ^bun-build-macos-[0-9]+-x64-.*-bootstrap-.*$ ]]; then
+                log "    Deleting redundant arch-specific image: $vm_name (${size_gb}GB)"
+                log "    (Generic images work for all architectures)"
+                if tart delete "$vm_name" 2>/dev/null; then
+                    log "    ✅ Deleted successfully"
+                    cleaned_count=$((cleaned_count + 1))
+                    space_freed=$((space_freed + size_gb))
+                else
+                    log "    ⚠️  Failed to delete"
+                fi
+            fi
+        fi
+    done <<< "$tart_output"
+    
+    log "✅ Cleanup complete: Removed $cleaned_count VMs, freed ${space_freed}GB"
+    log "=== END CLEANUP ==="
+}
 # Function to start logging
 start_logging() {
     log "Starting Tart logging..."
@@ -66,7 +169,9 @@ create_and_run_vm() {
         log "    If needed, run cleanup manually: ./scripts/build-macos-vm.sh (includes cleanup)"
     fi
 
-    # BUILD PHASES DO NO CLEANUP - this is handled in VM preparation step
+
+    # Clean up temporary VMs before creating new ones
+    cleanup_temporary_vms    # BUILD PHASES DO NO CLEANUP - this is handled in VM preparation step
     # We assume base images exist and temporary VMs are managed by preparation step
 
     # Start logging
