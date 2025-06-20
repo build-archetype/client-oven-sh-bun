@@ -989,7 +989,7 @@ function getOptionsApplyStep() {
     command: `${command} --apply`,
     depends_on: ["options"],
     agents: {
-      queue: getEnv("BUILDKITE_AGENT_META_DATA_QUEUE", false),
+      queue: "darwin",
     },
   };
 }
