@@ -73,10 +73,13 @@ log "======================="
 # This is a workaround for a bug in Tart where the .tart directory is not owned by the user running the script.
 # This can be removed once we are confident that tart permissions are working correctly.
 fix_tart_permissions() {
-    local tart_dir="$HOME/.tart"
+    # Handle undefined HOME variable - common when running as root in CI
+    local home_dir="${HOME:-/var/root}"
+    local tart_dir="$home_dir/.tart"
     local real_user="${SUDO_USER:-$USER}"
     
     log "Fixing Tart permissions..."
+    log "Home directory: $home_dir"
     log "Tart directory: $tart_dir"
     log "Target user: $real_user"
     
