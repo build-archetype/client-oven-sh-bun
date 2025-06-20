@@ -1219,6 +1219,14 @@ sudo systemsetup -setharddisksleep Never
 sudo pmset -a sleep 0
 sudo pmset -a disablesleep 1
 
+# --- Configure automatic restart after power failure ---
+echo_color "$BLUE" "Configuring automatic restart after power failure..."
+echo_color "$BLUE" "  • Enabling automatic restart after power outages"
+echo_color "$BLUE" "  • Setting 30-second delay to allow power stabilization"
+sudo systemsetup -setrestartpowerfailure on
+sudo systemsetup -setWaitForStartupAfterPowerFailure 30
+echo_color "$GREEN" "✅ Power failure recovery configured - system will automatically restart after outages"
+
 # --- Configure SSH ---
 echo_color "$BLUE" "Configuring SSH access..."
 FDA_CHECK_OUTPUT=$(sudo systemsetup -getremotelogin 2>&1)
