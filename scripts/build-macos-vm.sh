@@ -157,11 +157,12 @@ cleanup_old_images() {
         if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+) ]]; then
             local image_name="${BASH_REMATCH[1]}"
             
-            # Only consider bun-build-macos images
-            if [[ "$image_name" =~ ^bun-build-macos-([0-9]+)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
+            # Only consider bun-build-macos images with architecture
+            if [[ "$image_name" =~ ^bun-build-macos-([0-9]+)-(arm64|x64)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
                 local macos_ver="${BASH_REMATCH[1]}"
-                local bun_ver="${BASH_REMATCH[2]}"
-                local bootstrap_ver="${BASH_REMATCH[3]}"
+                local arch="${BASH_REMATCH[2]}"
+                local bun_ver="${BASH_REMATCH[3]}"
+                local bootstrap_ver="${BASH_REMATCH[4]}"
                 
                 all_bun_images+=("$image_name")
                 log "  Found: $image_name (macOS: $macos_ver, Bun: $bun_ver, Bootstrap: $bootstrap_ver)"
@@ -368,11 +369,11 @@ parse_image_name() {
     local bootstrap_version=""
     
     # Extract Bun version and bootstrap version from image name
-    # Format: bun-build-macos-[MACOS_RELEASE]-[BUN_VERSION]-bootstrap-[BOOTSTRAP_VERSION]
-    # Example: bun-build-macos-13-1.2.16-bootstrap-4.1
-    if [[ "$image_name" =~ bun-build-macos-([0-9]+)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
-        bun_version="${BASH_REMATCH[2]}"      # Second capture group is Bun version
-        bootstrap_version="${BASH_REMATCH[3]}" # Third capture group is Bootstrap version
+    # Format: bun-build-macos-[MACOS_RELEASE]-[ARCH]-[BUN_VERSION]-bootstrap-[BOOTSTRAP_VERSION]
+    # Example: bun-build-macos-13-arm64-1.2.16-bootstrap-4.1
+    if [[ "$image_name" =~ bun-build-macos-([0-9]+)-(arm64|x64)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
+        bun_version="${BASH_REMATCH[3]}"      # Third capture group is Bun version
+        bootstrap_version="${BASH_REMATCH[4]}" # Fourth capture group is Bootstrap version
     fi
     
     echo "$bun_version|$bootstrap_version"
@@ -402,8 +403,8 @@ check_local_image_version() {
         if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+) ]]; then
             local image_name="${BASH_REMATCH[1]}"
             
-            # Only consider bun-build-macos images
-            if [[ "$image_name" =~ ^bun-build-macos- ]]; then
+            # Only consider bun-build-macos images with architecture
+            if [[ "$image_name" =~ ^bun-build-macos-([0-9]+)-(arm64|x64)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
                 all_bun_images+=("$image_name")
                 
                 # Parse version info
@@ -907,6 +908,16 @@ get_bootstrap_version() {
     fi
 }
 
+# Validate image name format: bun-build-macos-{MACOS_RELEASE}-{ARCH}-{BUN_VERSION}-bootstrap-{BOOTSTRAP_VERSION}
+validate_image_name() {
+    local image_name="$1"
+    if [[ "$image_name" =~ ^bun-build-macos-([0-9]+)-(arm64|x64)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+)$ ]]; then
+        echo "valid"
+    else
+        echo "invalid"
+    fi
+}
+
 # Main execution
 main() {
     # Parse arguments
@@ -1084,13 +1095,14 @@ main() {
     log "Detected Bun version: $BUN_VERSION"
     
     # Bootstrap script version - increment this when bootstrap changes to force new images
-    BOOTSTRAP_VERSION=$(get_bootstrap_version scripts/bootstrap-macos.sh)
+    BOOTSTRAP_VERSION=$(get_bootstrap_version scripts/bootstrap_new.sh)
     log "Detected Bootstrap version: $BOOTSTRAP_VERSION"
     
-    # Image names (include release and bootstrap version to force rebuilds when bootstrap changes)
-    LOCAL_IMAGE_NAME="bun-build-macos-${MACOS_RELEASE}-${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
-    REMOTE_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}:${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
-    LATEST_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}:latest"
+    # Build the image name with architecture
+    BASE_IMAGE_NAME="bun-build-macos-${MACOS_RELEASE}"
+    LOCAL_IMAGE_NAME="${BASE_IMAGE_NAME}-${ARCH}-${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
+    REMOTE_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}-${ARCH}:${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
+    LATEST_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}-${ARCH}:latest"
     
     log "Configuration:"
     log "  macOS Release: $MACOS_RELEASE"
@@ -1150,7 +1162,7 @@ main() {
     
     # Pass the version to bootstrap script
     log "Making bootstrap script executable..."
-    chmod +x scripts/bootstrap-macos.sh
+    chmod +x scripts/bootstrap_new.sh
     
     # Start VM with shared directory
     log "Starting VM: $LOCAL_IMAGE_NAME"
@@ -1202,7 +1214,7 @@ main() {
             '
             
             # Run the bootstrap script
-            if sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "cd '/Volumes/My Shared Files/workspace' && ./scripts/bootstrap-macos.sh"; then
+            if sshpass -p "admin" ssh $SSH_OPTS admin@"$VM_IP" "cd '/Volumes/My Shared Files/workspace' && ./scripts/bootstrap_new.sh"; then
                 log "✅ Bootstrap completed successfully!"
                 SSH_SUCCESS=true
                 break

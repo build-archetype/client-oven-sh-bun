@@ -266,30 +266,30 @@ if [ "$goto_privileged_setup" = false ]; then
   security create-keychain -p "$CI_KEYCHAIN_PASSWORD" "$CI_KEYCHAIN"
   # Add to keychain search list
   security list-keychains -d user -s "$CI_KEYCHAIN" $(security list-keychains -d user | sed s/\"//g)
-  # Set keychain to not lock automatically and not require password for access
+  # Set keychain to not lock automatically and not require password for access (no flags = no timeout, no locking)
   security set-keychain-settings "$CI_KEYCHAIN"
   # Unlock the keychain (it will stay unlocked due to settings above)
   security unlock-keychain -p "$CI_KEYCHAIN_PASSWORD" "$CI_KEYCHAIN"
 
-  # Store GitHub credentials in the CI keychain
+  # Store GitHub credentials in the CI keychain (keychain path at end - this is the key!)
   echo_color "$BLUE" "Storing GitHub credentials in secure keychain..."
-  security add-generic-password -a "bun-ci" -s "github-username" -w "$GITHUB_USERNAME" -k "$CI_KEYCHAIN"
-  security add-generic-password -a "bun-ci" -s "github-token" -w "$GITHUB_TOKEN" -k "$CI_KEYCHAIN"
+  security add-generic-password -a "bun-ci" -s "github-username" -w "$GITHUB_USERNAME" "$CI_KEYCHAIN"
+  security add-generic-password -a "bun-ci" -s "github-token" -w "$GITHUB_TOKEN" "$CI_KEYCHAIN"
 
   # Store monitoring credentials in the CI keychain (if enabled)
   if [ "$MONITORING_ENABLED" = true ]; then
     echo_color "$BLUE" "Storing monitoring credentials in secure keychain..."
     case "$MONITORING_TYPE" in
       grafana-cloud)
-        security add-generic-password -a "bun-ci" -s "grafana-cloud-user" -w "$GRAFANA_CLOUD_USER" -k "$CI_KEYCHAIN"
-        security add-generic-password -a "bun-ci" -s "grafana-cloud-api-key" -w "$GRAFANA_CLOUD_API_KEY" -k "$CI_KEYCHAIN"
-        security add-generic-password -a "bun-ci" -s "grafana-cloud-prometheus-url" -w "$GRAFANA_CLOUD_PROMETHEUS_URL" -k "$CI_KEYCHAIN"
-        security add-generic-password -a "bun-ci" -s "grafana-cloud-loki-url" -w "$GRAFANA_CLOUD_LOKI_URL" -k "$CI_KEYCHAIN"
+        security add-generic-password -a "bun-ci" -s "grafana-cloud-user" -w "$GRAFANA_CLOUD_USER" "$CI_KEYCHAIN"
+        security add-generic-password -a "bun-ci" -s "grafana-cloud-api-key" -w "$GRAFANA_CLOUD_API_KEY" "$CI_KEYCHAIN"
+        security add-generic-password -a "bun-ci" -s "grafana-cloud-prometheus-url" -w "$GRAFANA_CLOUD_PROMETHEUS_URL" "$CI_KEYCHAIN"
+        security add-generic-password -a "bun-ci" -s "grafana-cloud-loki-url" -w "$GRAFANA_CLOUD_LOKI_URL" "$CI_KEYCHAIN"
         ;;
       self-hosted)
-        security add-generic-password -a "bun-ci" -s "prometheus-url" -w "$PROMETHEUS_URL" -k "$CI_KEYCHAIN"
-        security add-generic-password -a "bun-ci" -s "loki-url" -w "$LOKI_URL" -k "$CI_KEYCHAIN"
-        security add-generic-password -a "bun-ci" -s "grafana-url" -w "$GRAFANA_URL" -k "$CI_KEYCHAIN"
+        security add-generic-password -a "bun-ci" -s "prometheus-url" -w "$PROMETHEUS_URL" "$CI_KEYCHAIN"
+        security add-generic-password -a "bun-ci" -s "loki-url" -w "$LOKI_URL" "$CI_KEYCHAIN"
+        security add-generic-password -a "bun-ci" -s "grafana-url" -w "$GRAFANA_URL" "$CI_KEYCHAIN"
         ;;
     esac
   fi
@@ -301,6 +301,31 @@ if [ "$goto_privileged_setup" = false ]; then
 
   # Set ownership of keychain
   chown "$REAL_USER:staff" "$CI_KEYCHAIN"
+
+  # Create helper script for loading GitHub credentials
+  echo_color "$BLUE" "Creating GitHub credentials helper script..."
+  cat > "$REAL_HOME/.buildkite-agent/load-github-credentials.sh" << 'CREDENTIALS_SCRIPT_END'
+#!/bin/bash
+# Load GitHub credentials from keychain (using search all keychains method that works over SSH)
+
+GITHUB_USERNAME=$(security find-generic-password -a "bun-ci" -s "github-username" -w 2>/dev/null)
+GITHUB_TOKEN=$(security find-generic-password -a "bun-ci" -s "github-token" -w 2>/dev/null)
+
+if [ -n "$GITHUB_USERNAME" ] && [ -n "$GITHUB_TOKEN" ]; then
+    export TART_REGISTRY_USERNAME="$GITHUB_USERNAME"
+    export TART_REGISTRY_PASSWORD="$GITHUB_TOKEN"
+    export GITHUB_USERNAME="$GITHUB_USERNAME"
+    export GITHUB_TOKEN="$GITHUB_TOKEN"
+    echo "✅ GitHub credentials loaded: $GITHUB_USERNAME"
+    return 0
+else
+    echo "❌ Failed to load GitHub credentials from keychain"
+    return 1
+fi
+CREDENTIALS_SCRIPT_END
+
+  chmod +x "$REAL_HOME/.buildkite-agent/load-github-credentials.sh"
+  chown "$REAL_USER:staff" "$REAL_HOME/.buildkite-agent/load-github-credentials.sh"
 
   echo_color "$GREEN" "✅ Credentials stored securely in CI keychain"
 
@@ -812,10 +837,10 @@ if [ "${MONITORING_ENABLED:-false}" = true ]; then
   case "${MONITORING_TYPE:-grafana-cloud}" in
     grafana-cloud)
       # Load Grafana Cloud credentials
-      GRAFANA_CLOUD_USER=$(security find-generic-password -a "bun-ci" -s "grafana-cloud-user" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "")
-      GRAFANA_CLOUD_API_KEY=$(security find-generic-password -a "bun-ci" -s "grafana-cloud-api-key" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "")
-      GRAFANA_CLOUD_PROMETHEUS_URL=$(security find-generic-password -a "bun-ci" -s "grafana-cloud-prometheus-url" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "")
-      GRAFANA_CLOUD_LOKI_URL=$(security find-generic-password -a "bun-ci" -s "grafana-cloud-loki-url" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "")
+      GRAFANA_CLOUD_USER=$(security find-generic-password -a "bun-ci" -s "grafana-cloud-user" -w 2>/dev/null || echo "")
+      GRAFANA_CLOUD_API_KEY=$(security find-generic-password -a "bun-ci" -s "grafana-cloud-api-key" -w 2>/dev/null || echo "")
+      GRAFANA_CLOUD_PROMETHEUS_URL=$(security find-generic-password -a "bun-ci" -s "grafana-cloud-prometheus-url" -w 2>/dev/null || echo "")
+      GRAFANA_CLOUD_LOKI_URL=$(security find-generic-password -a "bun-ci" -s "grafana-cloud-loki-url" -w 2>/dev/null || echo "")
       
       cat > "$REAL_HOME/.alloy/config.alloy" << EOF
 // Grafana Alloy configuration for Bun CI monitoring
@@ -1070,8 +1095,8 @@ EOF
       
     self-hosted)
       # Load self-hosted credentials
-      PROMETHEUS_URL=$(security find-generic-password -a "bun-ci" -s "prometheus-url" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "http://localhost:9090")
-      LOKI_URL=$(security find-generic-password -a "bun-ci" -s "loki-url" -w -k "$CI_KEYCHAIN" 2>/dev/null || echo "http://localhost:3100")
+      PROMETHEUS_URL=$(security find-generic-password -a "bun-ci" -s "prometheus-url" -w 2>/dev/null || echo "http://localhost:9090")
+      LOKI_URL=$(security find-generic-password -a "bun-ci" -s "loki-url" -w 2>/dev/null || echo "http://localhost:3100")
       
       cat > "$REAL_HOME/.alloy/config.alloy" << EOF
 // Grafana Alloy configuration for self-hosted monitoring
@@ -1194,6 +1219,14 @@ sudo systemsetup -setharddisksleep Never
 sudo pmset -a sleep 0
 sudo pmset -a disablesleep 1
 
+# --- Configure automatic restart after power failure ---
+echo_color "$BLUE" "Configuring automatic restart after power failure..."
+echo_color "$BLUE" "  • Enabling automatic restart after power outages"
+echo_color "$BLUE" "  • Setting 30-second delay to allow power stabilization"
+sudo systemsetup -setrestartpowerfailure on
+sudo systemsetup -setWaitForStartupAfterPowerFailure 30
+echo_color "$GREEN" "✅ Power failure recovery configured - system will automatically restart after outages"
+
 # --- Configure SSH ---
 echo_color "$BLUE" "Configuring SSH access..."
 FDA_CHECK_OUTPUT=$(sudo systemsetup -getremotelogin 2>&1)
@@ -1278,14 +1311,16 @@ load_github_credentials() {
         security unlock-keychain -p "$keychain_password" "$ci_keychain" 2>/dev/null || true
     fi
     
-    # Load credentials
-    local username=$(security find-generic-password -a "bun-ci" -s "github-username" -w -k "$ci_keychain" 2>/dev/null || echo "")
-    local token=$(security find-generic-password -a "bun-ci" -s "github-token" -w -k "$ci_keychain" 2>/dev/null || echo "")
+    # Load credentials using search all keychains method (works over SSH)
+    local username=$(security find-generic-password -a "bun-ci" -s "github-username" -w 2>/dev/null || echo "")
+    local token=$(security find-generic-password -a "bun-ci" -s "github-token" -w 2>/dev/null || echo "")
     
     if [ -n "$username" ] && [ -n "$token" ]; then
         export GITHUB_USERNAME="$username"
         export GITHUB_TOKEN="$token"
-        echo "✅ GitHub credentials loaded from keychain"
+        export TART_REGISTRY_USERNAME="$username"
+        export TART_REGISTRY_PASSWORD="$token"
+        echo "✅ GitHub credentials loaded from keychain: $username"
         return 0
     else
         echo "⚠️  Failed to load GitHub credentials from keychain"

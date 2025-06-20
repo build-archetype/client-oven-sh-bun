@@ -14,15 +14,16 @@ log() {
 # Function to get base VM image name for a specific macOS release
 get_base_vm_image() {
     local release="${1:-14}"
-    local bun_version="${2:-1.2.16}"
+    local arch="${2:-arm64}"  # Add architecture parameter
+    local bun_version="${3:-1.2.16}"
     # Auto-detect bootstrap version from script (single source of truth)
-    local bootstrap_version="${3:-$(get_bootstrap_version)}"
-    echo "bun-build-macos-${release}-${bun_version}-bootstrap-${bootstrap_version}"
+    local bootstrap_version="${4:-$(get_bootstrap_version)}"
+    echo "bun-build-macos-${release}-${arch}-${bun_version}-bootstrap-${bootstrap_version}"
 }
 
 # Get bootstrap version from the bootstrap script (single source of truth)
 get_bootstrap_version() {
-    local script_path="scripts/bootstrap-macos.sh"
+    local script_path="scripts/bootstrap_new.sh"
     if [ ! -f "$script_path" ]; then
         echo "4.0"  # fallback
         return
@@ -44,6 +45,7 @@ SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalK
 ensure_vm_image_available() {
     local base_vm_image="$1"
     local release="$2"
+    local arch="$(uname -m | sed 's/x86_64/x64/; s/arm64/arm64/')"  # Detect architecture
     
     # Check if base image exists locally
     if tart list | grep -q "^local.*$base_vm_image"; then
@@ -54,15 +56,16 @@ ensure_vm_image_available() {
     log "🔍 Base image '$base_vm_image' not found locally"
     
     # Try to pull from registry (registry-first approach for distributed CI)
-    # Extract version info from image name: bun-build-macos-13-1.2.16-bootstrap-4.1
-    if [[ "$base_vm_image" =~ bun-build-macos-([0-9]+)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
+    # Extract version info from image name: bun-build-macos-13-arm64-1.2.16-bootstrap-4.1
+    if [[ "$base_vm_image" =~ bun-build-macos-([0-9]+)-(arm64|x64)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
         local macos_release="${BASH_REMATCH[1]}"
-        local bun_version="${BASH_REMATCH[2]}"
-        local bootstrap_version="${BASH_REMATCH[3]}"
-        local registry_url="ghcr.io/build-archetype/client-oven-sh-bun/bun-build-macos-${macos_release}:${bun_version}-bootstrap-${bootstrap_version}"
+        local arch="${BASH_REMATCH[2]}"
+        local bun_version="${BASH_REMATCH[3]}"
+        local bootstrap_version="${BASH_REMATCH[4]}"
+        local registry_url="ghcr.io/build-archetype/client-oven-sh-bun/bun-build-macos-${macos_release}-${arch}:${bun_version}-bootstrap-${bootstrap_version}"
     else
         # Fallback to latest if we can't parse the version
-        local registry_url="ghcr.io/build-archetype/client-oven-sh-bun/bun-build-macos-${release}:latest"
+        local registry_url="ghcr.io/build-archetype/client-oven-sh-bun/bun-build-macos-${release}-${arch}:latest"
     fi
     
     log "📥 Attempting to pull from registry: $registry_url"
@@ -203,12 +206,13 @@ create_and_run_vm() {
     VM_NAME_FOR_CLEANUP="$vm_name"
 
     # Determine the correct base VM image for this release
+    local arch="$(uname -m | sed 's/x86_64/x64/; s/arm64/arm64/')"  # Detect architecture
     local base_vm_image
     if [ -n "$BASE_VM_IMAGE" ]; then
         base_vm_image="$BASE_VM_IMAGE"
         log "Using explicit base VM image: $base_vm_image"
     else
-        base_vm_image=$(get_base_vm_image "$release")
+        base_vm_image=$(get_base_vm_image "$release" "$arch")
         log "Using release-specific base VM image: $base_vm_image"
     fi
 
