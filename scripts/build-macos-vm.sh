@@ -158,7 +158,7 @@ cleanup_old_images() {
             local image_name="${BASH_REMATCH[1]}"
             
             # Only consider bun-build-macos images with architecture
-            if [[ "$image_name" =~ ^bun-build-macos-([0-9]+)-(arm64|x64)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
+            if [[ "$image_name" =~ ^bun-build-macos-([0-9]+)-(arm64|x64)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+(\.[0-9]+)?)$ ]]; then
                 local macos_ver="${BASH_REMATCH[1]}"
                 local arch="${BASH_REMATCH[2]}"
                 local bun_ver="${BASH_REMATCH[3]}"
@@ -371,7 +371,7 @@ parse_image_name() {
     # Extract Bun version and bootstrap version from image name
     # Format: bun-build-macos-[MACOS_RELEASE]-[ARCH]-[BUN_VERSION]-bootstrap-[BOOTSTRAP_VERSION]
     # Example: bun-build-macos-13-arm64-1.2.16-bootstrap-4.1
-    if [[ "$image_name" =~ bun-build-macos-([0-9]+)-(arm64|x64)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
+    if [[ "$image_name" =~ bun-build-macos-([0-9]+)-(arm64|x64)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+(\.[0-9]+)?)$ ]]; then
         bun_version="${BASH_REMATCH[3]}"      # Third capture group is Bun version
         bootstrap_version="${BASH_REMATCH[4]}" # Fourth capture group is Bootstrap version
     fi
@@ -404,7 +404,7 @@ check_local_image_version() {
             local image_name="${BASH_REMATCH[1]}"
             
             # Only consider bun-build-macos images with architecture
-            if [[ "$image_name" =~ ^bun-build-macos-([0-9]+)-(arm64|x64)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+) ]]; then
+            if [[ "$image_name" =~ ^bun-build-macos-([0-9]+)-(arm64|x64)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+(\.[0-9]+)?)$ ]]; then
                 all_bun_images+=("$image_name")
                 
                 # Parse version info
@@ -895,7 +895,7 @@ get_local_image_info() {
 get_bootstrap_version() {
     local script_path="$1"
     if [ ! -f "$script_path" ]; then
-        echo "0"
+        echo "14"  # Updated fallback to match current bootstrap version
         return
     fi
     
@@ -904,14 +904,14 @@ get_bootstrap_version() {
     if [ -n "$version" ]; then
         echo "$version"
     else
-        echo "0"
+        echo "14"  # Updated fallback to match current bootstrap version
     fi
 }
 
 # Validate image name format: bun-build-macos-{MACOS_RELEASE}-{ARCH}-{BUN_VERSION}-bootstrap-{BOOTSTRAP_VERSION}
 validate_image_name() {
     local image_name="$1"
-    if [[ "$image_name" =~ ^bun-build-macos-([0-9]+)-(arm64|x64)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+\.[0-9]+)$ ]]; then
+    if [[ "$image_name" =~ ^bun-build-macos-([0-9]+)-(arm64|x64)-([0-9]+\.[0-9]+\.[0-9]+)-bootstrap-([0-9]+(\.[0-9]+)?)$ ]]; then
         echo "valid"
     else
         echo "invalid"
@@ -920,6 +920,16 @@ validate_image_name() {
 
 # Main execution
 main() {
+    # Detect architecture early
+    ARCH="$(uname -m | sed 's/x86_64/x64/; s/arm64/arm64/')"
+    log "Detected architecture: $ARCH"
+    
+    # Show current VM state for debugging
+    log "=== CURRENT VM STATE ==="
+    log "Available VM images:"
+    tart list || log "Failed to list VMs"
+    log "========================="
+    
     # Parse arguments
     local force_refresh=false
     local cleanup_only=false
