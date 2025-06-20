@@ -2080,7 +2080,8 @@ EOF
         log "   Will build directly from OCI base image: $BASE_IMAGE"
     else
         log "🌐 Checking remote registry..."
-        # Use error handling to gracefully fall back to local build if registry fails
+        
+        # First try exact match
         set +e  # Temporarily disable exit on error
         if check_remote_image "$REMOTE_IMAGE_URL" "$force_remote_refresh"; then
             set -e  # Re-enable exit on error
@@ -2088,7 +2089,6 @@ EOF
             tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
             
             # SAFETY: Ensure we're in a valid directory before tart clone operations
-            # Fix for: "shell-init: error retrieving current directory: getcwd: cannot access parent directories"
             if ! pwd >/dev/null 2>&1; then
                 log "⚠️  Current directory is invalid - switching to HOME for tart operations"
                 cd "$HOME"
@@ -2102,7 +2102,7 @@ EOF
             log "🔬 CRITICAL: Validating remote image to ensure it's ready for building..."
             if comprehensive_vm_validation "$LOCAL_IMAGE_NAME" "remote-image"; then
                 log "✅ Remote image passed validation - ready for building"
-        exit 0
+                exit 0
             else
                 log "❌ Remote image failed validation - not ready for building"
                 log "🔧 Remote image may be corrupted or missing dependencies"
@@ -2112,7 +2112,119 @@ EOF
             fi
         else
             set -e  # Re-enable exit on error
-            log "⚠️  Remote registry check failed - will build locally"
+            
+            # No exact match - look for compatible VMs with same Bun version but older bootstrap
+            log "⚠️  Exact remote image not found - checking for compatible versions..."
+            log "   Looking for: bun-build-macos-${MACOS_RELEASE}-${ARCH}:${BUN_VERSION}-bootstrap-*"
+            
+            # Get list of available remote images for this platform
+            local compatible_found=false
+            local remote_list_output=""
+            if remote_list_output=$(tart list | grep "^OCI.*bun-build-macos-${MACOS_RELEASE}.*${BUN_VERSION}-bootstrap-" 2>/dev/null); then
+                while IFS= read -r line; do
+                    if [[ "$line" =~ OCI[[:space:]]+([^[:space:]]+) ]]; then
+                        local remote_url="${BASH_REMATCH[1]}"
+                        log "🔍 Found compatible remote VM: $remote_url"
+                        
+                        # Clone and upgrade this VM
+                        log "📥 Using compatible remote image and upgrading bootstrap..."
+                        tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+                        
+                        # SAFETY: Ensure we're in a valid directory before tart clone operations
+                        if ! pwd >/dev/null 2>&1; then
+                            log "⚠️  Current directory is invalid - switching to HOME for tart operations"
+                            cd "$HOME"
+                            log "   Switched to: $(pwd)"
+                        fi
+                        
+                        if tart clone "$remote_url" "$LOCAL_IMAGE_NAME"; then
+                            log "✅ Compatible VM cloned, now upgrading bootstrap..."
+                            
+                            # Run bootstrap upgrade (same logic as Step 3)
+                            log "🔧 Starting VM to upgrade bootstrap from older version..."
+                            tart run "$LOCAL_IMAGE_NAME" --no-graphics >/dev/null 2>&1 &
+                            local vm_pid=$!
+                            
+                            # Wait for VM to boot
+                            sleep 15
+                            
+                            # Get VM IP
+                            local vm_ip=""
+                            for i in {1..30}; do
+                                vm_ip=$(tart ip "$LOCAL_IMAGE_NAME" 2>/dev/null || echo "")
+                                if [ -n "$vm_ip" ]; then
+                                    break
+                                fi
+                                sleep 3
+                            done
+                            
+                            if [ -n "$vm_ip" ]; then
+                                # Wait for SSH
+                                local ssh_ready=false
+                                for i in {1..30}; do
+                                    if sshpass -p "admin" ssh $SSH_OPTS -o ConnectTimeout=3 admin@"$vm_ip" "echo 'ready'" >/dev/null 2>&1; then
+                                        ssh_ready=true
+                                        break
+                                    fi
+                                    sleep 3
+                                done
+                                
+                                if [ "$ssh_ready" = "true" ]; then
+                                    log "✅ VM ready for bootstrap upgrade (IP: $vm_ip)"
+                                    
+                                    # Copy and run bootstrap script
+                                    if sshpass -p "admin" scp $SSH_OPTS scripts/bootstrap_new.sh admin@"$vm_ip":/tmp/; then
+                                        log "   📁 Bootstrap script copied, executing upgrade..."
+                                        local bootstrap_cmd='cd /tmp && chmod +x bootstrap_new.sh && ./bootstrap_new.sh'
+                                        
+                                        if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$bootstrap_cmd"; then
+                                            log "✅ Bootstrap upgrade completed successfully"
+                                        else
+                                            log "⚠️  Bootstrap upgrade had issues but continuing..."
+                                        fi
+                                        
+                                        # Shutdown VM gracefully
+                                        log "   🛑 Shutting down upgraded VM..."
+                                        sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" >/dev/null 2>&1 || true
+                                        sleep 10
+                                        kill $vm_pid >/dev/null 2>&1 || true
+                                        sleep 5
+                                        
+                                        # Validate upgraded VM
+                                        log "🔬 CRITICAL: Validating upgraded VM..."
+                                        if comprehensive_vm_validation "$LOCAL_IMAGE_NAME" "upgraded-remote"; then
+                                            log "✅ Upgraded VM passed validation - ready for building"
+                                            compatible_found=true
+                                            break
+                                        else
+                                            log "❌ Upgraded VM failed validation"
+                                            tart delete "$LOCAL_IMAGE_NAME" 2>/dev/null || true
+                                        fi
+                                    else
+                                        log "❌ Failed to copy bootstrap script"
+                                        kill $vm_pid >/dev/null 2>&1 || true
+                                    fi
+                                else
+                                    log "❌ SSH not available for upgrade"
+                                    kill $vm_pid >/dev/null 2>&1 || true
+                                fi
+                            else
+                                log "❌ Could not get VM IP for upgrade"
+                                kill $vm_pid >/dev/null 2>&1 || true
+                            fi
+                        else
+                            log "❌ Failed to clone compatible VM"
+                        fi
+                    fi
+                done <<< "$remote_list_output"
+            fi
+            
+            if [ "$compatible_found" = "true" ]; then
+                log "✅ Successfully upgraded compatible VM - ready for building"
+                exit 0
+            else
+                log "⚠️  No compatible remote images found - will build locally"
+            fi
         fi
     fi
     
