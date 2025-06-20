@@ -202,19 +202,6 @@ export VENDOR_PATH="$HOME/workspace/vendor"
 export TMPDIR="/tmp"
 export LD_SUPPORT_TMPDIR="/tmp"
 
-# Ensure buildkite-agent is available
-if ! command -v buildkite-agent >/dev/null 2>&1; then
-    echo "Installing buildkite-agent..."
-    AGENT_DIR="$HOME/.buildkite-agent"
-    if [ ! -d "$AGENT_DIR" ]; then
-        curl -fsSL https://raw.githubusercontent.com/buildkite/agent/main/install.sh > /tmp/install-buildkite.sh
-        chmod +x /tmp/install-buildkite.sh
-        DESTINATION=$AGENT_DIR bash /tmp/install-buildkite.sh
-        sudo ln -sf "$AGENT_DIR/bin/buildkite-agent" /usr/local/bin/buildkite-agent 2>/dev/null || true
-        rm -f /tmp/install-buildkite.sh
-    fi
-fi
-
 # Ensure bun is accessible
 if command -v bun >/dev/null 2>&1; then
     BUN_BIN=$(command -v bun)
@@ -312,21 +299,45 @@ echo "🎬 ===== EXECUTING COMMAND ====="
 
 # ===== EXECUTE COMMAND =====
 
-# Execute the user command in the VM - using heredoc for better escaping
-sshpass -p admin ssh $SSH_OPTS admin@$VM_IP bash -s <<REMOTE_EXEC
+# Execute the user command in the VM - using direct SSH with TTY for real-time output
+echo "🚀 Executing: $COMMAND"
+
+# Create a temporary script file for more reliable execution and output
+SCRIPT_FILE="/tmp/vm_command_$$.sh"
+cat > "$SCRIPT_FILE" << 'SCRIPT_CONTENT'
+#!/bin/bash
 set -eo pipefail
 cd ~/workspace
 source ./buildkite_env.sh
-export WORKSPACE="\$HOME/workspace"
-export BUILDKITE_BUILD_PATH="\$HOME/workspace/build-workdir"
-export VENDOR_PATH="\$HOME/workspace/vendor"
+export WORKSPACE="$HOME/workspace"
+export BUILDKITE_BUILD_PATH="$HOME/workspace/build-workdir"
+export VENDOR_PATH="$HOME/workspace/vendor"
 export TMPDIR="/tmp"
 export LD_SUPPORT_TMPDIR="/tmp"
 
-echo "🚀 Executing: $COMMAND"
-$COMMAND
-REMOTE_EXEC
+# Disable output buffering for real-time output
+export PYTHONUNBUFFERED=1
+export CARGO_TERM_VERBOSE=true
+
+# Execute the command with explicit output flushing
+exec bash -c 'COMMAND_TO_RUN'
+SCRIPT_CONTENT
+
+# Replace the placeholder with the actual command (properly escaped)
+sed -i.bak "s/COMMAND_TO_RUN/$(printf '%s\n' "$COMMAND" | sed 's/[[\.*^$()+?{|]/\\&/g')/g" "$SCRIPT_FILE"
+
+# Copy script to VM
+echo "📝 Copying execution script to VM..."
+sshpass -p admin scp $SSH_OPTS "$SCRIPT_FILE" admin@$VM_IP:/tmp/vm_command.sh
+
+# Execute with TTY allocation for real-time output and proper signal handling
+echo "⚡ Executing command with real-time output..."
+sshpass -p admin ssh -t $SSH_OPTS admin@$VM_IP 'bash -l /tmp/vm_command.sh'
 EXIT_CODE=$?
+
+# Cleanup temporary files
+rm -f "$SCRIPT_FILE" || true
+sshpass -p admin ssh $SSH_OPTS admin@$VM_IP 'rm -f /tmp/vm_command.sh' || true
 
 echo "📤 ===== COPYING ARTIFACTS BACK ====="
 
