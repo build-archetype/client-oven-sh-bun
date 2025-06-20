@@ -560,7 +560,6 @@ function getLinkBunStep(platform, options) {
   // If macOS, run in VM
   if (platform.os === "darwin") {
     step.command = [
-      `./scripts/build-macos-vm.sh --release=${platform.release}`,
       `./scripts/ci-macos.sh --release=${platform.release} "${getBuildCommand(platform, options)} --target bun" "${process.cwd()}"`
     ];
   }
@@ -633,7 +632,6 @@ function getTestBunStep(platform, options, testOptions = {}) {
         ? `node .\\scripts\\runner.node.mjs ${args.join(" ")}`
         : os === "darwin"
         ? [
-            `./scripts/build-macos-vm.sh --release=${platform.release}`,
             `./scripts/runner.node.mjs ${args.join(" ")}`
           ]
         : `./scripts/runner.node.mjs ${args.join(" ")}`,
