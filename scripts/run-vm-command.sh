@@ -9,6 +9,72 @@ if [ -z "$1" ]; then
     exit 1
 fi
 
+# Show help if requested
+if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+    cat << 'EOF'
+🎯 run-vm-command.sh - Execute commands in Tart VMs
+
+USAGE:
+    ./run-vm-command.sh <vm-name> [command]
+    ./run-vm-command.sh --help
+
+ARGUMENTS:
+    <vm-name>    Name of the Tart VM to run command in
+    [command]    Command to execute (default: echo 'VM is ready')
+
+OPTIONS:
+    --help, -h   Show this help message
+
+EXAMPLES:
+    # Basic VM test
+    ./run-vm-command.sh my-vm
+
+    # Run a build command
+    ./run-vm-command.sh my-vm "bun run build:release"
+
+    # Run tests
+    ./run-vm-command.sh my-vm "bun test"
+
+    # Multiple commands
+    ./run-vm-command.sh my-vm "bun install && bun run build"
+
+    # Debug VM environment
+    ./run-vm-command.sh my-vm "env | grep -E '(PATH|BUN|CARGO)'"
+
+FEATURES:
+    ✅ Automatic sshpass installation
+    ✅ Environment variable export from host
+    ✅ Workspace sync using rsync  
+    ✅ Build artifact copying back
+    ✅ Tool verification (Bun, CMake, Ninja, Clang, Cargo)
+    ✅ Cache preservation (zig-cache, buildkite-cache)
+
+WORKFLOW:
+    1. Wait for VM to be ready and get SSH access
+    2. Export host environment variables
+    3. Copy workspace to VM using rsync
+    4. Set up VM environment and verify tools
+    5. Execute the specified command
+    6. Copy build artifacts back to host
+    7. Clean up and exit with command's exit code
+
+ARTIFACT DIRECTORIES:
+    The script automatically copies these directories back from VM:
+    • build/          - Build outputs
+    • artifacts/      - Build artifacts  
+    • dist/           - Distribution files
+    • zig-cache/      - Zig compilation cache
+    • buildkite-cache/ - CI cache files
+
+REQUIREMENTS:
+    • Tart VM must be running
+    • VM must have 'admin' user with 'admin' password
+    • SSH access to VM on port 22
+    • rsync available on host
+EOF
+    exit 0
+fi
+
 VM_NAME="$1"
 COMMAND="${2:-echo 'VM is ready'}"
 
