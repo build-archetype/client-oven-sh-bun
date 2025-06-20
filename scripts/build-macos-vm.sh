@@ -1135,15 +1135,38 @@ load_github_credentials() {
         
         # Unlock keychain if password file exists
         if [ -f "$keychain_password_file" ]; then
+            log "   Found keychain password file: $keychain_password_file"
             local keychain_password=$(cat "$keychain_password_file" 2>/dev/null || echo "")
             if [ -n "$keychain_password" ]; then
-                security unlock-keychain -p "$keychain_password" "$ci_keychain" 2>/dev/null || true
+                log "   Attempting to unlock keychain..."
+                if timeout 10 security unlock-keychain -p "$keychain_password" "$ci_keychain" 2>/dev/null; then
+                    log "   ✅ Keychain unlocked successfully"
+                else
+                    log "   ⚠️  Failed to unlock keychain (timeout or error)"
+                fi
+            else
+                log "   ⚠️  Keychain password file is empty"
             fi
+        else
+            log "   ⚠️  No keychain password file found: $keychain_password_file"
         fi
         
-        # Load credentials using search all keychains method (works over SSH)
-        keychain_username=$(security find-generic-password -a "bun-ci" -s "github-username" -w 2>/dev/null || echo "")
-        keychain_token=$(security find-generic-password -a "bun-ci" -s "github-token" -w 2>/dev/null || echo "")
+        # Load credentials using search all keychains method with timeout (works over SSH)
+        log "   Loading username from keychain with timeout..."
+        keychain_username=$(timeout 10 security find-generic-password -a "bun-ci" -s "github-username" -w 2>/dev/null || echo "")
+        if [ -n "$keychain_username" ]; then
+            log "   ✅ Username loaded: $keychain_username"
+        else
+            log "   ⚠️  Failed to load username from keychain"
+        fi
+        
+        log "   Loading token from keychain with timeout..."
+        keychain_token=$(timeout 10 security find-generic-password -a "bun-ci" -s "github-token" -w 2>/dev/null || echo "")
+        if [ -n "$keychain_token" ]; then
+            log "   ✅ Token loaded successfully"
+        else
+            log "   ⚠️  Failed to load token from keychain"
+        fi
         
         if [ -n "$keychain_username" ] && [ -n "$keychain_token" ]; then
             log "✅ Loaded GitHub credentials from CI keychain: $keychain_username"
@@ -2335,60 +2358,68 @@ EOF
     log "=== REGISTRY PUSH ATTEMPT ==="
     set +e  # Disable error handling for entire registry section
 
-    # Load GitHub credentials using comprehensive method
-    log "🔐 Setting up GitHub authentication for registry push..."
-    local creds_loaded=false
-    if load_github_credentials false true; then
-        creds_loaded=true
-        log "✅ GitHub authentication configured"
-        log "   Username: $GITHUB_USERNAME"
-        log "   Token: ${GITHUB_TOKEN:0:8}... (${#GITHUB_TOKEN} chars)"
+    # Skip registry push in CI mode to avoid keychain hangs
+    if [ -n "${CI:-}" ] || [ -n "${BUILDKITE:-}" ] || [ "${ci_mode:-}" = "true" ]; then
+        log "⚠️  Skipping registry push in CI mode to avoid keychain hangs"
+        log "   This is normal for CI builds - registry push happens via dedicated jobs"
+        log "   VM is ready for local use: $LOCAL_IMAGE_NAME"
     else
-        log "⚠️  No GitHub credentials available"
-        log "   Registry push will be attempted without authentication"
-        log "   This may fail for private repositories or when pushing images"
-    fi
+        # Load GitHub credentials using comprehensive method with timeout
+        log "🔐 Setting up GitHub authentication for registry push..."
+        local creds_loaded=false
+        
+        # Try to load credentials with a reasonable timeout
+        if timeout 30 load_github_credentials false true 2>/dev/null; then
+            creds_loaded=true
+            log "✅ GitHub authentication configured"
+            log "   Username: $GITHUB_USERNAME"
+            log "   Token: ${GITHUB_TOKEN:0:8}... (${#GITHUB_TOKEN} chars)"
+        else
+            log "⚠️  Credential loading timed out or failed"
+            log "   Registry push will be skipped (non-fatal)"
+        fi
 
-    if [ "$creds_loaded" = true ]; then
-        log "Attempting to push to registry with credentials..."
-        
-        log "Registry URLs:"
-        log "  Primary: $REMOTE_IMAGE_URL"
-        log "  Latest:  $LATEST_IMAGE_URL"
-        
-        # Try to push primary tag
-        log "Pushing primary tag..."
-        if tart push "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" 2>&1; then
-            log "✅ Primary push successful"
+        if [ "$creds_loaded" = true ]; then
+            log "Attempting to push to registry with credentials..."
             
-            # Try to push latest tag
-            log "Pushing latest tag..."
-            if tart push "$LOCAL_IMAGE_NAME" "$LATEST_IMAGE_URL" 2>&1; then
-                log "✅ Latest push successful"
+            log "Registry URLs:"
+            log "  Primary: $REMOTE_IMAGE_URL"
+            log "  Latest:  $LATEST_IMAGE_URL"
+            
+            # Try to push primary tag with timeout
+            log "Pushing primary tag..."
+            if timeout 300 tart push "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" 2>&1; then
+                log "✅ Primary push successful"
+                
+                # Try to push latest tag with timeout
+                log "Pushing latest tag..."
+                if timeout 300 tart push "$LOCAL_IMAGE_NAME" "$LATEST_IMAGE_URL" 2>&1; then
+                    log "✅ Latest push successful"
+                else
+                    log "⚠️  Latest push failed (non-fatal)"
+                fi
+                
+                log "✅ Registry push completed successfully!"
             else
-                log "⚠️  Latest push failed (non-fatal)"
+                log "⚠️  Primary push failed or timed out (non-fatal)"
+                log "     This is normal if:"
+                log "     - Registry authentication failed"
+                log "     - Network issues occurred"
+                log "     - Registry is read-only"
+                log "     The build will continue normally."
             fi
             
-            log "✅ Registry push completed successfully!"
+            # Clean up environment variables (with error handling)
+            unset TART_REGISTRY_USERNAME 2>/dev/null || true
+            unset TART_REGISTRY_PASSWORD 2>/dev/null || true
         else
-            log "⚠️  Primary push failed (non-fatal)"
-            log "     This is normal if:"
-            log "     - Registry authentication failed"
-            log "     - Network issues occurred"
-            log "     - Registry is read-only"
+            log "⚠️  Skipping registry push - no credentials available"
+            log "     This is normal for:"
+            log "     - Local development builds"
+            log "     - Forks without push access"
+            log "     - Machines not yet configured with credentials"
             log "     The build will continue normally."
         fi
-        
-        # Clean up environment variables (with error handling)
-        unset TART_REGISTRY_USERNAME 2>/dev/null || true
-        unset TART_REGISTRY_PASSWORD 2>/dev/null || true
-    else
-        log "⚠️  Skipping registry push - no credentials available"
-        log "     This is normal for:"
-        log "     - Local development builds"
-        log "     - Forks without push access"
-        log "     - Machines not yet configured with credentials"
-        log "     The build will continue normally."
     fi
 
     set -e  # Re-enable strict error handling
