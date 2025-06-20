@@ -1434,6 +1434,13 @@ get_bootstrap_version() {
 
 # Main execution
 main() {
+    # DEBUG: Show what VMs are available at the very start
+    log "🔍 DEBUG: Available VMs at start of build-macos-vm.sh:"
+    tart list || log "Failed to list VMs"
+    
+    log "🔍 DEBUG: Base VMs specifically:"
+    tart list | grep "bun-build-macos" || log "No bun-build-macos VMs found"
+    
     # Parse arguments
     local force_refresh=false
     local cleanup_only=false
@@ -1628,6 +1635,10 @@ main() {
     # Clean up old VM images to free storage space (do this early!)
     cleanup_old_images
     
+    # DEBUG: Show what VMs are available after cleanup
+    log "🔍 DEBUG: Available VMs after cleanup_old_images:"
+    tart list | grep "bun-build-macos" || log "No bun-build-macos VMs found after cleanup"
+    
     # If cleanup-only requested, exit here
     if [ "$cleanup_only" = true ]; then
         log "✅ Cleanup-only mode complete - exiting"
@@ -1666,6 +1677,15 @@ main() {
     LOCAL_IMAGE_NAME="bun-build-macos-${MACOS_RELEASE}-${ARCH}-${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
     REMOTE_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}-${ARCH}:${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
     LATEST_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}-${ARCH}:latest"
+    
+    # DEBUG: Show what we're looking for
+    log "🔍 DEBUG: Target VM name we're looking for: $LOCAL_IMAGE_NAME"
+    log "🔍 DEBUG: Checking if target VM exists before shortcut:"
+    if tart list | grep -q "^local.*$LOCAL_IMAGE_NAME"; then
+        log "✅ DEBUG: Target VM EXISTS"
+    else
+        log "❌ DEBUG: Target VM DOES NOT EXIST"
+    fi
     
     # QUICK SHORTCUT: If target VM already exists and we're not forcing rebuild, proceed immediately
     if [ "$force_refresh" != "true" ] && [ "$force_rebuild_all" != "true" ] && [ "$force_oci_rebuild" != "true" ]; then

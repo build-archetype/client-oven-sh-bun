@@ -37,12 +37,25 @@ create_and_run_vm() {
     local workspace_dir="$3"
     local release="${4:-14}"
 
+    # DEBUG: Show what VMs are available at the start
+    log "🔍 DEBUG: Available VMs at start of create_and_run_vm:"
+    tart list || log "Failed to list VMs"
+    
+    log "🔍 DEBUG: Looking for base VMs specifically:"
+    tart list | grep "bun-build-macos" || log "No bun-build-macos VMs found"
+
     # Get base VM name
     local base_vm_image=$(get_base_vm_image "$release")
+    
+    log "🔍 DEBUG: Target base VM name: $base_vm_image"
     
     # Check if base VM exists
     if ! tart list | grep -q "^local.*$base_vm_image"; then
         log "❌ Base VM not found: $base_vm_image"
+        log "🔍 DEBUG: Exact VMs available:"
+        tart list | while read -r line; do
+            log "  $line"
+        done
         log "Run: ./scripts/build-macos-vm.sh --release=$release"
         exit 1
     fi
