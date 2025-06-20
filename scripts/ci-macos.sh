@@ -63,36 +63,12 @@ create_and_run_vm() {
     tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" >/dev/null 2>&1 &
     
     # Wait for VM to boot
-    sleep 15
+    sleep 5
     
-    # Get VM IP
-    local vm_ip=""
-    for i in {1..30}; do
-        vm_ip=$(tart ip "$vm_name" 2>/dev/null || echo "")
-        if [ -n "$vm_ip" ]; then
-            break
-        fi
-        sleep 2
-    done
+    log "✅ VM started - executing command via run-vm-command.sh"
     
-    if [ -z "$vm_ip" ]; then
-        log "❌ Could not get VM IP"
-        exit 1
-    fi
-    
-    # Wait for SSH
-    log "Waiting for SSH to be ready on $vm_ip..."
-    for i in {1..30}; do
-        if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "echo 'ready'" >/dev/null 2>&1; then
-            break
-        fi
-        sleep 2
-    done
-    
-    log "✅ VM ready - executing command"
-    
-    # Execute command via SSH
-    sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "cd /Volumes/workspace && $command"
+    # Use existing run-vm-command.sh script to handle all the SSH complexity
+    ./scripts/run-vm-command.sh "$vm_name" "$command"
     
     log "✅ Command completed"
 }
