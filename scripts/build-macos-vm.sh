@@ -1667,6 +1667,15 @@ main() {
     REMOTE_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}-${ARCH}:${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"
     LATEST_IMAGE_URL="${REGISTRY}/${ORGANIZATION}/${REPOSITORY}/bun-build-macos-${MACOS_RELEASE}-${ARCH}:latest"
     
+    # QUICK SHORTCUT: If target VM already exists and we're not forcing rebuild, proceed immediately
+    if [ "$force_refresh" != "true" ] && [ "$force_rebuild_all" != "true" ] && [ "$force_oci_rebuild" != "true" ]; then
+        if tart list | grep -q "^local.*$LOCAL_IMAGE_NAME"; then
+            log "✅ Target VM already exists: $LOCAL_IMAGE_NAME"
+            log "🎯 VM ready for use - exiting quickly"
+            exit 0
+        fi
+    fi
+    
     # Handle check-only mode - but with comprehensive validation
     if [ "$check_only" = true ]; then
         log "=== CHECK-ONLY MODE ==="
