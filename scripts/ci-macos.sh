@@ -13,25 +13,7 @@ log() {
 get_bun_version() {
     local version=""
     
-    # First try package.json - this is the authoritative source
-    if [ -f "package.json" ]; then
-        version=$(jq -r '.version // empty' package.json 2>/dev/null || true)
-    fi
-    
-    # If no package.json, try CMakeLists.txt but look for the right pattern
-    if [ -z "$version" ] && [ -f "CMakeLists.txt" ]; then
-        # Look for project(Bun VERSION ...) or similar patterns
-        version=$(grep -E "project\(.*VERSION\s+" CMakeLists.txt | sed -E 's/.*VERSION\s+([0-9]+\.[0-9]+\.[0-9]+).*/\1/' || true)
-    fi
-    
-    # Fallback to git tags
-    if [ -z "$version" ]; then
-        version=$(git describe --tags --always --dirty 2>/dev/null | sed 's/^bun-v//' | sed 's/^v//' || echo "1.2.14")
-    fi
-    
-    # Clean up version string
-    version=${version#v}
-    version=${version#bun-}
+    version=$(jq -r '.version // empty' package.json 2>/dev/null || true)
     
     # Validate version format
     if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
@@ -58,7 +40,7 @@ get_bootstrap_version() {
     fi
 }
 
-# Function to get base VM image name (now dynamic!)
+# Function to get base VM image name
 get_base_vm_image() {
     local release="${1:-14}"
     local arch="arm64"  # Default to arm64 for Apple Silicon
