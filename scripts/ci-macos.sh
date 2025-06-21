@@ -57,21 +57,47 @@ cleanup_temporary_vms() {
         return 0
     fi
     
-    # Clean up temporary build VMs (any bun-build VM without 'bootstrap' in name)
-    log "🗑️  Removing temporary build VMs (bun-build* without 'bootstrap')..."
+    # Clean up ALL temporary VMs (any VM starting with tmp-)
+    log "🗑️  Removing ALL temporary VMs (tmp-*)..."
     while IFS= read -r line; do
         # Skip header line and empty lines
         [[ "$line" =~ ^(Source|local|OCI)[[:space:]] ]] || continue
         [[ "$line" =~ ^Source ]] && continue
         
         # Parse the line - Format: local  VM_NAME  DISK_SIZE  SIZE_ON_DISK  SIZE_ON_DISK  STATE
-        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+stopped ]]; then
+        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+.* ]]; then
+            local vm_name="${BASH_REMATCH[1]}"
+            local size_gb="${BASH_REMATCH[3]}"  # Use SizeOnDisk (3rd number)
+            
+            # Match ANY VM starting with tmp-
+            if [[ "$vm_name" =~ ^tmp- ]]; then
+                log "    Deleting temporary VM: $vm_name (${size_gb}GB)"
+                if tart delete "$vm_name" 2>/dev/null; then
+                    log "    ✅ Deleted successfully"
+                    cleaned_count=$((cleaned_count + 1))
+                    space_freed=$((space_freed + size_gb))
+                else
+                    log "    ⚠️  Failed to delete"
+                fi
+            fi
+        fi
+    done <<< "$tart_output"
+    
+    # Clean up legacy temporary build VMs (any bun-build VM without 'bootstrap' in name)
+    log "🗑️  Removing legacy temporary build VMs (bun-build* without 'bootstrap')..."
+    while IFS= read -r line; do
+        # Skip header line and empty lines
+        [[ "$line" =~ ^(Source|local|OCI)[[:space:]] ]] || continue
+        [[ "$line" =~ ^Source ]] && continue
+        
+        # Parse the line - Format: local  VM_NAME  DISK_SIZE  SIZE_ON_DISK  SIZE_ON_DISK  STATE
+        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+.* ]]; then
             local vm_name="${BASH_REMATCH[1]}"
             local size_gb="${BASH_REMATCH[3]}"  # Use SizeOnDisk (3rd number)
             
             # Match any bun-build VM that doesn't contain 'bootstrap'
             if [[ "$vm_name" =~ ^bun-build ]] && [[ ! "$vm_name" =~ bootstrap ]]; then
-                log "    Deleting temporary VM: $vm_name (${size_gb}GB)"
+                log "    Deleting legacy temporary VM: $vm_name (${size_gb}GB)"
                 if tart delete "$vm_name" 2>/dev/null; then
                     log "    ✅ Deleted successfully"
                     cleaned_count=$((cleaned_count + 1))
@@ -211,6 +237,9 @@ create_and_run_vm() {
     log "✅ Base image found - cloning VM"
     tart clone "$base_vm_image" "$vm_name"
     
+    # Set current VM name for cleanup trap
+    export CURRENT_VM_NAME="$vm_name"
+    
     log "Setting VM resources..."
     tart set "$vm_name" --cpu=6 --memory=16384
     
@@ -231,14 +260,8 @@ create_and_run_vm() {
     # Upload logs
     buildkite-agent artifact upload vm.log || true
 
-    # Cleanup
-    log "Checking VM status before cleanup..."
-    if tart list | grep -q "$vm_name"; then
-        log "VM $vm_name exists, deleting..."
-        tart delete "$vm_name" || true
-    else
-        log "VM $vm_name not found - may have been cleaned up earlier or crashed"
-    fi
+    # VM cleanup is now handled by the exit trap
+    log "VM cleanup will be handled by exit trap"
 
     log "=== FINAL TART STATE ==="
     log "Available Tart VMs:"
@@ -268,6 +291,46 @@ show_usage() {
     echo ""
     echo "Note: For VM cleanup, use ./scripts/build-macos-vm.sh which handles all cleanup operations"
 }
+
+# Function to ensure cleanup on exit
+cleanup_on_exit() {
+    local exit_code=$?
+    log "🧹 Exit cleanup triggered (exit code: $exit_code)"
+    
+    # Clean up specific VM if it was created
+    if [ -n "${CURRENT_VM_NAME:-}" ]; then
+        log "Cleaning up current VM: $CURRENT_VM_NAME"
+        if tart list | grep -q "$CURRENT_VM_NAME"; then
+            log "VM $CURRENT_VM_NAME exists, deleting..."
+            tart delete "$CURRENT_VM_NAME" 2>/dev/null || log "Failed to delete $CURRENT_VM_NAME"
+        else
+            log "VM $CURRENT_VM_NAME not found - may have been cleaned up earlier"
+        fi
+    fi
+    
+    # Clean up any remaining tmp VMs
+    log "Final cleanup of all tmp VMs..."
+    local tart_output=$(tart list 2>/dev/null || echo "")
+    while IFS= read -r line; do
+        [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+.* ]] || continue
+        local vm_name="${BASH_REMATCH[1]}"
+        if [[ "$vm_name" =~ ^tmp- ]]; then
+            log "Final cleanup: deleting $vm_name"
+            tart delete "$vm_name" 2>/dev/null || log "Failed to delete $vm_name"
+        fi
+    done <<< "$tart_output"
+    
+    # Kill logging process if it exists
+    if [ -n "${TART_LOG_PID:-}" ]; then
+        kill $TART_LOG_PID 2>/dev/null || true
+        buildkite-agent artifact upload tart.log 2>/dev/null || true
+    fi
+    
+    exit $exit_code
+}
+
+# Set up cleanup trap
+trap cleanup_on_exit EXIT INT TERM
 
 # Main execution
 main() {
