@@ -785,6 +785,31 @@ VM_PID=$!
     log "✅ Base image ready: $LOCAL_IMAGE_NAME"
     log "Available images:"
     tart list
+    
+    # Update agent meta-data to indicate VM is ready
+    log "=== UPDATING AGENT META-DATA ==="
+    log "Setting agent as ready with VM image: $LOCAL_IMAGE_NAME"
+    
+    # Use same version detection as the script
+    local agent_bun_version="$BUN_VERSION"
+    local agent_bootstrap_version="$BOOTSTRAP_VERSION"
+    local agent_macos_release="$MACOS_RELEASE"
+    local vm_ready_key="vm-ready-macos-${agent_macos_release}"
+    
+    log "Setting version-specific ready tag: $vm_ready_key = true"
+    
+    # Update agent meta-data (suppress errors to avoid breaking the build)
+    if command -v buildkite-agent >/dev/null 2>&1; then
+        buildkite-agent meta-data set "$vm_ready_key" "true" 2>/dev/null || log "Warning: Could not update $vm_ready_key meta-data"
+        buildkite-agent meta-data set "vm-image-macos-${agent_macos_release}" "$LOCAL_IMAGE_NAME" 2>/dev/null || log "Warning: Could not update vm-image meta-data"
+        buildkite-agent meta-data set "vm-bootstrap-version-macos-${agent_macos_release}" "$agent_bootstrap_version" 2>/dev/null || log "Warning: Could not update vm-bootstrap-version meta-data"
+        buildkite-agent meta-data set "vm-bun-version-macos-${agent_macos_release}" "$agent_bun_version" 2>/dev/null || log "Warning: Could not update vm-bun-version meta-data"
+        buildkite-agent meta-data set "vm-status-reason-macos-${agent_macos_release}" "VM image built successfully" 2>/dev/null || log "Warning: Could not update vm-status-reason meta-data"
+        buildkite-agent meta-data set "vm-last-updated-macos-${agent_macos_release}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>/dev/null || log "Warning: Could not update vm-last-updated meta-data"
+        log "✅ Agent meta-data updated - agent is now ready for macOS $agent_macos_release builds"
+    else
+        log "⚠️  buildkite-agent command not found - meta-data not updated (this is normal for local runs)"
+    fi
 }
 
 main "$@" 

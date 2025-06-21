@@ -293,7 +293,7 @@ function getEc2Agent(platform, options, ec2Options) {
  * @returns {string}
  */
 function getCppAgent(platform, options) {
-  const { os, arch } = platform;
+  const { os, arch, release } = platform;
 
   if (os === "darwin") {
     return {
@@ -301,7 +301,7 @@ function getCppAgent(platform, options) {
       os,
       arch: arch === "aarch64" ? "arm64" : arch,
       tart: "true",
-      "vm-ready": "true"  // Only target agents with VM images ready
+      [`vm-ready-macos-${release}`]: "true"  // Version-specific VM ready check
     };
   }
 
@@ -346,7 +346,7 @@ function getZigAgent(platform, options) {
  * @returns {Agent}
  */
 function getTestAgent(platform, options) {
-  const { os, arch } = platform;
+  const { os, arch, release } = platform;
 
   if (os === "darwin") {
     return {
@@ -354,7 +354,7 @@ function getTestAgent(platform, options) {
       os,
       arch: arch === "aarch64" ? "arm64" : arch,
       tart: "true",
-      "vm-ready": "true"  // Only target agents with VM images ready
+      [`vm-ready-macos-${release}`]: "true"  // Version-specific VM ready check
     };
   }
 
@@ -1097,10 +1097,7 @@ function getMacOSVMBuildStep(platform, options) {
     label: `🍎 Build macOS ${release} VM image`,
     agents: {
       queue: "darwin",
-      // VM build steps can run on any agent since they create the VM images
-      // No vm-ready requirement here - this step makes agents ready
-      // TODO: In future, use different tag for base image builds
-      // macos_vm_builder: "true"
+      [`vm-ready-macos-${release}`]: "false"  // Only target agents that DON'T have this specific macOS version ready
     },
     command: `./scripts/build-macos-vm.sh --release=${release}`,
     timeout_in_minutes: 720,
