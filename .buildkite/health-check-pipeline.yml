@@ -1,5 +1,6 @@
 steps:
   - label: "🩺 Agent VM Health Check"
+    key: "agent-vm-health-check"
     command: |
       echo "Running VM health check on agent..."
       ./scripts/agent-vm-health-check.sh check
@@ -12,6 +13,7 @@ steps:
     parallelism: 10
     
   - label: "📊 Health Check Summary"
+    key: "health-check-summary"
     command: |
       echo "=== HEALTH CHECK SUMMARY ==="
       echo "All agents have completed health checks"
@@ -19,4 +21,4 @@ steps:
     agents:
       queue: "darwin"
       # Run summary on any agent
-    depends_on: "🩺 Agent VM Health Check" 
+    depends_on: "agent-vm-health-check" 
