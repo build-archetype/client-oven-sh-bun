@@ -36,8 +36,14 @@ wait_for_vm() {
         # Try to get IP
         VM_IP=$(tart ip "$vm_name" 2>/dev/null || echo "")
         if [ -n "$VM_IP" ]; then
+            # Give SSH service a moment to fully start after getting IP
+            if [ $attempt -eq 0 ]; then
+                echo "VM got IP $VM_IP, waiting for SSH service to start..."
+                sleep 10
+            fi
+            
             # Test SSH connectivity with comprehensive options
-            if sshpass -p admin ssh $SSH_OPTS -o ConnectTimeout=2 "admin@$VM_IP" echo "test" &>/dev/null; then
+            if sshpass -p admin ssh $SSH_OPTS -o ConnectTimeout=10 "admin@$VM_IP" echo "test" &>/dev/null; then
                 echo "VM is ready at $VM_IP"
                 return 0
             fi
@@ -45,7 +51,7 @@ wait_for_vm() {
         
         attempt=$((attempt + 1))
         echo "Attempt $attempt/$max_attempts: Waiting for VM..."
-        sleep 2
+        sleep 5  # Increased from 2 to 5 seconds between attempts
     done
     
     echo "Error: VM did not become ready within timeout"
