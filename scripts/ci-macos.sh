@@ -308,6 +308,59 @@ create_and_run_vm() {
                 [ $memory_available_mb -lt 8192 ] && log "   - Need 8GB RAM, only ${memory_available_mb}MB available"
             fi
             log "================================="
+            
+            # Test VM startup with default resources
+            log "🧪 Testing VM startup with default resources (2 CPUs + 4GB)..."
+            
+            # Stop the current VM attempt
+            log "Stopping current VM attempt..."
+            tart stop "$vm_name" 2>/dev/null || true
+            sleep 5
+            
+            # Create a test VM with default resources  
+            local test_vm_name="${vm_name}-test"
+            log "Creating test VM: $test_vm_name"
+            if tart clone "$base_vm_image" "$test_vm_name" 2>/dev/null; then
+                log "Starting test VM with default resources..."
+                tart run "$test_vm_name" --no-graphics > test-vm.log 2>&1 &
+                local test_vm_pid=$!
+                
+                # Wait up to 30 seconds for test VM
+                local test_attempt=0
+                local test_started=false
+                while [ $test_attempt -lt 6 ]; do
+                    if tart list | grep -q "$test_vm_name.*running"; then
+                        log "✅ Test VM started successfully with default resources!"
+                        log "   Issue is likely our aggressive resource allocation (4 CPUs + 8GB)"
+                        test_started=true
+                        break
+                    fi
+                    test_attempt=$((test_attempt + 1))
+                    sleep 5
+                done
+                
+                if [ "$test_started" = false ]; then
+                    log "❌ Test VM also failed to start with default resources"
+                    log "   Issue is likely deeper: VM image, Tart, or system problem"
+                fi
+                
+                # Clean up test VM
+                log "Cleaning up test VM..."
+                tart stop "$test_vm_name" 2>/dev/null || true
+                sleep 2
+                tart delete "$test_vm_name" 2>/dev/null || true
+                
+                # Upload test VM logs
+                buildkite-agent artifact upload test-vm.log 2>/dev/null || true
+            else
+                log "❌ Failed to create test VM - VM image may be corrupted"
+            fi
+            log "🧪 Test complete, resuming original VM startup..."
+            
+            # Restart original VM with our settings
+            log "Restarting original VM with configured resources..."
+            tart set "$vm_name" --cpu=4 --memory=8192
+            tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" > vm.log 2>&1 &
         fi
         
         log "Checking VM status... ($attempt/$max_attempts)"
