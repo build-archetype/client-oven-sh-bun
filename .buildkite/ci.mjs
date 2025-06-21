@@ -1186,10 +1186,9 @@ async function getPipeline(options = {}) {
         if (imagePlatforms.has(imageKey)) {
           dependsOn.push(`${imageKey}-build-image`);
         }
-        // Add dependency on specific macOS VM build if this is a macOS platform
-        if (target.os === "darwin") {
-          dependsOn.push(`build-macos-vm-${target.release}`);
-        }
+        // Removed VM build dependency to allow parallel execution
+        // Build steps can run immediately on hosts with existing VM images
+        // while other hosts build/download VM images in parallel
 
         return getStepWithDependsOn(
           {
