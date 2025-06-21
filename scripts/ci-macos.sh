@@ -273,161 +273,16 @@ create_and_run_vm() {
     export CURRENT_VM_NAME="$vm_name"
     
     log "Starting VM with default resources (2 CPUs + 4GB)..."
-    tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" > vm.log 2>&1 &
+    tart run "$vm_name" --no-graphics > vm.log 2>&1 &
     
-    # Wait for VM to be ready with proper IP and SSH connectivity checking
-    log "Waiting for VM to be ready..."
-    local max_attempts=4  # 4 attempts with 30-second intervals = 120 seconds total (2 minutes)
-    local attempt=0
-    local diagnostic_shown=false
-    
-    # SSH options for connectivity testing
-    local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
-    
-    while [ $attempt -lt $max_attempts ]; do
-        # Try to get VM IP address directly - this will only work if VM is running and has networking
-        local vm_ip=$(tart ip "$vm_name" 2>/dev/null || echo "")
-        if [ -n "$vm_ip" ]; then
-            log "VM has IP address: $vm_ip - testing SSH connectivity..."
-            # Test SSH connectivity
-            if sshpass -p admin ssh $SSH_OPTS "admin@$vm_ip" echo "test" &>/dev/null; then
-                log "✅ VM is ready at $vm_ip after $((attempt * 30)) seconds"
-                break
-            else
-                log "VM has IP but SSH not ready yet..."
-            fi
-        else
-            log "VM not ready yet (no IP) - waiting..."
-        fi
-        
-        attempt=$((attempt + 1))
-        
-        # Show resource diagnostics after 2 attempts (since we only have 4 total)
-        if [ $attempt -eq 2 ] && [ "$diagnostic_shown" = false ]; then
-            log "⚠️  VM not ready after 2 attempts - checking host resources..."
-            diagnostic_shown=true
-            
-            log "Current VM status:"
-            tart list | grep "$vm_name" || log "VM not found in tart list"
-            
-            # Get system resource info
-            log "=== HOST RESOURCE DIAGNOSTICS ==="
-            
-            # CPU info
-            local cpu_count=$(sysctl -n hw.ncpu)
-            local cpu_usage=$(top -l 1 -n 0 | grep "CPU usage" | awk '{print $3}' | sed 's/%//')
-            local cpu_available=$((100 - ${cpu_usage%.*}))
-            log "💻 CPU: $cpu_count cores total, ${cpu_usage}% used, ${cpu_available}% available"
-            log "   VM using: 2 cores (default) - $([ $cpu_count -ge 2 ] && echo "✅ SUFFICIENT" || echo "❌ INSUFFICIENT")"
-            
-            # Memory info  
-            local memory_total_mb=$(echo "$(sysctl -n hw.memsize) / 1024 / 1024" | bc)
-            local memory_used_mb=$(vm_stat | awk '/Pages active/ {active=$3} /Pages inactive/ {inactive=$3} /Pages speculative/ {spec=$3} /Pages wired/ {wired=$3} END {gsub(/[^0-9]/,"",active); gsub(/[^0-9]/,"",inactive); gsub(/[^0-9]/,"",spec); gsub(/[^0-9]/,"",wired); printf "%.0f", (active+inactive+spec+wired)*4096/1024/1024}')
-            local memory_available_mb=$((memory_total_mb - memory_used_mb))
-            local memory_usage_pct=$(echo "scale=1; $memory_used_mb * 100 / $memory_total_mb" | bc)
-            log "🧠 Memory: ${memory_total_mb}MB total, ${memory_used_mb}MB used (${memory_usage_pct}%), ${memory_available_mb}MB available"
-            log "   VM using: 4096MB (4GB default) - $([ $memory_available_mb -ge 4096 ] && echo "✅ SUFFICIENT" || echo "❌ INSUFFICIENT ($memory_available_mb MB available)")"
-            
-            # Running VMs
-            local running_vms=$(tart list | grep "running" | wc -l | tr -d ' ')
-            log "🔄 Running VMs: $running_vms"
-            if [ $running_vms -gt 0 ]; then
-                log "   Active VMs:"
-                tart list | grep "running" | awk '{print "   - " $2}' || log "   (unable to list active VMs)"
-            fi
-            
-            # Disk space
-            local disk_usage=$(df -h . | tail -1 | awk '{print $5}' | sed 's/%//')
-            local disk_available=$(df -h . | tail -1 | awk '{print $4}')
-            log "💾 Disk: ${disk_usage}% used, ${disk_available} available"
-            
-            # Overall assessment
-            log "=== RESOURCE ASSESSMENT ==="
-            if [ $cpu_count -ge 2 ] && [ $memory_available_mb -ge 4096 ]; then
-                log "✅ Host has sufficient resources for VM (2 CPUs + 4GB RAM)"
-                log "   Issue may be: VM image corruption, Tart permissions, or system limits"
-            else
-                log "❌ Host lacks sufficient resources for VM"
-                [ $cpu_count -lt 2 ] && log "   - Need 2 CPUs, only $cpu_count available"
-                [ $memory_available_mb -lt 4096 ] && log "   - Need 4GB RAM, only ${memory_available_mb}MB available"
-            fi
-            log "================================="
-            
-            # Test VM startup with default resources
-            log "🧪 Testing VM startup with default resources (2 CPUs + 4GB)..."
-            
-            # Stop the current VM attempt
-            log "Stopping current VM attempt..."
-            tart stop "$vm_name" 2>/dev/null || true
-            sleep 5
-            
-            # Create a test VM with default resources  
-            local test_vm_name="${vm_name}-test"
-            log "Creating test VM: $test_vm_name"
-            if tart clone "$base_vm_image" "$test_vm_name" 2>/dev/null; then
-                log "Starting test VM with default resources..."
-                tart run "$test_vm_name" --no-graphics > test-vm.log 2>&1 &
-                local test_vm_pid=$!
-                
-                # Wait up to 30 seconds for test VM
-                local test_attempt=0
-                local test_started=false
-                while [ $test_attempt -lt 6 ]; do
-                    # Check if test VM gets an IP
-                    local test_vm_ip=$(tart ip "$test_vm_name" 2>/dev/null || echo "")
-                    if [ -n "$test_vm_ip" ]; then
-                        log "✅ Test VM started successfully and got IP: $test_vm_ip"
-                        log "   Main VM should now work with same default allocation"
-                        test_started=true
-                        break
-                    fi
-                    test_attempt=$((test_attempt + 1))
-                    sleep 5
-                done
-                
-                if [ "$test_started" = false ]; then
-                    log "❌ Test VM also failed to get IP with default resources"
-                    log "   Issue is likely deeper: VM image, Tart, or system problem"
-                fi
-                
-                # Clean up test VM
-                log "Cleaning up test VM..."
-                tart stop "$test_vm_name" 2>/dev/null || true
-                sleep 2
-                tart delete "$test_vm_name" 2>/dev/null || true
-                
-                # Upload test VM logs
-                buildkite-agent artifact upload test-vm.log 2>/dev/null || true
-            else
-                log "❌ Failed to create test VM - VM image may be corrupted"
-            fi
-            log "🧪 Test complete, resuming original VM startup..."
-            
-            # Restart original VM with default resources
-            log "Restarting original VM with default resources..."
-            tart stop "$vm_name" 2>/dev/null || true
-            sleep 2
-            tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" > vm.log 2>&1 &
-        fi
-        
-        log "Checking VM readiness... ($attempt/$max_attempts)"
-        sleep 30  # Wait 30 seconds between attempts
-    done
-
-    # Check if we timed out
-    if [ $attempt -ge $max_attempts ]; then
-        log "❌ VM failed to become ready within timeout"
-        log "Final VM status:"
-        tart list | grep "$vm_name" || log "VM not found in tart list"
-        log "Uploading VM logs for debugging..."
-        buildkite-agent artifact upload vm.log 2>/dev/null || true
-        exit 1
-    fi
+    # Give VM a moment to start, then let run-vm-command.sh handle readiness checking
+    log "VM started, letting run-vm-command.sh handle readiness and workspace setup..."
+    sleep 5
 
     # Make run-vm-command.sh executable
     chmod +x ./scripts/run-vm-command.sh
 
-    # Execute the command
+    # Execute the command - run-vm-command.sh will handle VM readiness checking and workspace setup
     log "Executing command in VM: $command"
     ./scripts/run-vm-command.sh "$vm_name" "$command"
 
