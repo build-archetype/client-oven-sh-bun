@@ -269,10 +269,14 @@ create_and_run_vm() {
     log "✅ Base image found - cloning VM"
     tart clone "$base_vm_image" "$vm_name"
     
+    # Set VM resources for better build performance
+    log "Setting VM resources: 6 CPUs, 10GB RAM..."
+    tart set "$vm_name" --cpu 6 --memory 10240  # 10240 MB = 10 GB
+    
     # Set current VM name for cleanup trap
     export CURRENT_VM_NAME="$vm_name"
     
-    log "Starting VM with default resources (2 CPUs + 4GB)..."
+    log "Starting VM with allocated resources (6 CPUs + 10GB)..."
     tart run "$vm_name" --no-graphics > vm.log 2>&1 &
     
     # Give VM a moment to start, then let run-vm-command.sh handle readiness checking
