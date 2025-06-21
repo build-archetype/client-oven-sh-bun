@@ -243,24 +243,44 @@ create_and_run_vm() {
     log "Starting VM with default resources (2 CPUs + 4GB)..."
     tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" > vm.log 2>&1 &
     
-    # Wait for VM to be ready with simple checking every 5 seconds
+    # Wait for VM to be ready with proper IP and SSH connectivity checking
     log "Waiting for VM to be ready..."
     local max_attempts=60  # 5 minutes with 5-second intervals
     local attempt=0
     local diagnostic_shown=false
     
+    # SSH options for connectivity testing
+    local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=2"
+    
     while [ $attempt -lt $max_attempts ]; do
-        # Check if VM is running
-        if tart list | grep -q "$vm_name.*running"; then
-            log "✅ VM is running after $((attempt * 5)) seconds"
-            break
+        # Check if VM is running first
+        if ! tart list | grep -q "$vm_name.*running"; then
+            log "VM is not running - waiting..."
+            attempt=$((attempt + 1))
+            sleep 5
+            continue
+        fi
+        
+        # Try to get VM IP address
+        local vm_ip=$(tart ip "$vm_name" 2>/dev/null || echo "")
+        if [ -n "$vm_ip" ]; then
+            log "VM has IP address: $vm_ip - testing SSH connectivity..."
+            # Test SSH connectivity
+            if sshpass -p admin ssh $SSH_OPTS "admin@$vm_ip" echo "test" &>/dev/null; then
+                log "✅ VM is ready at $vm_ip after $((attempt * 5)) seconds"
+                break
+            else
+                log "VM has IP but SSH not ready yet..."
+            fi
+        else
+            log "VM running but no IP address yet..."
         fi
         
         attempt=$((attempt + 1))
         
         # Show resource diagnostics after 2 minutes (24 attempts)
         if [ $attempt -eq 24 ] && [ "$diagnostic_shown" = false ]; then
-            log "⚠️  VM not starting after 2 minutes - checking host resources..."
+            log "⚠️  VM not ready after 2 minutes - checking host resources..."
             diagnostic_shown=true
             
             # Get system resource info
@@ -327,17 +347,21 @@ create_and_run_vm() {
                 local test_started=false
                 while [ $test_attempt -lt 6 ]; do
                     if tart list | grep -q "$test_vm_name.*running"; then
-                        log "✅ Test VM started successfully with default resources!"
-                        log "   Main VM should now work with same default allocation"
-                        test_started=true
-                        break
+                        # Check if test VM gets an IP
+                        local test_vm_ip=$(tart ip "$test_vm_name" 2>/dev/null || echo "")
+                        if [ -n "$test_vm_ip" ]; then
+                            log "✅ Test VM started successfully and got IP: $test_vm_ip"
+                            log "   Main VM should now work with same default allocation"
+                            test_started=true
+                            break
+                        fi
                     fi
                     test_attempt=$((test_attempt + 1))
                     sleep 5
                 done
                 
                 if [ "$test_started" = false ]; then
-                    log "❌ Test VM also failed to start with default resources"
+                    log "❌ Test VM also failed to start or get IP with default resources"
                     log "   Issue is likely deeper: VM image, Tart, or system problem"
                 fi
                 
@@ -361,9 +385,19 @@ create_and_run_vm() {
             tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" > vm.log 2>&1 &
         fi
         
-        log "Checking VM status... ($attempt/$max_attempts)"
+        log "Checking VM readiness... ($attempt/$max_attempts)"
         sleep 5
     done
+
+    # Check if we timed out
+    if [ $attempt -ge $max_attempts ]; then
+        log "❌ VM failed to become ready within timeout"
+        log "Final VM status:"
+        tart list | grep "$vm_name" || log "VM not found in tart list"
+        log "Uploading VM logs for debugging..."
+        buildkite-agent artifact upload vm.log 2>/dev/null || true
+        exit 1
+    fi
 
     # Make run-vm-command.sh executable
     chmod +x ./scripts/run-vm-command.sh
