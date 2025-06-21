@@ -277,12 +277,12 @@ create_and_run_vm() {
     
     # Wait for VM to be ready with proper IP and SSH connectivity checking
     log "Waiting for VM to be ready..."
-    local max_attempts=60  # 5 minutes with 5-second intervals
+    local max_attempts=4  # 4 attempts with 30-second intervals = 120 seconds total (2 minutes)
     local attempt=0
     local diagnostic_shown=false
     
     # SSH options for connectivity testing
-    local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=2"
+    local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=10"
     
     while [ $attempt -lt $max_attempts ]; do
         # Try to get VM IP address directly - this will only work if VM is running and has networking
@@ -291,7 +291,7 @@ create_and_run_vm() {
             log "VM has IP address: $vm_ip - testing SSH connectivity..."
             # Test SSH connectivity
             if sshpass -p admin ssh $SSH_OPTS "admin@$vm_ip" echo "test" &>/dev/null; then
-                log "✅ VM is ready at $vm_ip after $((attempt * 5)) seconds"
+                log "✅ VM is ready at $vm_ip after $((attempt * 30)) seconds"
                 break
             else
                 log "VM has IP but SSH not ready yet..."
@@ -302,9 +302,9 @@ create_and_run_vm() {
         
         attempt=$((attempt + 1))
         
-        # Show resource diagnostics after 2 minutes (24 attempts)
-        if [ $attempt -eq 24 ] && [ "$diagnostic_shown" = false ]; then
-            log "⚠️  VM not ready after 2 minutes - checking host resources..."
+        # Show resource diagnostics after 2 attempts (since we only have 4 total)
+        if [ $attempt -eq 2 ] && [ "$diagnostic_shown" = false ]; then
+            log "⚠️  VM not ready after 2 attempts - checking host resources..."
             diagnostic_shown=true
             
             log "Current VM status:"
@@ -411,7 +411,7 @@ create_and_run_vm() {
         fi
         
         log "Checking VM readiness... ($attempt/$max_attempts)"
-        sleep 5
+        sleep 30  # Wait 30 seconds between attempts
     done
 
     # Check if we timed out
