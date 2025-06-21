@@ -240,10 +240,7 @@ create_and_run_vm() {
     # Set current VM name for cleanup trap
     export CURRENT_VM_NAME="$vm_name"
     
-    log "Setting VM resources..."
-    tart set "$vm_name" --cpu=2 --memory=6144
-    
-    log "Starting VM with workspace: $workspace_dir"
+    log "Starting VM with default resources (2 CPUs + 4GB)..."
     tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" > vm.log 2>&1 &
     
     # Wait for VM to be ready with simple checking every 5 seconds
@@ -274,7 +271,7 @@ create_and_run_vm() {
             local cpu_usage=$(top -l 1 -n 0 | grep "CPU usage" | awk '{print $3}' | sed 's/%//')
             local cpu_available=$((100 - ${cpu_usage%.*}))
             log "💻 CPU: $cpu_count cores total, ${cpu_usage}% used, ${cpu_available}% available"
-            log "   VM requesting: 2 cores - $([ $cpu_count -ge 2 ] && echo "✅ SUFFICIENT" || echo "❌ INSUFFICIENT")"
+            log "   VM using: 2 cores (default) - $([ $cpu_count -ge 2 ] && echo "✅ SUFFICIENT" || echo "❌ INSUFFICIENT")"
             
             # Memory info  
             local memory_total_mb=$(echo "$(sysctl -n hw.memsize) / 1024 / 1024" | bc)
@@ -282,7 +279,7 @@ create_and_run_vm() {
             local memory_available_mb=$((memory_total_mb - memory_used_mb))
             local memory_usage_pct=$(echo "scale=1; $memory_used_mb * 100 / $memory_total_mb" | bc)
             log "🧠 Memory: ${memory_total_mb}MB total, ${memory_used_mb}MB used (${memory_usage_pct}%), ${memory_available_mb}MB available"
-            log "   VM requesting: 6144MB (6GB) - $([ $memory_available_mb -ge 6144 ] && echo "✅ SUFFICIENT" || echo "❌ INSUFFICIENT ($memory_available_mb MB available)")"
+            log "   VM using: 4096MB (4GB default) - $([ $memory_available_mb -ge 4096 ] && echo "✅ SUFFICIENT" || echo "❌ INSUFFICIENT ($memory_available_mb MB available)")"
             
             # Running VMs
             local running_vms=$(tart list | grep "running" | wc -l | tr -d ' ')
@@ -299,13 +296,13 @@ create_and_run_vm() {
             
             # Overall assessment
             log "=== RESOURCE ASSESSMENT ==="
-            if [ $cpu_count -ge 2 ] && [ $memory_available_mb -ge 6144 ]; then
-                log "✅ Host has sufficient resources for VM (2 CPUs + 6GB RAM)"
+            if [ $cpu_count -ge 2 ] && [ $memory_available_mb -ge 4096 ]; then
+                log "✅ Host has sufficient resources for VM (2 CPUs + 4GB RAM)"
                 log "   Issue may be: VM image corruption, Tart permissions, or system limits"
             else
                 log "❌ Host lacks sufficient resources for VM"
                 [ $cpu_count -lt 2 ] && log "   - Need 2 CPUs, only $cpu_count available"
-                [ $memory_available_mb -lt 6144 ] && log "   - Need 6GB RAM, only ${memory_available_mb}MB available"
+                [ $memory_available_mb -lt 4096 ] && log "   - Need 4GB RAM, only ${memory_available_mb}MB available"
             fi
             log "================================="
             
@@ -331,7 +328,7 @@ create_and_run_vm() {
                 while [ $test_attempt -lt 6 ]; do
                     if tart list | grep -q "$test_vm_name.*running"; then
                         log "✅ Test VM started successfully with default resources!"
-                        log "   Issue is likely our conservative resource allocation (2 CPUs + 6GB)"
+                        log "   Main VM should now work with same default allocation"
                         test_started=true
                         break
                     fi
@@ -357,9 +354,10 @@ create_and_run_vm() {
             fi
             log "🧪 Test complete, resuming original VM startup..."
             
-            # Restart original VM with our settings
-            log "Restarting original VM with configured resources..."
-            tart set "$vm_name" --cpu=2 --memory=6144
+            # Restart original VM with default resources
+            log "Restarting original VM with default resources..."
+            tart stop "$vm_name" 2>/dev/null || true
+            sleep 2
             tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" > vm.log 2>&1 &
         fi
         
