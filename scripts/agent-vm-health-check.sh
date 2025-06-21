@@ -105,20 +105,60 @@ check_vm_health_for_version() {
     log "Expected VM image: $expected_image"
     
     # Check if image exists
+    local vm_ready=false
+    local vm_status_reason=""
+    
     if check_vm_image_exists "$expected_image"; then
         # Check if bootstrap version matches requirement
         if [ "$current_bootstrap_version" = "$REQUIRED_BOOTSTRAP_VERSION" ]; then
             log "✅ VM READY: macOS $macos_version image exists with correct bootstrap version"
-            update_agent_metadata_for_version "$macos_version" "true" "$expected_image" "$current_bootstrap_version" "$current_bun_version" "VM image available with correct bootstrap version"
-            return 0
+            vm_ready=true
+            vm_status_reason="VM image available with correct bootstrap version"
         else
             log "⚠️  VM NOT READY: macOS $macos_version bootstrap version mismatch (have: $current_bootstrap_version, need: $REQUIRED_BOOTSTRAP_VERSION)"
-            update_agent_metadata_for_version "$macos_version" "false" "$expected_image" "$current_bootstrap_version" "$current_bun_version" "Bootstrap version mismatch"
-            return 1
+            vm_ready=false
+            vm_status_reason="Bootstrap version mismatch - rebuilding VM"
         fi
     else
         log "❌ VM NOT READY: macOS $macos_version image not found locally"
-        update_agent_metadata_for_version "$macos_version" "false" "$expected_image" "$current_bootstrap_version" "$current_bun_version" "VM image not found locally"
+        vm_ready=false
+        vm_status_reason="VM image not found locally - building VM"
+    fi
+    
+    # If VM is not ready, attempt to build it
+    if [ "$vm_ready" = false ]; then
+        log "🏗️  Building missing VM for macOS $macos_version..."
+        
+        # Update metadata to show we're building
+        update_agent_metadata_for_version "$macos_version" "false" "$expected_image" "$current_bootstrap_version" "$current_bun_version" "Building VM image"
+        
+        # Call the VM build script
+        if ./scripts/build-macos-vm.sh --release="$macos_version"; then
+            log "✅ VM build completed successfully for macOS $macos_version"
+            
+            # Recheck VM status after build
+            if check_vm_image_exists "$expected_image"; then
+                log "✅ VM READY: macOS $macos_version image now available after build"
+                vm_ready=true
+                vm_status_reason="VM image built successfully"
+            else
+                log "❌ VM build completed but image still not found"
+                vm_ready=false
+                vm_status_reason="VM build completed but image not found"
+            fi
+        else
+            log "❌ VM build failed for macOS $macos_version"
+            vm_ready=false
+            vm_status_reason="VM build failed"
+        fi
+    fi
+    
+    # Update final metadata
+    update_agent_metadata_for_version "$macos_version" "$vm_ready" "$expected_image" "$current_bootstrap_version" "$current_bun_version" "$vm_status_reason"
+    
+    if [ "$vm_ready" = true ]; then
+        return 0
+    else
         return 1
     fi
 }

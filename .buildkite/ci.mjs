@@ -300,8 +300,7 @@ function getCppAgent(platform, options) {
       queue: "darwin",
       os,
       arch: arch === "aarch64" ? "arm64" : arch,
-      tart: "true",
-      [`vm-ready-macos-${release}`]: "true"  // Version-specific VM ready check
+      tart: "true"
     };
   }
 
@@ -353,8 +352,7 @@ function getTestAgent(platform, options) {
       queue: "darwin",
       os,
       arch: arch === "aarch64" ? "arm64" : arch,
-      tart: "true",
-      [`vm-ready-macos-${release}`]: "true"  // Version-specific VM ready check
+      tart: "true"
     };
   }
 
@@ -1086,26 +1084,6 @@ async function getPipelineOptions() {
 }
 
 /**
- * @param {Platform} platform
- * @param {PipelineOptions} options
- * @returns {Step}
- */
-function getMacOSVMBuildStep(platform, options) {
-  const { release } = platform;
-  return {
-    key: `build-macos-vm-${release}`,
-    label: `🍎 Build macOS ${release} VM image`,
-    agents: {
-      queue: "darwin",
-      [`vm-ready-macos-${release}`]: "false"  // Only target agents that DON'T have this specific macOS version ready
-    },
-    command: `./scripts/build-macos-vm.sh --release=${release}`,
-    timeout_in_minutes: 720,
-    parallelism: 3,
-  };
-}
-
-/**
  * @param {PipelineOptions} [options]
  * @returns {Promise<Pipeline | undefined>}
  */
@@ -1135,19 +1113,6 @@ async function getPipeline(options = {}) {
 
   /** @type {Step[]} */
   const steps = [];
-
-  // Add macOS VM base image build steps - one for each unique macOS release
-  const macOSReleases = [...new Set([
-    ...buildPlatforms.filter(p => p.os === "darwin").map(p => p.release),
-    ...testPlatforms.filter(p => p.os === "darwin").map(p => p.release)
-  ])];
-  if (macOSReleases.length > 0) {
-    steps.push({
-      key: "build-macos-base-images", 
-      group: "🍎 macOS Base Images",
-      steps: macOSReleases.map(release => getMacOSVMBuildStep({ os: "darwin", release }, options))
-    });
-  }
 
   if (imagePlatforms.size) {
     steps.push({

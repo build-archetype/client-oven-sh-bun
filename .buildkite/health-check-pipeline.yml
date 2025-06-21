@@ -6,7 +6,7 @@ steps:
       ./scripts/agent-vm-health-check.sh check
     agents:
       queue: "darwin"
-    timeout_in_minutes: 5
+    timeout_in_minutes: 720
     retry:
       automatic: false
     # Run on ALL darwin agents simultaneously

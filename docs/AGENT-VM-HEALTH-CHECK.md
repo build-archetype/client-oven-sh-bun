@@ -1,21 +1,48 @@
 # Agent VM Health Check System
 
-This system enables dynamic agent tagging based on VM image availability for specific macOS versions, ensuring builds only run on hosts with the correct VM images ready.
+This system enables dynamic agent management for macOS VM images, automatically building missing VMs and updating agent status based on VM availability for specific macOS versions.
 
 ## 🎯 How It Works
 
 1. **Agents self-check** VM image availability for each macOS version (13, 14)
-2. **Update version-specific meta-data** (`vm-ready-macos-13: true/false`, `vm-ready-macos-14: true/false`) 
-3. **Jobs target agents with specific version ready** using meta-data selectors
-4. **VM build jobs** target agents that DON'T have the specific version ready
+2. **Automatically build** missing VM images when detected
+3. **Update version-specific meta-data** (`vm-ready-macos-13: true/false`, `vm-ready-macos-14: true/false`) 
+4. **Jobs run normally** on available agents without VM dependencies
+5. **Background VM management** ensures all agents eventually have required VMs
 
 ## 📋 Benefits
 
-- **Version-specific targeting** - macOS 13 builds only run on hosts with macOS 13 VMs
-- **Efficient resource utilization** - agents can have some versions ready while building others
-- **No wasted builds** on hosts without the required VM images
-- **Automatic recovery** as agents become ready for each version
-- **Graceful degradation** when specific VM versions are being built/updated
+- **Automatic VM building** - missing VMs are built without manual intervention
+- **Version-specific management** - each macOS version handled independently
+- **No build dependencies** - regular builds run immediately on available agents
+- **Efficient resource utilization** - VMs built in background while builds continue
+- **Self-healing** - agents automatically recover from missing VMs
+- **Parallel execution** - multiple agents can build different VMs simultaneously
+
+## 🛠️ Health Check Behavior
+
+The health check script now performs these actions:
+
+### For Each macOS Version (13, 14):
+1. **Check if VM exists locally**
+2. **If missing**: Call `./scripts/build-macos-vm.sh --release=VERSION`
+3. **If bootstrap mismatch**: Rebuild VM with correct version
+4. **Update agent meta-data** with current status
+5. **Continue to next version**
+
+### Build Process:
+- Downloads base macOS image if needed
+- Runs bootstrap script to install dependencies
+- Validates all required tools are present
+- Optionally pushes to registry for sharing
+- Updates agent meta-data to show ready status
+
+## ⏱️ Timing Considerations
+
+- **Health check runs every 5 minutes** via scheduled pipeline
+- **VM builds can take 1-12 hours** depending on network/resources
+- **Timeout set to 720 minutes (12 hours)** to accommodate builds
+- **Regular builds continue** on other agents while VMs build in background
 
 ## 🎯 Agent Meta-data Structure
 
@@ -137,66 +164,36 @@ agents: {
 ./scripts/agent-vm-health-check.sh force-not-ready
 ```
 
-### Buildkite Dashboard
+### Build Progress Tracking
 
-View agent meta-data in the Buildkite UI:
-- Go to Agents page
-- Click on individual agents
-- View meta-data section
-- Look for `vm-ready-macos-13` and `vm-ready-macos-14` fields
-
-## 🔄 Automatic Recovery Flow
-
-### Example Scenario:
-1. **Agent starts**: No VM images → `vm-ready-macos-13: false`, `vm-ready-macos-14: false`
-2. **macOS 14 VM build job**: Runs on this agent → creates macOS 14 image → sets `vm-ready-macos-14: true`
-3. **macOS 14 builds**: Now target this agent
-4. **macOS 13 VM build job**: Still runs on this agent → creates macOS 13 image → sets `vm-ready-macos-13: true`
-5. **All builds**: Now target this agent for appropriate versions
-
-### Mixed States:
-An agent can have:
-- `vm-ready-macos-13: true`, `vm-ready-macos-14: false` → Available for macOS 13 builds only
-- `vm-ready-macos-13: false`, `vm-ready-macos-14: true` → Available for macOS 14 builds only
-- `vm-ready-macos-13: true`, `vm-ready-macos-14: true` → Available for all builds
+Agent meta-data shows real-time status:
+- `vm-status-reason-macos-13`: "Building VM image" (during build)
+- `vm-status-reason-macos-14`: "VM image built successfully" (after completion)
+- `vm-last-check-macos-13`: Timestamp of last check/build
 
 ## 🚨 Troubleshooting
 
-### Agent Stuck in Not-Ready State for Specific Version
+### Agent Building VMs for Too Long
 
 ```bash
-# Check what's wrong
+# Check what's happening
 ./scripts/agent-vm-health-check.sh status
 
-# Check specific version details
+# Check specific version build progress
 buildkite-agent meta-data get "vm-status-reason-macos-13"
-buildkite-agent meta-data get "vm-status-reason-macos-14"
+buildkite-agent meta-data get "vm-last-check-macos-13"
 
-# Common issues:
-# - VM image missing for specific version
-# - Bootstrap version mismatch for specific version
-# - Tart permissions (affects all versions)
+# Manual intervention if needed
+./scripts/build-macos-vm.sh --release=13 --force-refresh
 ```
 
-### Force Version-Specific Recovery
+### Build Failures
 
-```bash
-# Force ready state for all versions
-./scripts/agent-vm-health-check.sh force-ready
-
-# Or trigger VM build manually for specific version
-./scripts/build-macos-vm.sh --release=13  # For macOS 13
-./scripts/build-macos-vm.sh --release=14  # For macOS 14
-```
-
-### No Agents Available for Specific Version
-
-If no agents show `vm-ready-macos-13: true`:
-
-1. Check if macOS 13 VM build jobs are running/queued
-2. Manually trigger macOS 13 VM build: `./scripts/build-macos-vm.sh --release=13`
-3. Check agent logs for health check errors
-4. Verify tart/VM functionality on agents
+Common issues and solutions:
+- **Network timeouts**: Retry automatically on next health check
+- **Disk space**: Clean up old VMs automatically
+- **Permissions**: Tart permission fixes built into scripts
+- **Bootstrap failures**: Validates tools and retries if needed
 
 ## ⚙️ Configuration
 
