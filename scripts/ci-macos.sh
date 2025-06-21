@@ -57,15 +57,20 @@ cleanup_temporary_vms() {
         return 0
     fi
     
-    # Clean up temporary build VMs (UUID-named)
-    log "🗑️  Removing temporary build VMs..."
+    # Clean up temporary build VMs (any bun-build VM without 'bootstrap' in name)
+    log "🗑️  Removing temporary build VMs (bun-build* without 'bootstrap')..."
     while IFS= read -r line; do
-        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+[0-9]+[[:space:]]+([0-9]+)[[:space:]]+[0-9]+[[:space:]]+stopped ]]; then
+        # Skip header line and empty lines
+        [[ "$line" =~ ^(Source|local|OCI)[[:space:]] ]] || continue
+        [[ "$line" =~ ^Source ]] && continue
+        
+        # Parse the line - Format: local  VM_NAME  DISK_SIZE  SIZE_ON_DISK  SIZE_ON_DISK  STATE
+        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+stopped ]]; then
             local vm_name="${BASH_REMATCH[1]}"
-            local size_gb="${BASH_REMATCH[2]}"
+            local size_gb="${BASH_REMATCH[3]}"  # Use SizeOnDisk (3rd number)
             
-            # Match temporary build VMs: bun-build-{timestamp}-{UUID}
-            if [[ "$vm_name" =~ ^bun-build-[0-9]+-[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$ ]]; then
+            # Match any bun-build VM that doesn't contain 'bootstrap'
+            if [[ "$vm_name" =~ ^bun-build ]] && [[ ! "$vm_name" =~ bootstrap ]]; then
                 log "    Deleting temporary VM: $vm_name (${size_gb}GB)"
                 if tart delete "$vm_name" 2>/dev/null; then
                     log "    ✅ Deleted successfully"
@@ -81,9 +86,13 @@ cleanup_temporary_vms() {
     # Clean up outdated base images (old bootstrap versions)
     log "🗑️  Removing outdated base images..."
     while IFS= read -r line; do
-        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+[0-9]+[[:space:]]+([0-9]+)[[:space:]]+[0-9]+[[:space:]]+stopped ]]; then
+        # Skip header line and empty lines
+        [[ "$line" =~ ^(Source|local|OCI)[[:space:]] ]] || continue
+        [[ "$line" =~ ^Source ]] && continue
+        
+        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+stopped ]]; then
             local vm_name="${BASH_REMATCH[1]}"
-            local size_gb="${BASH_REMATCH[2]}"
+            local size_gb="${BASH_REMATCH[3]}"  # Use SizeOnDisk (3rd number)
             
             # Match base images with bootstrap versions
             if [[ "$vm_name" =~ ^bun-build-macos-[0-9]+-.*-bootstrap-(.+)$ ]]; then
@@ -104,18 +113,20 @@ cleanup_temporary_vms() {
         fi
     done <<< "$tart_output"
     
-    # Clean up redundant arch-specific images (keep only generic ones)
-    log "🗑️  Removing redundant architecture-specific images..."
+    # Clean up duplicate OCI images (keep only latest tag, remove SHA versions)
+    log "🗑️  Removing duplicate OCI images..."
     while IFS= read -r line; do
-        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+[0-9]+[[:space:]]+([0-9]+)[[:space:]]+[0-9]+[[:space:]]+stopped ]]; then
+        # Skip header line and empty lines
+        [[ "$line" =~ ^(Source|local|OCI)[[:space:]] ]] || continue
+        [[ "$line" =~ ^Source ]] && continue
+        
+        if [[ "$line" =~ ^OCI[[:space:]]+([^[:space:]]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+stopped ]]; then
             local vm_name="${BASH_REMATCH[1]}"
-            local size_gb="${BASH_REMATCH[2]}"
+            local size_gb="${BASH_REMATCH[3]}"  # Use SizeOnDisk (3rd number)
             
-            # Match arch-specific images: bun-build-macos-{release}-{arch}-{version}-bootstrap-{bootstrap}
-            if [[ "$vm_name" =~ ^bun-build-macos-[0-9]+-arm64-.*-bootstrap-.*$ ]] || 
-               [[ "$vm_name" =~ ^bun-build-macos-[0-9]+-x64-.*-bootstrap-.*$ ]]; then
-                log "    Deleting redundant arch-specific image: $vm_name (${size_gb}GB)"
-                log "    (Generic images work for all architectures)"
+            # Remove SHA-based OCI images (keep only tag-based ones)
+            if [[ "$vm_name" =~ @sha256: ]]; then
+                log "    Deleting duplicate OCI SHA image: $vm_name (${size_gb}GB)"
                 if tart delete "$vm_name" 2>/dev/null; then
                     log "    ✅ Deleted successfully"
                     cleaned_count=$((cleaned_count + 1))
@@ -292,8 +303,8 @@ main() {
     # BUILD PHASES ONLY - no cleanup functionality
     # All cleanup is handled by VM preparation step (build-macos-vm.sh)
     
-    # Generate a unique VM name
-    local vm_name="bun-build-$(date +%s)-$(uuidgen)"
+    # Generate a unique VM name with tmp prefix for easy cleanup
+    local vm_name="tmp-bun-build-$(date +%s)-$(uuidgen)"
     
     # Get the command to run (default to build command if none provided)
     local command="${1:-./scripts/runner.node.mjs --step=darwin-x64-build-bun}"
