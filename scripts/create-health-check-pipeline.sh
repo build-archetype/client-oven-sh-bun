@@ -3,8 +3,8 @@ set -euo pipefail
 
 # Script to create/update the agent health check pipeline in Buildkite
 
-PIPELINE_SLUG="agent-vm-health-check"
-PIPELINE_NAME="Agent VM Health Check"
+PIPELINE_SLUG="oven-bun-agent-vm-healthcheck"
+PIPELINE_NAME="oven-bun-agent-vm-healthcheck"
 SCHEDULE_CRON="*/5 * * * *"  # Every 5 minutes
 
 log() {
@@ -15,7 +15,7 @@ log() {
 create_pipeline_config() {
     cat << 'EOF'
 {
-  "name": "Agent VM Health Check",
+  "name": "oven-bun-agent-vm-healthcheck",
   "description": "Periodic health check for agent VM image availability",
   "repository": "https://github.com/build-archetype/client-oven-sh-bun.git",
   "branch_configuration": "feat/self-hosted-mac-ci-with-tart",
