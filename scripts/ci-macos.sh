@@ -241,37 +241,14 @@ create_and_run_vm() {
     export CURRENT_VM_NAME="$vm_name"
     
     log "Setting VM resources..."
-    tart set "$vm_name" --cpu=6 --memory=16384
+    tart set "$vm_name" --cpu=4 --memory=8192
     
     log "Starting VM with workspace: $workspace_dir"
     tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" > vm.log 2>&1 &
     
-    # Wait for VM to be ready with simple checking every 5 seconds
+    # Wait for VM to be ready
     log "Waiting for VM to be ready..."
-    local max_attempts=60  # 5 minutes with 5-second intervals
-    local attempt=0
-    
-    while [ $attempt -lt $max_attempts ]; do
-        # Check if VM is running
-        if tart list | grep -q "$vm_name.*running"; then
-            log "✅ VM is running after $((attempt * 5)) seconds"
-            break
-        fi
-        
-        attempt=$((attempt + 1))
-        log "Checking VM status... ($attempt/$max_attempts)"
-        sleep 5
-    done
-    
-    # Final check
-    if ! tart list | grep -q "$vm_name.*running"; then
-        log "❌ VM failed to start within 5 minutes"
-        log "VM logs:"
-        cat vm.log || log "No VM logs available"
-        exit 1
-    fi
-    
-    log "✅ VM is ready and running"
+    sleep 30
 
     # Make run-vm-command.sh executable
     chmod +x ./scripts/run-vm-command.sh
