@@ -300,7 +300,8 @@ function getCppAgent(platform, options) {
       queue: "darwin",
       os,
       arch: arch === "aarch64" ? "arm64" : arch,
-      tart: "true"
+      tart: "true",
+      "vm-ready": "true"  // Only target agents with VM images ready
     };
   }
 
@@ -352,7 +353,8 @@ function getTestAgent(platform, options) {
       queue: "darwin",
       os,
       arch: arch === "aarch64" ? "arm64" : arch,
-      tart: "true"
+      tart: "true",
+      "vm-ready": "true"  // Only target agents with VM images ready
     };
   }
 
@@ -1095,6 +1097,8 @@ function getMacOSVMBuildStep(platform, options) {
     label: `🍎 Build macOS ${release} VM image`,
     agents: {
       queue: "darwin",
+      // VM build steps can run on any agent since they create the VM images
+      // No vm-ready requirement here - this step makes agents ready
       // TODO: In future, use different tag for base image builds
       // macos_vm_builder: "true"
     },
