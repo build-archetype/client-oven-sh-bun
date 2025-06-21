@@ -57,7 +57,7 @@ cleanup_temporary_vms() {
         return 0
     fi
     
-    # Clean up ALL temporary VMs (any VM starting with tmp-)
+    # Clean up ALL temporary VMs (any VM starting with tmp-) - stop them first if running
     log "🗑️  Removing ALL temporary VMs (tmp-*)..."
     while IFS= read -r line; do
         # Skip header line and empty lines
@@ -65,13 +65,29 @@ cleanup_temporary_vms() {
         [[ "$line" =~ ^Source ]] && continue
         
         # Parse the line - Format: local  VM_NAME  DISK_SIZE  SIZE_ON_DISK  SIZE_ON_DISK  STATE
-        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+.* ]]; then
+        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+(.+) ]]; then
             local vm_name="${BASH_REMATCH[1]}"
             local size_gb="${BASH_REMATCH[3]}"  # Use SizeOnDisk (3rd number)
+            local state="${BASH_REMATCH[5]}"
             
             # Match ANY VM starting with tmp-
             if [[ "$vm_name" =~ ^tmp- ]]; then
-                log "    Deleting temporary VM: $vm_name (${size_gb}GB)"
+                log "    Found temporary VM: $vm_name (${size_gb}GB, $state)"
+                
+                # Stop VM if it's running
+                if [[ "$state" == "running" ]]; then
+                    log "    Stopping running VM: $vm_name"
+                    if tart stop "$vm_name" 2>/dev/null; then
+                        log "    ✅ Stopped successfully"
+                        # Wait a moment for VM to fully stop
+                        sleep 3
+                    else
+                        log "    ⚠️  Failed to stop, will try to delete anyway"
+                    fi
+                fi
+                
+                # Delete the VM
+                log "    Deleting VM: $vm_name"
                 if tart delete "$vm_name" 2>/dev/null; then
                     log "    ✅ Deleted successfully"
                     cleaned_count=$((cleaned_count + 1))
@@ -91,13 +107,28 @@ cleanup_temporary_vms() {
         [[ "$line" =~ ^Source ]] && continue
         
         # Parse the line - Format: local  VM_NAME  DISK_SIZE  SIZE_ON_DISK  SIZE_ON_DISK  STATE
-        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+.* ]]; then
+        if [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+(.+) ]]; then
             local vm_name="${BASH_REMATCH[1]}"
             local size_gb="${BASH_REMATCH[3]}"  # Use SizeOnDisk (3rd number)
+            local state="${BASH_REMATCH[5]}"
             
             # Match any bun-build VM that doesn't contain 'bootstrap'
             if [[ "$vm_name" =~ ^bun-build ]] && [[ ! "$vm_name" =~ bootstrap ]]; then
-                log "    Deleting legacy temporary VM: $vm_name (${size_gb}GB)"
+                log "    Found legacy temporary VM: $vm_name (${size_gb}GB, $state)"
+                
+                # Stop VM if it's running
+                if [[ "$state" == "running" ]]; then
+                    log "    Stopping running VM: $vm_name"
+                    if tart stop "$vm_name" 2>/dev/null; then
+                        log "    ✅ Stopped successfully"
+                        sleep 3
+                    else
+                        log "    ⚠️  Failed to stop, will try to delete anyway"
+                    fi
+                fi
+                
+                # Delete the VM
+                log "    Deleting VM: $vm_name"
                 if tart delete "$vm_name" 2>/dev/null; then
                     log "    ✅ Deleted successfully"
                     cleaned_count=$((cleaned_count + 1))
@@ -167,6 +198,7 @@ cleanup_temporary_vms() {
     log "✅ Cleanup complete: Removed $cleaned_count VMs, freed ${space_freed}GB"
     log "=== END CLEANUP ==="
 }
+
 # Function to start logging
 start_logging() {
     log "Starting Tart logging..."
@@ -443,21 +475,37 @@ cleanup_on_exit() {
     if [ -n "${CURRENT_VM_NAME:-}" ]; then
         log "Cleaning up current VM: $CURRENT_VM_NAME"
         if tart list | grep -q "$CURRENT_VM_NAME"; then
-            log "VM $CURRENT_VM_NAME exists, deleting..."
+            log "VM $CURRENT_VM_NAME exists, stopping and deleting..."
+            # Stop VM first if it's running
+            if tart list | grep -q "$CURRENT_VM_NAME.*running"; then
+                log "Stopping running VM: $CURRENT_VM_NAME"
+                tart stop "$CURRENT_VM_NAME" 2>/dev/null || log "Failed to stop $CURRENT_VM_NAME"
+                sleep 2
+            fi
+            # Delete the VM
             tart delete "$CURRENT_VM_NAME" 2>/dev/null || log "Failed to delete $CURRENT_VM_NAME"
         else
             log "VM $CURRENT_VM_NAME not found - may have been cleaned up earlier"
         fi
     fi
     
-    # Clean up any remaining tmp VMs
+    # Clean up any remaining tmp VMs - stop them first if running
     log "Final cleanup of all tmp VMs..."
     local tart_output=$(tart list 2>/dev/null || echo "")
     while IFS= read -r line; do
-        [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+.* ]] || continue
+        [[ "$line" =~ ^local[[:space:]]+([^[:space:]]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+([0-9]+)[[:space:]]+(.+) ]] || continue
         local vm_name="${BASH_REMATCH[1]}"
+        local state="${BASH_REMATCH[5]}"
         if [[ "$vm_name" =~ ^tmp- ]]; then
-            log "Final cleanup: deleting $vm_name"
+            log "Final cleanup: found $vm_name ($state)"
+            # Stop if running
+            if [[ "$state" == "running" ]]; then
+                log "Stopping running VM: $vm_name"
+                tart stop "$vm_name" 2>/dev/null || log "Failed to stop $vm_name"
+                sleep 2
+            fi
+            # Delete the VM
+            log "Deleting VM: $vm_name"
             tart delete "$vm_name" 2>/dev/null || log "Failed to delete $vm_name"
         fi
     done <<< "$tart_output"
@@ -509,7 +557,7 @@ main() {
     # All cleanup is handled by VM preparation step (build-macos-vm.sh)
     
     # Generate a unique VM name with tmp prefix for easy cleanup
-    local vm_name="tmp-bun-build-$(date +%s)-$(uuidgen)"
+    local vm_name="tmp-bun-build-$(printf "%05d" $((RANDOM % 100000)))"
     
     # Get the command to run (default to build command if none provided)
     local command="${1:-./scripts/runner.node.mjs --step=darwin-x64-build-bun}"
