@@ -39,17 +39,39 @@ Each agent tracks separate meta-data for each macOS version:
 
 The health check script is provided at `scripts/agent-vm-health-check.sh`.
 
-### 2. Agent Configuration
+### 2. Deployment Options
 
-Add this to your Buildkite agent's startup script or cron:
+#### **Option A: Dedicated Pipeline (Recommended)**
+
+Create a separate health check pipeline that runs every 5 minutes:
 
 ```bash
-# Run health check every 5 minutes for all supported macOS versions
-*/5 * * * * cd /path/to/repo && ./scripts/agent-vm-health-check.sh check
+# Set up the health check pipeline
+./scripts/create-health-check-pipeline.sh
 
-# Or run on agent startup
-./scripts/agent-vm-health-check.sh check
+# This creates a Buildkite pipeline that:
+# - Runs every 5 minutes automatically  
+# - Targets all darwin agents simultaneously
+# - Updates agent meta-data
+# - Provides visibility in Buildkite UI
 ```
+
+**Benefits:**
+- ✅ Centralized management (no agent setup needed)
+- ✅ Visible in Buildkite dashboard
+- ✅ Easy to update/modify
+- ✅ Better error handling and monitoring
+
+#### **Option B: Cron Jobs (Manual)**
+
+Add to each agent's cron if preferred:
+
+```bash
+# Run health check every 5 minutes
+*/5 * * * * cd /path/to/repo && ./scripts/agent-vm-health-check.sh check
+```
+
+**Note:** Pipeline approach is recommended for easier management.
 
 ### 3. Agent Launch Configuration
 

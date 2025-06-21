@@ -1,0 +1,22 @@
+steps:
+  - label: "🩺 Agent VM Health Check"
+    command: |
+      echo "Running VM health check on agent..."
+      ./scripts/agent-vm-health-check.sh check
+    agents:
+      queue: "darwin"
+    timeout_in_minutes: 5
+    retry:
+      automatic: false
+    # Run on ALL darwin agents simultaneously
+    parallelism: 10
+    
+  - label: "📊 Health Check Summary"
+    command: |
+      echo "=== HEALTH CHECK SUMMARY ==="
+      echo "All agents have completed health checks"
+      echo "Check individual agent meta-data in Buildkite UI"
+    agents:
+      queue: "darwin"
+      # Run summary on any agent
+    depends_on: "🩺 Agent VM Health Check" 
