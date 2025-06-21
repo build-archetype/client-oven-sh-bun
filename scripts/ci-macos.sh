@@ -246,9 +246,73 @@ create_and_run_vm() {
     log "Starting VM with workspace: $workspace_dir"
     tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" > vm.log 2>&1 &
     
-    # Wait for VM to be ready
+    # Wait for VM to be ready with simple checking every 5 seconds
     log "Waiting for VM to be ready..."
-    sleep 30
+    local max_attempts=60  # 5 minutes with 5-second intervals
+    local attempt=0
+    local diagnostic_shown=false
+    
+    while [ $attempt -lt $max_attempts ]; do
+        # Check if VM is running
+        if tart list | grep -q "$vm_name.*running"; then
+            log "✅ VM is running after $((attempt * 5)) seconds"
+            break
+        fi
+        
+        attempt=$((attempt + 1))
+        
+        # Show resource diagnostics after 2 minutes (24 attempts)
+        if [ $attempt -eq 24 ] && [ "$diagnostic_shown" = false ]; then
+            log "⚠️  VM not starting after 2 minutes - checking host resources..."
+            diagnostic_shown=true
+            
+            # Get system resource info
+            log "=== HOST RESOURCE DIAGNOSTICS ==="
+            
+            # CPU info
+            local cpu_count=$(sysctl -n hw.ncpu)
+            local cpu_usage=$(top -l 1 -n 0 | grep "CPU usage" | awk '{print $3}' | sed 's/%//')
+            local cpu_available=$((100 - ${cpu_usage%.*}))
+            log "💻 CPU: $cpu_count cores total, ${cpu_usage}% used, ${cpu_available}% available"
+            log "   VM requesting: 4 cores - $([ $cpu_count -ge 4 ] && echo "✅ SUFFICIENT" || echo "❌ INSUFFICIENT")"
+            
+            # Memory info  
+            local memory_total_mb=$(echo "$(sysctl -n hw.memsize) / 1024 / 1024" | bc)
+            local memory_used_mb=$(vm_stat | awk '/Pages active/ {active=$3} /Pages inactive/ {inactive=$3} /Pages speculative/ {spec=$3} /Pages wired/ {wired=$3} END {gsub(/[^0-9]/,"",active); gsub(/[^0-9]/,"",inactive); gsub(/[^0-9]/,"",spec); gsub(/[^0-9]/,"",wired); printf "%.0f", (active+inactive+spec+wired)*4096/1024/1024}')
+            local memory_available_mb=$((memory_total_mb - memory_used_mb))
+            local memory_usage_pct=$(echo "scale=1; $memory_used_mb * 100 / $memory_total_mb" | bc)
+            log "🧠 Memory: ${memory_total_mb}MB total, ${memory_used_mb}MB used (${memory_usage_pct}%), ${memory_available_mb}MB available"
+            log "   VM requesting: 8192MB (8GB) - $([ $memory_available_mb -ge 8192 ] && echo "✅ SUFFICIENT" || echo "❌ INSUFFICIENT ($memory_available_mb MB available)")"
+            
+            # Running VMs
+            local running_vms=$(tart list | grep "running" | wc -l | tr -d ' ')
+            log "🔄 Running VMs: $running_vms"
+            if [ $running_vms -gt 0 ]; then
+                log "   Active VMs:"
+                tart list | grep "running" | awk '{print "   - " $2}' || log "   (unable to list active VMs)"
+            fi
+            
+            # Disk space
+            local disk_usage=$(df -h . | tail -1 | awk '{print $5}' | sed 's/%//')
+            local disk_available=$(df -h . | tail -1 | awk '{print $4}')
+            log "💾 Disk: ${disk_usage}% used, ${disk_available} available"
+            
+            # Overall assessment
+            log "=== RESOURCE ASSESSMENT ==="
+            if [ $cpu_count -ge 4 ] && [ $memory_available_mb -ge 8192 ]; then
+                log "✅ Host has sufficient resources for VM (4 CPUs + 8GB RAM)"
+                log "   Issue may be: VM image corruption, Tart permissions, or system limits"
+            else
+                log "❌ Host lacks sufficient resources for VM"
+                [ $cpu_count -lt 4 ] && log "   - Need 4 CPUs, only $cpu_count available"
+                [ $memory_available_mb -lt 8192 ] && log "   - Need 8GB RAM, only ${memory_available_mb}MB available"
+            fi
+            log "================================="
+        fi
+        
+        log "Checking VM status... ($attempt/$max_attempts)"
+        sleep 5
+    done
 
     # Make run-vm-command.sh executable
     chmod +x ./scripts/run-vm-command.sh
