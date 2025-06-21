@@ -253,15 +253,7 @@ create_and_run_vm() {
     local SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -o ConnectTimeout=2"
     
     while [ $attempt -lt $max_attempts ]; do
-        # Check if VM is running first
-        if ! tart list | grep -q "$vm_name.*running"; then
-            log "VM is not running - waiting..."
-            attempt=$((attempt + 1))
-            sleep 5
-            continue
-        fi
-        
-        # Try to get VM IP address
+        # Try to get VM IP address directly - this will only work if VM is running and has networking
         local vm_ip=$(tart ip "$vm_name" 2>/dev/null || echo "")
         if [ -n "$vm_ip" ]; then
             log "VM has IP address: $vm_ip - testing SSH connectivity..."
@@ -273,7 +265,7 @@ create_and_run_vm() {
                 log "VM has IP but SSH not ready yet..."
             fi
         else
-            log "VM running but no IP address yet..."
+            log "VM not ready yet (no IP) - waiting..."
         fi
         
         attempt=$((attempt + 1))
@@ -282,6 +274,9 @@ create_and_run_vm() {
         if [ $attempt -eq 24 ] && [ "$diagnostic_shown" = false ]; then
             log "⚠️  VM not ready after 2 minutes - checking host resources..."
             diagnostic_shown=true
+            
+            log "Current VM status:"
+            tart list | grep "$vm_name" || log "VM not found in tart list"
             
             # Get system resource info
             log "=== HOST RESOURCE DIAGNOSTICS ==="
@@ -346,22 +341,20 @@ create_and_run_vm() {
                 local test_attempt=0
                 local test_started=false
                 while [ $test_attempt -lt 6 ]; do
-                    if tart list | grep -q "$test_vm_name.*running"; then
-                        # Check if test VM gets an IP
-                        local test_vm_ip=$(tart ip "$test_vm_name" 2>/dev/null || echo "")
-                        if [ -n "$test_vm_ip" ]; then
-                            log "✅ Test VM started successfully and got IP: $test_vm_ip"
-                            log "   Main VM should now work with same default allocation"
-                            test_started=true
-                            break
-                        fi
+                    # Check if test VM gets an IP
+                    local test_vm_ip=$(tart ip "$test_vm_name" 2>/dev/null || echo "")
+                    if [ -n "$test_vm_ip" ]; then
+                        log "✅ Test VM started successfully and got IP: $test_vm_ip"
+                        log "   Main VM should now work with same default allocation"
+                        test_started=true
+                        break
                     fi
                     test_attempt=$((test_attempt + 1))
                     sleep 5
                 done
                 
                 if [ "$test_started" = false ]; then
-                    log "❌ Test VM also failed to start or get IP with default resources"
+                    log "❌ Test VM also failed to get IP with default resources"
                     log "   Issue is likely deeper: VM image, Tart, or system problem"
                 fi
                 
