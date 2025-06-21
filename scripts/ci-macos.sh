@@ -241,7 +241,7 @@ create_and_run_vm() {
     export CURRENT_VM_NAME="$vm_name"
     
     log "Setting VM resources..."
-    tart set "$vm_name" --cpu=3 --memory=6144
+    tart set "$vm_name" --cpu=2 --memory=6144
     
     log "Starting VM with workspace: $workspace_dir"
     tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" > vm.log 2>&1 &
@@ -274,7 +274,7 @@ create_and_run_vm() {
             local cpu_usage=$(top -l 1 -n 0 | grep "CPU usage" | awk '{print $3}' | sed 's/%//')
             local cpu_available=$((100 - ${cpu_usage%.*}))
             log "💻 CPU: $cpu_count cores total, ${cpu_usage}% used, ${cpu_available}% available"
-            log "   VM requesting: 3 cores - $([ $cpu_count -ge 3 ] && echo "✅ SUFFICIENT" || echo "❌ INSUFFICIENT")"
+            log "   VM requesting: 2 cores - $([ $cpu_count -ge 2 ] && echo "✅ SUFFICIENT" || echo "❌ INSUFFICIENT")"
             
             # Memory info  
             local memory_total_mb=$(echo "$(sysctl -n hw.memsize) / 1024 / 1024" | bc)
@@ -299,12 +299,12 @@ create_and_run_vm() {
             
             # Overall assessment
             log "=== RESOURCE ASSESSMENT ==="
-            if [ $cpu_count -ge 3 ] && [ $memory_available_mb -ge 6144 ]; then
-                log "✅ Host has sufficient resources for VM (3 CPUs + 6GB RAM)"
+            if [ $cpu_count -ge 2 ] && [ $memory_available_mb -ge 6144 ]; then
+                log "✅ Host has sufficient resources for VM (2 CPUs + 6GB RAM)"
                 log "   Issue may be: VM image corruption, Tart permissions, or system limits"
             else
                 log "❌ Host lacks sufficient resources for VM"
-                [ $cpu_count -lt 3 ] && log "   - Need 3 CPUs, only $cpu_count available"
+                [ $cpu_count -lt 2 ] && log "   - Need 2 CPUs, only $cpu_count available"
                 [ $memory_available_mb -lt 6144 ] && log "   - Need 6GB RAM, only ${memory_available_mb}MB available"
             fi
             log "================================="
@@ -331,7 +331,7 @@ create_and_run_vm() {
                 while [ $test_attempt -lt 6 ]; do
                     if tart list | grep -q "$test_vm_name.*running"; then
                         log "✅ Test VM started successfully with default resources!"
-                        log "   Issue is likely our moderate resource allocation (3 CPUs + 6GB)"
+                        log "   Issue is likely our conservative resource allocation (2 CPUs + 6GB)"
                         test_started=true
                         break
                     fi
@@ -359,7 +359,7 @@ create_and_run_vm() {
             
             # Restart original VM with our settings
             log "Restarting original VM with configured resources..."
-            tart set "$vm_name" --cpu=3 --memory=6144
+            tart set "$vm_name" --cpu=2 --memory=6144
             tart run "$vm_name" --no-graphics --dir=workspace:"$workspace_dir" > vm.log 2>&1 &
         fi
         
