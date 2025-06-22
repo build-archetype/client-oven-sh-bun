@@ -147,6 +147,46 @@ export VENDOR_PATH="$HOME/workspace/vendor"
 export TMPDIR="/tmp"
 export LD_SUPPORT_TMPDIR="/tmp"
 
+# === DIAGNOSTIC LOGGING FOR ISSUE #24 ===
+echo "🔍 === LIFECYCLE SCRIPT ENVIRONMENT DEBUG ==="
+echo "Current PATH: $PATH"
+echo "User: $(whoami)"
+echo "Working directory: $(pwd)"
+echo ""
+echo "Tool availability check:"
+echo "  which bun: $(which bun 2>/dev/null || echo 'NOT FOUND')"
+echo "  which node: $(which node 2>/dev/null || echo 'NOT FOUND')"
+echo "  which npm: $(which npm 2>/dev/null || echo 'NOT FOUND')"
+echo "  which node-gyp: $(which node-gyp 2>/dev/null || echo 'NOT FOUND')"
+echo ""
+echo "Bun version check:"
+if command -v bun >/dev/null 2>&1; then
+    echo "  bun --version: $(bun --version 2>/dev/null || echo 'ERROR')"
+    echo "  bun location: $(command -v bun)"
+else
+    echo "  bun: COMMAND NOT FOUND"
+fi
+echo ""
+echo "Node version check:"
+if command -v node >/dev/null 2>&1; then
+    echo "  node --version: $(node --version 2>/dev/null || echo 'ERROR')"
+    echo "  node location: $(command -v node)"
+else
+    echo "  node: COMMAND NOT FOUND"
+fi
+echo ""
+echo "Directory contents check:"
+echo "  /usr/local/bin/ (bun/node): $(ls /usr/local/bin/ 2>/dev/null | grep -E '(bun|node)' || echo 'none found')"
+echo "  /opt/homebrew/bin/ (bun/node): $(ls /opt/homebrew/bin/ 2>/dev/null | grep -E '(bun|node)' || echo 'none found')"
+echo "  ~/.cargo/bin/ exists: $([ -d ~/.cargo/bin ] && echo 'YES' || echo 'NO')"
+echo ""
+echo "Environment variables:"
+echo "  HOME: $HOME"
+echo "  SHELL: $SHELL"
+echo "  BUILDKITE_BUILD_PATH: $BUILDKITE_BUILD_PATH"
+echo "=============================================="
+echo ""
+
 # Ensure buildkite-agent is available
 if ! command -v buildkite-agent >/dev/null 2>&1; then
     echo "Installing buildkite-agent..."
