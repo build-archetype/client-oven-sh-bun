@@ -15,7 +15,7 @@ log() {
 get_base_vm_image() {
     local release="${1:-14}"
     local bun_version="${2:-1.2.16}"
-    local bootstrap_version="${3:-3.6}"
+    local bootstrap_version="${3:-3.7}"
     echo "bun-build-macos-${release}-${bun_version}-bootstrap-${bootstrap_version}"
 }
 
