@@ -24,7 +24,7 @@ fi
 # Base image to clone for new VM images
 BASE_IMAGE="${BASE_IMAGE:-ghcr.io/cirruslabs/macos-sonoma-xcode:latest}"
 # Bootstrap script version (bump to force new images)
-BOOTSTRAP_VERSION="${BOOTSTRAP_VERSION:-3.6}"
+BOOTSTRAP_VERSION="${BOOTSTRAP_VERSION:-3.7}"
 # Bun version (auto-detected, can override)
 BUN_VERSION="${BUN_VERSION:-}"
 # If not set, will be detected later in the script
@@ -483,7 +483,7 @@ main() {
                 echo ""
                 echo "Environment Variables:"
                 echo "  MACOS_RELEASE       macOS release version (default: 14)"
-                echo "  BOOTSTRAP_VERSION   Bootstrap script version (default: 3.6)"
+                echo "  BOOTSTRAP_VERSION   Bootstrap script version (default: 3.7)"
                 echo "  BUN_VERSION         Bun version (auto-detected if not set)"
                 echo "  REGISTRY            Container registry (default: ghcr.io)"
                 echo "  ORGANIZATION        Organization name (default: build-archetype)"
@@ -524,7 +524,7 @@ main() {
     log "Detected Bun version: $BUN_VERSION"
     
     # Bootstrap script version - increment this when bootstrap changes to force new images
-    BOOTSTRAP_VERSION="3.6"  # Updated: Fixed SSH_OPTS and improved base image validation
+    BOOTSTRAP_VERSION="3.7"  # Updated: Added tool symlinks for lifecycle script execution
     
     # Image names (include release and bootstrap version to force rebuilds when bootstrap changes)
     LOCAL_IMAGE_NAME="bun-build-macos-${MACOS_RELEASE}-${BUN_VERSION}-bootstrap-${BOOTSTRAP_VERSION}"

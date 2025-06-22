@@ -210,23 +210,6 @@ else
     exit 1
 fi
 
-# Ensure node and npm are accessible to lifecycle scripts
-if command -v node >/dev/null 2>&1; then
-    NODE_BIN=$(command -v node)
-    sudo ln -sf "$NODE_BIN" /usr/local/bin/node 2>/dev/null || true
-    echo "✅ Node symlink created: $NODE_BIN -> /usr/local/bin/node"
-else
-    echo "⚠️  Node not found - some lifecycle scripts may fail"
-fi
-
-if command -v npm >/dev/null 2>&1; then
-    NPM_BIN=$(command -v npm)
-    sudo ln -sf "$NPM_BIN" /usr/local/bin/npm 2>/dev/null || true
-    echo "✅ NPM symlink created: $NPM_BIN -> /usr/local/bin/npm"
-else
-    echo "⚠️  NPM not found - some lifecycle scripts may fail"
-fi
-
 # Verify Rust is available
 if command -v cargo >/dev/null 2>&1; then
     echo "✅ Cargo found: $(cargo --version)"

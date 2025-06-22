@@ -2,7 +2,7 @@
 set -e
 set -x
 
-# Version: 3.6 - Fixed SSH connectivity and improved base image validation
+# Version: 3.7 - Added tool symlinks for lifecycle script execution
 # A comprehensive bootstrap script for macOS based on the main bootstrap.sh
 
 # Constants
@@ -423,6 +423,53 @@ install_buildkite() {
     print "✅ Buildkite Agent installed successfully: $(buildkite-agent --version)"
 }
 
+create_tool_symlinks() {
+    print "Creating system-wide tool symlinks for lifecycle scripts..."
+    
+    # Determine the appropriate bin directory  
+    local bin_dir="/usr/local/bin"
+    if [ "$(uname -m)" = "arm64" ] && [ -d "/opt/homebrew/bin" ]; then
+        bin_dir="/opt/homebrew/bin"
+    fi
+    
+    # Ensure /usr/local/bin exists and is accessible
+    if [ ! -d "/usr/local/bin" ]; then
+        execute sudo mkdir -p "/usr/local/bin"
+    fi
+    
+    # Create symlinks for node and npm in /usr/local/bin (always in PATH for lifecycle scripts)
+    if command -v node >/dev/null 2>&1; then
+        local node_path="$(command -v node)"
+        execute sudo ln -sf "$node_path" "/usr/local/bin/node"
+        print "✅ Node symlink: $node_path -> /usr/local/bin/node"
+    else
+        print "⚠️  Node not found - some lifecycle scripts may fail"
+    fi
+    
+    if command -v npm >/dev/null 2>&1; then
+        local npm_path="$(command -v npm)"
+        execute sudo ln -sf "$npm_path" "/usr/local/bin/npm"
+        print "✅ NPM symlink: $npm_path -> /usr/local/bin/npm"
+    else
+        print "⚠️  NPM not found - some lifecycle scripts may fail"
+    fi
+    
+    # Verify bun symlink exists (should be created by move_to_bin in install_bun)
+    if command -v bun >/dev/null 2>&1; then
+        local bun_path="$(command -v bun)"
+        if [ ! -f "/usr/local/bin/bun" ]; then
+            execute sudo ln -sf "$bun_path" "/usr/local/bin/bun"
+            print "✅ Bun symlink: $bun_path -> /usr/local/bin/bun"
+        else
+            print "✅ Bun symlink already exists: /usr/local/bin/bun"
+        fi
+    else
+        print "⚠️  Bun not found - lifecycle scripts will fail"
+    fi
+    
+    print "✅ Tool symlinks created for reliable lifecycle script execution"
+}
+
 install_chromium() {
     print "Installing Chromium for browser testing..."
     # Use Google Chrome via Homebrew cask for better compatibility
@@ -598,6 +645,7 @@ install_common_software() {
     install_nodejs
     install_bun
     install_buildkite
+    create_tool_symlinks
 }
 
 install_build_essentials() {
