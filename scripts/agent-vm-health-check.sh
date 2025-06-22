@@ -6,7 +6,7 @@ set -euo pipefail
 # and updates version-specific agent meta-data
 
 # Configuration
-REQUIRED_BOOTSTRAP_VERSION="3.6"
+REQUIRED_BOOTSTRAP_VERSION="3.7"
 BUN_VERSION="${BUN_VERSION:-1.2.16}"
 # Check both macOS versions that this agent might support
 MACOS_VERSIONS_TO_CHECK="${MACOS_VERSIONS_TO_CHECK:-13 14}"  # Space-separated list
@@ -236,7 +236,7 @@ main() {
             echo ""
             echo "Environment Variables:"
             echo "  MACOS_VERSIONS_TO_CHECK  Space-separated macOS versions (default: '13 14')"
-            echo "  REQUIRED_BOOTSTRAP_VERSION  Required bootstrap version (default: '3.6')"
+            echo "  REQUIRED_BOOTSTRAP_VERSION  Required bootstrap version (default: '3.7')"
             exit 1
             ;;
     esac
