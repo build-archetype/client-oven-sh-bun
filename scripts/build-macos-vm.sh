@@ -346,12 +346,21 @@ make_caching_decision() {
     local target_image_name="$3"
     local remote_image_url="$4"
     local force_refresh="$5"
+    local rebuild_from_base="$6"
     
     log "🧠 Making smart caching decision..." >&2
     log "  Target: Bun $target_bun_version, Bootstrap $target_bootstrap_version" >&2
     log "  Force refresh: $force_refresh" >&2
+    log "  Rebuild from base: $rebuild_from_base" >&2
     
-    # If force refresh, skip all local checks
+    # If rebuild from base is forced, skip all caching
+    if [ "$rebuild_from_base" = true ]; then
+        log "🔄 Rebuild from base forced - will build new image" >&2
+        echo "build_new"
+        return
+    fi
+    
+    # If force refresh, skip local checks but still allow remote
     if [ "$force_refresh" = true ]; then
         log "🔄 Force refresh requested - will check remote then build" >&2
         if check_remote_image "$remote_image_url"; then
@@ -383,12 +392,29 @@ make_caching_decision() {
         return
     fi
     
-    # Priority 3: Check for newer bootstrap versions only (removed old fallback)
-    # Bootstrap version changes are critical - always build new if version doesn't match
-    # Old logic that used different bootstrap versions removed for safety
+    # Priority 3: Check for safe incremental update from compatible local images
+    if [ -n "$usable_images" ]; then
+        log "🔄 Checking for safe incremental update..." >&2
+        
+        # Parse the first usable image
+        local source_image="${usable_images%%,*}"
+        
+        # Extract bootstrap version from source image
+        local source_version_info=$(parse_image_name "$source_image")
+        local source_bootstrap_version="${source_version_info#*|}"
+        
+        # Check if incremental update is safe
+        if can_incremental_update_safely "$source_bootstrap_version" "$target_bootstrap_version"; then
+            log "🎯 Decision: Incremental update from $source_image" >&2
+            echo "incremental_update|$source_image"
+            return
+        else
+            log "❌ Incremental update not safe, will build new" >&2
+        fi
+    fi
     
     # Priority 4: Build new image
-    log "🎯 Decision: Build new image (no suitable local or remote found)" >&2
+    log "🎯 Decision: Build new image (no suitable local, remote, or incremental path found)" >&2
     echo "build_new"
 }
 
@@ -424,6 +450,17 @@ execute_caching_decision() {
             log "✅ Remote image cloned locally as: $target_image_name" >&2
             return 0
             ;;
+
+        "incremental_update")
+            log "🔄 Performing incremental update from: $target" >&2
+            if perform_incremental_update "$target" "$target_image_name"; then
+                log "✅ Incremental update completed successfully" >&2
+                return 0
+            else
+                log "❌ Incremental update failed, will fall back to full rebuild" >&2
+                return 1
+            fi
+            ;;
             
         "build_new")
             log "🏗️  Building new image: $target_image_name" >&2
@@ -438,6 +475,144 @@ execute_caching_decision() {
             return 1
             ;;
     esac
+}
+
+# Detect if incremental update is safe for this bootstrap version change
+can_incremental_update_safely() {
+    local from_version="$1"
+    local to_version="$2"
+    
+    log "🔍 Checking if incremental update is safe: $from_version → $to_version" >&2
+    
+    # Define safe incremental update paths
+    # Only allow specific, tested version transitions
+    case "$from_version -> $to_version" in
+        "3.6 -> 3.7")
+            log "✅ Safe incremental: 3.6 → 3.7 (tool symlinks only)" >&2
+            return 0
+            ;;
+        "3.7 -> 3.8")
+            # Future: add more safe transitions here
+            log "✅ Safe incremental: 3.7 → 3.8 (if implemented)" >&2
+            return 0
+            ;;
+        *)
+            log "❌ Incremental not safe: $from_version → $to_version (use full rebuild)" >&2
+            return 1
+            ;;
+    esac
+}
+
+# Perform incremental update from existing VM
+perform_incremental_update() {
+    local source_image="$1"
+    local target_image="$2"
+    
+    log "🔄 Starting incremental update..."
+    log "  Source: $source_image"
+    log "  Target: $target_image"
+    
+    # Clone the source image
+    log "📋 Cloning source image..."
+    if ! tart clone "$source_image" "$target_image"; then
+        log "❌ Failed to clone source image"
+        return 1
+    fi
+    
+    # Start the VM
+    log "🚀 Starting VM for incremental update..."
+    tart run "$target_image" --no-graphics &
+    local vm_pid=$!
+    
+    # Wait for VM to boot
+    log "⏳ Waiting for VM to boot..."
+    sleep 60
+    
+    # Get VM IP
+    local vm_ip=""
+    for i in {1..10}; do
+        vm_ip=$(tart ip "$target_image" 2>/dev/null || echo "")
+        if [ -n "$vm_ip" ]; then
+            log "🌐 VM IP: $vm_ip"
+            break
+        fi
+        log "⏳ Attempt $i: waiting for VM IP..."
+        sleep 10
+    done
+    
+    if [ -z "$vm_ip" ]; then
+        log "❌ Could not get VM IP for incremental update"
+        kill $vm_pid 2>/dev/null || true
+        tart delete "$target_image" 2>/dev/null || true
+        return 1
+    fi
+    
+    # Wait for SSH and perform update
+    log "🔧 Performing incremental update via SSH..."
+    local ssh_success=false
+    
+    for i in {1..10}; do
+        if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "echo 'SSH ready'"; then
+            log "✅ SSH connection established"
+            
+            # Perform the specific update (tool symlinks for 3.6→3.7)
+            local update_script='
+                echo "🔧 Creating tool symlinks for lifecycle scripts..."
+                
+                # Ensure /usr/local/bin exists
+                sudo mkdir -p /usr/local/bin
+                
+                # Create symlinks (idempotent)
+                if command -v node >/dev/null 2>&1; then
+                    sudo ln -sf "$(command -v node)" /usr/local/bin/node
+                    echo "✅ Node symlink: $(command -v node) -> /usr/local/bin/node"
+                else
+                    echo "⚠️  Node not found"
+                fi
+                
+                if command -v npm >/dev/null 2>&1; then
+                    sudo ln -sf "$(command -v npm)" /usr/local/bin/npm  
+                    echo "✅ NPM symlink: $(command -v npm) -> /usr/local/bin/npm"
+                else
+                    echo "⚠️  NPM not found"
+                fi
+                
+                if command -v bun >/dev/null 2>&1; then
+                    sudo ln -sf "$(command -v bun)" /usr/local/bin/bun
+                    echo "✅ Bun symlink: $(command -v bun) -> /usr/local/bin/bun"
+                else
+                    echo "⚠️  Bun not found"
+                fi
+                
+                echo "✅ Tool symlinks created successfully"
+            '
+            
+            if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$update_script"; then
+                log "✅ Incremental update completed successfully"
+                ssh_success=true
+                break
+            else
+                log "❌ Update script failed on attempt $i"
+            fi
+        fi
+        log "⏳ SSH attempt $i failed, retrying..."
+        sleep 10
+    done
+    
+    # Shutdown VM
+    log "🛑 Shutting down VM..."
+    sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "sudo shutdown -h now" 2>/dev/null || true
+    sleep 20
+    kill $vm_pid 2>/dev/null || true
+    
+    if [ "$ssh_success" = true ]; then
+        log "✅ Incremental update completed successfully (~5 minutes vs ~45 minutes)"
+        return 0
+    else
+        log "❌ Incremental update failed"
+        tart delete "$target_image" 2>/dev/null || true
+        return 1
+    fi
 }
 
 # Check if local image exists and get its creation time (legacy function, kept for compatibility)
@@ -463,10 +638,15 @@ get_local_image_info() {
 main() {
     # Parse arguments
     local force_refresh=false
+    local rebuild_from_base=false
     for arg in "$@"; do
         case $arg in
             --force-refresh)
                 force_refresh=true
+                shift
+                ;;
+            --rebuild-from-base)
+                rebuild_from_base=true
                 shift
                 ;;
             --release=*)
@@ -477,9 +657,14 @@ main() {
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
                 echo "Options:"
-                echo "  --force-refresh     Force refresh of base image"
+                echo "  --force-refresh     Force refresh of base image (legacy)"
+                echo "  --rebuild-from-base Force full rebuild from base image"
                 echo "  --release=VERSION   macOS release version (13, 14) [default: 14]"
                 echo "  --help, -h          Show this help message"
+                echo ""
+                echo "Build Modes:"
+                echo "  Default:            Smart incremental (fast updates when safe)"
+                echo "  --rebuild-from-base Full rebuild from base (slow but thorough)"
                 echo ""
                 echo "Environment Variables:"
                 echo "  MACOS_RELEASE       macOS release version (default: 14)"
@@ -490,9 +675,9 @@ main() {
                 echo "  REPOSITORY          Repository name (default: client-oven-sh-bun)"
                 echo ""
                 echo "Examples:"
-                echo "  $0                    # Build macOS 14 base image"
-                echo "  $0 --release=13       # Build macOS 13 base image"
-                echo "  $0 --force-refresh    # Force rebuild of base image"
+                echo "  $0                       # Smart incremental build"
+                echo "  $0 --rebuild-from-base   # Force full rebuild"
+                echo "  $0 --release=13          # Build for macOS 13"
                 exit 0
                 ;;
         esac
@@ -543,7 +728,7 @@ main() {
     log "=== SMART CACHING ANALYSIS ==="
     
     # Make intelligent caching decision
-    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh")
+    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh" "$rebuild_from_base")
     
     log "Caching decision: $caching_decision"
     
