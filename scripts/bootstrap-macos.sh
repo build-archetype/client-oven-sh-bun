@@ -5,6 +5,136 @@ set -x
 # Version: 3.7 - Added tool symlinks for lifecycle script execution
 # A comprehensive bootstrap script for macOS based on the main bootstrap.sh
 
+# =============================================================================
+# INCREMENTAL UPDATES SECTION
+# =============================================================================
+if [ "$INCREMENTAL_MODE" = "true" ]; then
+    echo "🔄 INCREMENTAL UPDATE MODE"
+    echo "  From: $FROM_VERSION"
+    echo "  To: $TO_VERSION"
+    echo "  Mode: ${UPDATE_MODE:-incremental_plus_full}"
+    echo ""
+    
+    case "$FROM_VERSION-$TO_VERSION" in
+        "3.6-3.7")
+            echo "🔧 Incremental Update: Bootstrap 3.6 -> 3.7"
+            echo "   Adding tool symlinks + upgrading Bun to 2.16"
+            echo ""
+            
+            # Ensure /usr/local/bin exists
+            echo "📁 Ensuring /usr/local/bin directory exists..."
+            sudo mkdir -p /usr/local/bin
+            
+            # Create tool symlinks (idempotent operations)
+            echo "🔗 Creating tool symlinks..."
+            
+            if command -v node >/dev/null 2>&1; then
+                local node_path="$(command -v node)"
+                sudo ln -sf "$node_path" /usr/local/bin/node
+                echo "✅ Node symlink: $node_path -> /usr/local/bin/node"
+            else
+                echo "⚠️  Node not found - skipping symlink"
+            fi
+            
+            if command -v npm >/dev/null 2>&1; then
+                local npm_path="$(command -v npm)"
+                sudo ln -sf "$npm_path" /usr/local/bin/npm  
+                echo "✅ NPM symlink: $npm_path -> /usr/local/bin/npm"
+            else
+                echo "⚠️  NPM not found - skipping symlink"
+            fi
+            
+            if command -v bun >/dev/null 2>&1; then
+                local bun_path="$(command -v bun)"
+                sudo ln -sf "$bun_path" /usr/local/bin/bun
+                echo "✅ Bun symlink: $bun_path -> /usr/local/bin/bun"
+            else
+                echo "⚠️  Bun not found - skipping symlink"
+            fi
+            
+            # Upgrade Bun to version 2.16
+            echo ""
+            echo "⬆️  Upgrading Bun to version 2.16..."
+            if command -v bun >/dev/null 2>&1; then
+                echo "Current Bun version: $(bun --version)"
+                
+                # Download and install Bun 2.16
+                local os="darwin"
+                local arch="$(uname -m)"
+                case "$arch" in
+                arm64)
+                    arch="aarch64"
+                    ;;
+                x86_64)
+                    arch="x64"
+                    ;;
+                esac
+                
+                local bun_triplet="bun-$os-$arch"
+                local bun_download_url="https://pub-5e11e972747a44bf9aaf9394f185a982.r2.dev/releases/bun-v2.16.0/$bun_triplet.zip"
+                
+                echo "Downloading Bun 2.16..."
+                local temp_dir=$(mktemp -d)
+                cd "$temp_dir"
+                curl -fsSL "$bun_download_url" -o bun.zip
+                unzip -o bun.zip
+                
+                # Replace existing bun binary
+                local existing_bun=$(command -v bun)
+                local bun_dir=$(dirname "$existing_bun")
+                sudo cp "$bun_triplet/bun" "$existing_bun"
+                sudo chmod +x "$existing_bun"
+                
+                # Update symlink
+                sudo ln -sf "$existing_bun" /usr/local/bin/bun
+                
+                # Cleanup
+                cd /
+                rm -rf "$temp_dir"
+                
+                echo "✅ Bun upgraded to: $(bun --version)"
+            else
+                echo "❌ Bun not found for upgrade"
+            fi
+            
+            # Verify symlinks were created
+            echo ""
+            echo "🔍 Verification:"
+            echo "   /usr/local/bin/node: $([ -L /usr/local/bin/node ] && echo "✅ exists" || echo "❌ missing")"
+            echo "   /usr/local/bin/npm:  $([ -L /usr/local/bin/npm ] && echo "✅ exists" || echo "❌ missing")"
+            echo "   /usr/local/bin/bun:  $([ -L /usr/local/bin/bun ] && echo "✅ exists" || echo "❌ missing")"
+            
+            echo ""
+            echo "✅ Bootstrap 3.6 -> 3.7 incremental update completed"
+            echo "   - Tool symlinks created for reliable lifecycle script execution"
+            echo "   - Bun upgraded to version 2.16"
+            ;;
+            
+        *)
+            echo "❌ No incremental update path for $FROM_VERSION -> $TO_VERSION"
+            exit 1
+            ;;
+    esac
+    
+    # Exit here if incremental-only mode
+    if [ "$UPDATE_MODE" = "incremental_only" ]; then
+        echo ""
+        echo "✅ INCREMENTAL-ONLY UPDATE COMPLETED"
+        echo "   Mode 1: Quick incremental updates applied"
+        echo "   Total time: ~5 minutes"
+        exit 0
+    fi
+    
+    echo ""
+    echo "🔄 Incremental updates complete, continuing with full bootstrap..."
+    echo "   Mode 2: Will refresh all tools and dependencies"
+    echo ""
+fi
+
+# =============================================================================
+# FULL BOOTSTRAP SECTION (existing logic)
+# =============================================================================
+
 # Constants
 MAX_RETRIES=3
 INITIAL_BACKOFF=5

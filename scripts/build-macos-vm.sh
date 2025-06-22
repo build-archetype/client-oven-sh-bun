@@ -347,15 +347,17 @@ make_caching_decision() {
     local remote_image_url="$4"
     local force_refresh="$5"
     local rebuild_from_base="$6"
+    local incremental_only="$7"
     
     log "🧠 Making smart caching decision..." >&2
     log "  Target: Bun $target_bun_version, Bootstrap $target_bootstrap_version" >&2
     log "  Force refresh: $force_refresh" >&2
     log "  Rebuild from base: $rebuild_from_base" >&2
+    log "  Incremental only: $incremental_only" >&2
     
-    # If rebuild from base is forced, skip all caching
+    # Mode 3: Force rebuild from base (nuclear option)
     if [ "$rebuild_from_base" = true ]; then
-        log "🔄 Rebuild from base forced - will build new image" >&2
+        log "🔄 Mode 3: Rebuild from base forced - will build new image" >&2
         echo "build_new"
         return
     fi
@@ -392,9 +394,9 @@ make_caching_decision() {
         return
     fi
     
-    # Priority 3: Check for safe incremental update from compatible local images
+    # Priority 3: Check for incremental update from compatible local images
     if [ -n "$usable_images" ]; then
-        log "🔄 Checking for safe incremental update..." >&2
+        log "🔄 Checking for incremental update..." >&2
         
         # Parse the first usable image
         local source_image="${usable_images%%,*}"
@@ -405,15 +407,20 @@ make_caching_decision() {
         
         # Check if incremental update is safe
         if can_incremental_update_safely "$source_bootstrap_version" "$target_bootstrap_version"; then
-            log "🎯 Decision: Incremental update from $source_image" >&2
-            echo "incremental_update|$source_image"
+            if [ "$incremental_only" = true ]; then
+                log "🎯 Mode 1: Incremental-only update from $source_image" >&2
+                echo "incremental_only|$source_image"
+            else
+                log "🎯 Mode 2: Incremental + full bootstrap from $source_image" >&2
+                echo "incremental_plus_full|$source_image"
+            fi
             return
         else
             log "❌ Incremental update not safe, will build new" >&2
         fi
     fi
     
-    # Priority 4: Build new image
+    # Priority 4: Build new image (Mode 3)
     log "🎯 Decision: Build new image (no suitable local, remote, or incremental path found)" >&2
     echo "build_new"
 }
@@ -461,6 +468,28 @@ execute_caching_decision() {
                 return 1
             fi
             ;;
+
+        "incremental_only")
+            log "🔄 Mode 1: Performing incremental-only update from: $target" >&2
+            if perform_incremental_update "$target" "$target_image_name" "incremental_only"; then
+                log "✅ Mode 1: Incremental-only update completed successfully" >&2
+                return 0
+            else
+                log "❌ Mode 1: Incremental-only update failed, will fall back to full rebuild" >&2
+                return 1
+            fi
+            ;;
+
+        "incremental_plus_full")
+            log "🔄 Mode 2: Performing incremental + full bootstrap from: $target" >&2
+            if perform_incremental_update "$target" "$target_image_name" "incremental_plus_full"; then
+                log "✅ Mode 2: Incremental + full bootstrap completed successfully" >&2
+                return 0
+            else
+                log "❌ Mode 2: Incremental + full bootstrap failed, will fall back to full rebuild" >&2
+                return 1
+            fi
+            ;;
             
         "build_new")
             log "🏗️  Building new image: $target_image_name" >&2
@@ -484,20 +513,18 @@ can_incremental_update_safely() {
     
     log "🔍 Checking if incremental update is safe: $from_version → $to_version" >&2
     
-    # Source the incremental updates file to get available functions
-    if [ -f "scripts/incremental-updates.sh" ]; then
-        source scripts/incremental-updates.sh
-        
-        # Check if an update function exists for this transition
-        if has_update_function "$from_version" "$to_version"; then
-            log "✅ Safe incremental: $from_version → $to_version (update function available)" >&2
+    # Check if the bootstrap script supports this transition
+    if [ -f "scripts/bootstrap-macos.sh" ]; then
+        # Check if the specific transition is supported in the bootstrap script
+        if grep -q "\"$from_version-$to_version\")" scripts/bootstrap-macos.sh; then
+            log "✅ Safe incremental: $from_version → $to_version (supported in bootstrap script)" >&2
             return 0
         else
-            log "❌ Incremental not safe: $from_version → $to_version (no update function)" >&2
+            log "❌ Incremental not safe: $from_version → $to_version (not supported in bootstrap script)" >&2
             return 1
         fi
     else
-        log "❌ Incremental updates file not found: scripts/incremental-updates.sh" >&2
+        log "❌ Bootstrap script not found: scripts/bootstrap-macos.sh" >&2
         return 1
     fi
 }
@@ -506,6 +533,7 @@ can_incremental_update_safely() {
 perform_incremental_update() {
     local source_image="$1"
     local target_image="$2"
+    local mode="$3"
     
     log "🔄 Starting incremental update..."
     log "  Source: $source_image"
@@ -550,38 +578,43 @@ perform_incremental_update() {
     log "🔧 Performing incremental update via SSH..."
     local ssh_success=false
     
+    # Extract version info for environment variables
+    local source_version_info=$(parse_image_name "$source_image")
+    local source_bootstrap_version="${source_version_info#*|}"
+    local target_bootstrap_version=$(echo "$target_image" | grep -o 'bootstrap-[0-9]\+\.[0-9]\+' | sed 's/bootstrap-//')
+    
+    log "🎯 Incremental update: $source_bootstrap_version → $target_bootstrap_version (Mode: $mode)"
+    
     for i in {1..10}; do
         if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "echo 'SSH ready'"; then
             log "✅ SSH connection established"
             
-            # Copy and execute the incremental update script
-            log "📤 Copying incremental update script to VM..."
-            if sshpass -p "admin" scp $SSH_OPTS scripts/incremental-updates.sh admin@"$vm_ip":/tmp/; then
-                log "✅ Script copied successfully"
+            # Copy bootstrap script to VM
+            log "📤 Copying bootstrap script to VM..."
+            if sshpass -p "admin" scp $SSH_OPTS scripts/bootstrap-macos.sh admin@"$vm_ip":/tmp/; then
+                log "✅ Bootstrap script copied successfully"
                 
-                # Extract version info for the update function call
-                local source_version_info=$(parse_image_name "$source_image")
-                local source_bootstrap_version="${source_version_info#*|}"
-                local target_bootstrap_version=$(echo "$target_image" | grep -o 'bootstrap-[0-9]\+\.[0-9]\+' | sed 's/bootstrap-//')
-                
-                log "🎯 Executing incremental update: $source_bootstrap_version → $target_bootstrap_version"
-                
-                # Execute the specific update function on the VM
-                local remote_update_script="
+                # Set environment variables for incremental mode and execute bootstrap
+                local bootstrap_command="
                     cd /tmp
-                    source incremental-updates.sh
-                    execute_update '$source_bootstrap_version' '$target_bootstrap_version'
+                    export INCREMENTAL_MODE=true
+                    export FROM_VERSION='$source_bootstrap_version'
+                    export TO_VERSION='$target_bootstrap_version'
+                    export UPDATE_MODE='$mode'
+                    chmod +x bootstrap-macos.sh
+                    ./bootstrap-macos.sh
                 "
                 
-                if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$remote_update_script"; then
-                    log "✅ Incremental update executed successfully"
+                log "🚀 Executing bootstrap script in incremental mode..."
+                if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$bootstrap_command"; then
+                    log "✅ Incremental bootstrap completed successfully"
                     ssh_success=true
                     break
                 else
-                    log "❌ Update script execution failed on attempt $i"
+                    log "❌ Bootstrap execution failed on attempt $i"
                 fi
             else
-                log "❌ Failed to copy incremental update script on attempt $i"
+                log "❌ Failed to copy bootstrap script on attempt $i"
             fi
         fi
         log "⏳ SSH attempt $i failed, retrying..."
@@ -628,6 +661,7 @@ main() {
     # Parse arguments
     local force_refresh=false
     local rebuild_from_base=false
+    local incremental_only=false
     for arg in "$@"; do
         case $arg in
             --force-refresh)
@@ -636,6 +670,10 @@ main() {
                 ;;
             --rebuild-from-base)
                 rebuild_from_base=true
+                shift
+                ;;
+            --incremental-only)
+                incremental_only=true
                 shift
                 ;;
             --release=*)
@@ -648,12 +686,14 @@ main() {
                 echo "Options:"
                 echo "  --force-refresh     Force refresh of base image (legacy)"
                 echo "  --rebuild-from-base Force full rebuild from base image"
+                echo "  --incremental-only  Run incremental updates only (fastest)"
                 echo "  --release=VERSION   macOS release version (13, 14) [default: 14]"
                 echo "  --help, -h          Show this help message"
                 echo ""
                 echo "Build Modes:"
-                echo "  Default:            Smart incremental (fast updates when safe)"
-                echo "  --rebuild-from-base Full rebuild from base (slow but thorough)"
+                echo "  Default:            Smart incremental + full bootstrap (~25 min)"
+                echo "  --incremental-only  Incremental updates only (~5 min)"
+                echo "  --rebuild-from-base Full rebuild from base (~45 min)"
                 echo ""
                 echo "Environment Variables:"
                 echo "  MACOS_RELEASE       macOS release version (default: 14)"
@@ -664,7 +704,8 @@ main() {
                 echo "  REPOSITORY          Repository name (default: client-oven-sh-bun)"
                 echo ""
                 echo "Examples:"
-                echo "  $0                       # Smart incremental build"
+                echo "  $0                       # Smart incremental + full bootstrap"
+                echo "  $0 --incremental-only    # Fast incremental updates only"
                 echo "  $0 --rebuild-from-base   # Force full rebuild"
                 echo "  $0 --release=13          # Build for macOS 13"
                 exit 0
@@ -717,7 +758,7 @@ main() {
     log "=== SMART CACHING ANALYSIS ==="
     
     # Make intelligent caching decision
-    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh" "$rebuild_from_base")
+    local caching_decision=$(make_caching_decision "$BUN_VERSION" "$BOOTSTRAP_VERSION" "$LOCAL_IMAGE_NAME" "$REMOTE_IMAGE_URL" "$force_refresh" "$rebuild_from_base" "$incremental_only")
     
     log "Caching decision: $caching_decision"
     
