@@ -484,23 +484,22 @@ can_incremental_update_safely() {
     
     log "🔍 Checking if incremental update is safe: $from_version → $to_version" >&2
     
-    # Define safe incremental update paths
-    # Only allow specific, tested version transitions
-    case "$from_version -> $to_version" in
-        "3.6 -> 3.7")
-            log "✅ Safe incremental: 3.6 → 3.7 (tool symlinks only)" >&2
+    # Source the incremental updates file to get available functions
+    if [ -f "scripts/incremental-updates.sh" ]; then
+        source scripts/incremental-updates.sh
+        
+        # Check if an update function exists for this transition
+        if has_update_function "$from_version" "$to_version"; then
+            log "✅ Safe incremental: $from_version → $to_version (update function available)" >&2
             return 0
-            ;;
-        "3.7 -> 3.8")
-            # Future: add more safe transitions here
-            log "✅ Safe incremental: 3.7 → 3.8 (if implemented)" >&2
-            return 0
-            ;;
-        *)
-            log "❌ Incremental not safe: $from_version → $to_version (use full rebuild)" >&2
+        else
+            log "❌ Incremental not safe: $from_version → $to_version (no update function)" >&2
             return 1
-            ;;
-    esac
+        fi
+    else
+        log "❌ Incremental updates file not found: scripts/incremental-updates.sh" >&2
+        return 1
+    fi
 }
 
 # Perform incremental update from existing VM
@@ -555,44 +554,34 @@ perform_incremental_update() {
         if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "echo 'SSH ready'"; then
             log "✅ SSH connection established"
             
-            # Perform the specific update (tool symlinks for 3.6→3.7)
-            local update_script='
-                echo "🔧 Creating tool symlinks for lifecycle scripts..."
+            # Copy and execute the incremental update script
+            log "📤 Copying incremental update script to VM..."
+            if sshpass -p "admin" scp $SSH_OPTS scripts/incremental-updates.sh admin@"$vm_ip":/tmp/; then
+                log "✅ Script copied successfully"
                 
-                # Ensure /usr/local/bin exists
-                sudo mkdir -p /usr/local/bin
+                # Extract version info for the update function call
+                local source_version_info=$(parse_image_name "$source_image")
+                local source_bootstrap_version="${source_version_info#*|}"
+                local target_bootstrap_version=$(echo "$target_image" | grep -o 'bootstrap-[0-9]\+\.[0-9]\+' | sed 's/bootstrap-//')
                 
-                # Create symlinks (idempotent)
-                if command -v node >/dev/null 2>&1; then
-                    sudo ln -sf "$(command -v node)" /usr/local/bin/node
-                    echo "✅ Node symlink: $(command -v node) -> /usr/local/bin/node"
+                log "🎯 Executing incremental update: $source_bootstrap_version → $target_bootstrap_version"
+                
+                # Execute the specific update function on the VM
+                local remote_update_script="
+                    cd /tmp
+                    source incremental-updates.sh
+                    execute_update '$source_bootstrap_version' '$target_bootstrap_version'
+                "
+                
+                if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$remote_update_script"; then
+                    log "✅ Incremental update executed successfully"
+                    ssh_success=true
+                    break
                 else
-                    echo "⚠️  Node not found"
+                    log "❌ Update script execution failed on attempt $i"
                 fi
-                
-                if command -v npm >/dev/null 2>&1; then
-                    sudo ln -sf "$(command -v npm)" /usr/local/bin/npm  
-                    echo "✅ NPM symlink: $(command -v npm) -> /usr/local/bin/npm"
-                else
-                    echo "⚠️  NPM not found"
-                fi
-                
-                if command -v bun >/dev/null 2>&1; then
-                    sudo ln -sf "$(command -v bun)" /usr/local/bin/bun
-                    echo "✅ Bun symlink: $(command -v bun) -> /usr/local/bin/bun"
-                else
-                    echo "⚠️  Bun not found"
-                fi
-                
-                echo "✅ Tool symlinks created successfully"
-            '
-            
-            if sshpass -p "admin" ssh $SSH_OPTS admin@"$vm_ip" "$update_script"; then
-                log "✅ Incremental update completed successfully"
-                ssh_success=true
-                break
             else
-                log "❌ Update script failed on attempt $i"
+                log "❌ Failed to copy incremental update script on attempt $i"
             fi
         fi
         log "⏳ SSH attempt $i failed, retrying..."
@@ -761,7 +750,7 @@ main() {
     # Start VM with shared directory
     log "Starting VM: $LOCAL_IMAGE_NAME"
     tart run "$LOCAL_IMAGE_NAME" --dir=workspace:"$PWD" --no-graphics &
-VM_PID=$!
+    VM_PID=$!
 
     # Wait for VM to boot
     log "Waiting for VM to boot (60 seconds)..."
@@ -824,7 +813,7 @@ VM_PID=$!
     if [ "$SSH_SUCCESS" != "true" ]; then
         log "❌ Bootstrap failed after 30 SSH attempts"
         kill $VM_PID 2>/dev/null || true
-    exit 1
+        exit 1
     fi
 
     # Validate that all required tools are installed
