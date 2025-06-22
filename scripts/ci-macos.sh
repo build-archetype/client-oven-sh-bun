@@ -155,9 +155,33 @@ cleanup_temporary_vms() {
             if [[ "$vm_name" =~ ^bun-build-macos-[0-9]+-.*-bootstrap-(.+)$ ]]; then
                 local bootstrap_version="${BASH_REMATCH[1]}"
                 
-                # Only delete if bootstrap version is NOT current
-                if [[ "$bootstrap_version" != "$current_bootstrap_version" ]]; then
-                    log "    Deleting outdated base image: $vm_name (bootstrap-${bootstrap_version} != current-${current_bootstrap_version}) (${size_gb}GB)"
+                # Only delete if bootstrap version is more than 1 version behind current
+                # Preserve current version and previous version (for incremental updates)
+                local should_delete=false
+                case "$current_bootstrap_version" in
+                    "3.7")
+                        # Keep 3.7 (current) and 3.6 (for incremental updates)
+                        if [[ "$bootstrap_version" =~ ^3\.[0-5]$ ]] || [[ "$bootstrap_version" =~ ^[0-2]\. ]]; then
+                            should_delete=true
+                        fi
+                        ;;
+                    "3.6")
+                        # Keep 3.6 (current) and 3.5 (for incremental updates)
+                        if [[ "$bootstrap_version" =~ ^3\.[0-4]$ ]] || [[ "$bootstrap_version" =~ ^[0-2]\. ]]; then
+                            should_delete=true
+                        fi
+                        ;;
+                    *)
+                        # For other versions, only delete if significantly older
+                        # This is a fallback - preserve recent versions
+                        if [[ "$bootstrap_version" != "$current_bootstrap_version" ]]; then
+                            log "    Keeping $vm_name (bootstrap-${bootstrap_version}) for potential incremental updates"
+                        fi
+                        ;;
+                esac
+                
+                if [ "$should_delete" = true ]; then
+                    log "    Deleting old base image: $vm_name (bootstrap-${bootstrap_version} is too old vs current-${current_bootstrap_version}) (${size_gb}GB)"
                     if tart delete "$vm_name" 2>/dev/null; then
                         log "    ✅ Deleted successfully"
                         cleaned_count=$((cleaned_count + 1))
@@ -165,6 +189,8 @@ cleanup_temporary_vms() {
                     else
                         log "    ⚠️  Failed to delete"
                     fi
+                else
+                    log "    Keeping $vm_name (bootstrap-${bootstrap_version}) - compatible with current ${current_bootstrap_version}"
                 fi
             fi
         fi
